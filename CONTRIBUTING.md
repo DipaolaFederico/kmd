@@ -166,6 +166,30 @@ build-provenance attestation; its notes list the merged pull requests.
   copies in the repository are not rewritten (`main` only accepts reviewed
   pull requests, the release workflow cannot push to it).
 
+## Local CI
+
+```sh
+make ci      # every gate, in order; stops at the first failure
+make hooks   # run `make ci` before every git push
+```
+
+| Stage       | Tool                                                 | Gate                                               |
+|-------------|------------------------------------------------------|----------------------------------------------------|
+| format      | `gofmt -s`                                           | no diff                         |
+| lint        | `go vet` + `staticcheck`                             | no findings                     |
+| test        | `go test -race` (includes CommonMark/GFM spec)       | all green                       |
+| coverage    | `go test -coverprofile`                              | ≥ 90 % (`COVER_MIN`)            |
+| security    | `govulncheck` + `gosec`                              | no issues                       |
+| build       | `go build -trimpath`, `CGO_ENABLED=0`                | static binary                   |
+| packaging   | `groff`, `appstreamcli --pedantic`, completions      | valid Fedora metadata           |
+| performance | `scripts/perf.sh` (whole process, 200 runs)          | p50 and exec-adjusted p95 < 10 ms (`PERF_MAX_MS`) |
+
+Extras: `make spec` (conformance), `make fuzz` (5 fuzzers), `make bench`,
+`make rpm`.
+
+Lint and security tools are installed at pinned versions into `.tools/` (the
+first run needs network access). They are never linked into the binary.
+
 ## Project layout
 
 | Path               | What lives there                                     |
@@ -175,8 +199,12 @@ build-provenance attestation; its notes list the merged pull requests.
 | `internal/diagram` | Mermaid and Graphviz layout                          |
 | `internal/tex`     | LaTeX → Unicode                                      |
 | `internal/termimg` | image protocols (kitty, iTerm2, sixel, blocks)       |
+| `internal/styled`  | shared vocabulary: styled spans, Unicode width       |
+| `internal/term`    | terminal size and raw mode via ioctl                 |
 | `internal/view`    | interactive viewer: links, search, live reload       |
 | `internal/cli`     | flags, config, pager, `--follow`, `--html`           |
+| `main.go`          | entry point: terminal and cell size, GC tuning       |
+| `docs/`            | man page, packaging guide, README screenshot         |
 | `scripts/`         | perf gate, release helpers and their tests           |
 | `packaging/`       | Fedora RPM spec and AppStream metadata               |
 

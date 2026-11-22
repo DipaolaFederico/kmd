@@ -1,36 +1,136 @@
+<div align="center">
+
 # kmd
 
+**Markdown previewer for the terminal**
+
+[![Release](https://img.shields.io/github/v/release/DipaolaFederico/kmd?sort=semver&label=release)](https://github.com/DipaolaFederico/kmd/releases/latest)
 [![CI](https://github.com/DipaolaFederico/kmd/actions/workflows/ci.yml/badge.svg)](https://github.com/DipaolaFederico/kmd/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/github/go-mod/go-version/DipaolaFederico/kmd)](go.mod)
+[![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](go.mod)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20FreeBSD%20%7C%20Windows-lightgrey)](https://github.com/DipaolaFederico/kmd/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A Markdown previewer for the terminal: **fast** (a few milliseconds),
-**beautiful**, and **dependency-free** (Go standard library only).
+[Installation](#-installation) · [Usage](#-usage) · [Viewer](#-viewer) · [Themes](#-themes) · [Configuration](#%EF%B8%8F-configuration) · [Security](#-security)
+
+</div>
+
+kmd renders Markdown files in the terminal with colors, tables, syntax
+highlighting, diagrams and math. It is a single static binary written in Go
+with no dependencies outside the standard library, and renders a typical
+document in under 10 ms, process start included. Documents are treated as
+untrusted input.
+
+<p align="center">
+  <img src="docs/images/screenshot.png" alt="kmd rendering docs/images/demo.md with the tokyo-night theme" width="720">
+</p>
+
+<p align="center"><sub><code>kmd docs/images/demo.md</code> with the <code>tokyo-night</code> theme</sub></p>
+
+## ✨ Features
+
+| | Feature | Details |
+|---|---|---|
+| 📝 | **CommonMark** | 652/652 examples of the 0.31.2 specification, checked in CI |
+| 🐙 | **GitHub Flavored Markdown** | tables, task lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts, YAML front matter (24/24 GFM examples) |
+| 🎨 | **Syntax highlighting** | about 25 languages plus `diff`, in labeled boxes |
+| 🧭 | **Viewer** | long documents open in a built-in viewer; links between Markdown files can be followed and navigated back |
+| 🔗 | **Hyperlinks** | clickable OSC 8 links; relative links resolved to absolute `file://` URLs |
+| 🖼️ | **Images** | kitty, iTerm2, sixel or Unicode blocks; local files and `data:` URIs only |
+| 📊 | **Diagrams** | Mermaid (flowchart, state, sequence, pie) and Graphviz DOT, drawn with box-drawing characters |
+| ∑ | **Math** | `$…$`, `$$…$$` and ` ```math ` blocks rendered as Unicode, including fractions, roots, sums and matrices |
+| 🌈 | **Themes** | 13 bundled themes; custom themes from a 17-color palette |
+| 🔄 | **Live preview** | `-f` re-renders the file every time it is saved |
+| 🌐 | **HTML export** | standalone page with the theme colors; raw HTML and unsafe URLs removed by default |
+
+## 📦 Installation
+
+### Prebuilt binaries
+
+Every [release](https://github.com/DipaolaFederico/kmd/releases/latest)
+includes binaries for Linux (amd64, arm64), macOS (amd64, arm64), FreeBSD
+(amd64) and Windows (amd64), a `SHA256SUMS` file and a signed build
+provenance attestation. Each archive contains `kmd`, the man page `kmd.1`,
+`README.md` and `LICENSE`.
 
 ```sh
-kmd README.md              # render (opens the viewer when it doesn't fit)
-kmd -f notes.md            # live preview in the viewer: re-renders on save
-kmd --view short.md        # the viewer even for a document that fits
-cat doc.md | kmd           # read from stdin
-kmd --toc CHANGELOG.md     # table of contents
-kmd --html doc.md > d.html # export HTML using the theme colors
-kmd -t catppuccin-mocha    # pick a theme
+# Linux amd64; for other platforms change "linux-amd64" (see the release page)
+VERSION=$(curl -fsSL https://api.github.com/repos/DipaolaFederico/kmd/releases/latest \
+  | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+BASE=https://github.com/DipaolaFederico/kmd/releases/download/$VERSION
+ARCHIVE=kmd-$VERSION-linux-amd64
+[ -n "$VERSION" ] &&
+  curl -fsSLO "$BASE/$ARCHIVE.tar.gz" -O "$BASE/SHA256SUMS" &&
+  sha256sum --check --ignore-missing SHA256SUMS &&
+  tar -xzf "$ARCHIVE.tar.gz" &&
+  install -Dm755 "$ARCHIVE/kmd" ~/.local/bin/kmd &&
+  install -Dm644 "$ARCHIVE/kmd.1" ~/.local/share/man/man1/kmd.1
 ```
 
-## Features
+The checksum confirms the download is intact. To also confirm that the
+archive was built by this repository's release workflow, verify its build
+provenance with the GitHub CLI before the `install` step:
 
-| | |
+```sh
+gh attestation verify "$ARCHIVE.tar.gz" --repo DipaolaFederico/kmd
+```
+
+### From source
+
+Requires Go 1.25 or later.
+
+```sh
+git clone https://github.com/DipaolaFederico/kmd.git && cd kmd
+make install                        # ~/.local/bin/kmd, man page, bash/zsh/fish completions
+sudo make install PREFIX=/usr/local # system-wide
+```
+
+`go install github.com/DipaolaFederico/kmd@latest` also works, but does not
+install the man page or completions, and `kmd --version` reports `dev`.
+
+### 🐧 Fedora
+
+An RPM spec and AppStream metadata are in [`packaging/`](packaging). The
+package is not yet in the Fedora repositories; to build it locally, see
+[docs/PACKAGING.md](docs/PACKAGING.md).
+
+### Shell completions
+
+`make install` and the RPM install them. Otherwise:
+
+```sh
+kmd --completion bash > ~/.local/share/bash-completion/completions/kmd
+kmd --completion zsh  > ~/.zfunc/_kmd     # any directory listed in $fpath
+kmd --completion fish > ~/.config/fish/completions/kmd.fish
+```
+
+## 🚀 Usage
+
+```sh
+kmd README.md                 # render; opens the viewer if it does not fit on screen
+kmd docs/*.md                 # several files, one after another
+cat notes.md | kmd            # read from standard input
+kmd -f notes.md               # live preview: re-render on every save
+kmd --view short.md           # open the viewer even if the document fits
+kmd -P README.md | less -R    # print without the viewer
+kmd --toc CHANGELOG.md        # table of contents only
+kmd --html doc.md > doc.html  # export a standalone HTML page
+kmd -t catppuccin-mocha doc.md
+kmd -w 80 doc.md              # fixed render width
+```
+
+### Common tasks
+
+| Task | Command |
 |---|---|
-| **Full CommonMark** | 652/652 examples of the 0.31.2 specification (checked in CI) |
-| **GitHub Flavored Markdown** | tables, task lists, strikethrough, extended autolinks, tag filter (24/24 GFM examples), footnotes, `> [!NOTE]` alerts, YAML front matter |
-| **Syntax highlighting** | ~25 languages + `diff`, in labeled boxes |
-| **Navigable documents** | a built-in viewer: Tab through links (or click them), Enter opens linked Markdown in place — at the right `#heading` — and Backspace goes back; search, edit with `e` |
-| **Clickable links** | OSC 8 hyperlinks, relative links resolved to absolute `file://` URLs (with the URL shown as a fallback when not on a terminal) |
-| **Inline images** | kitty, iTerm2, sixel, or Unicode blocks (any truecolor terminal); local files and `data:` URIs only — nothing is ever downloaded |
-| **Diagrams** | Mermaid (flowchart, state, sequence, pie) and Graphviz DOT, drawn with box-drawing characters |
-| **Math** | `$…$`, `$$…$$` and ` ```math `: LaTeX → Unicode, with 2D fractions, roots, sums and matrices |
-| **Custom themes** | 13 bundled themes + your own in `~/.config/kmd/themes/*.theme` |
+| 📖 Read a project's documentation and follow its links | `kmd README.md`, then `Tab` and `Enter` |
+| ✍️ Preview a file while editing it | `kmd -f draft.md` |
+| 📋 Get an overview of a long document | `kmd --toc doc.md` |
+| 📤 Share a rendered document | `kmd --html doc.md > doc.html` |
+| 🔌 Render remote Markdown without downloading it to disk | `curl -s https://…/README.md \| kmd` |
+| 🖨️ Plain output for scripts or logs | `kmd -c never -P doc.md` |
 
-## Options
+### Options
 
 ```
 Display:
@@ -58,59 +158,66 @@ Other:
   -v, --version · -h, --help
 ```
 
-See `man kmd` for the full reference.
+The full reference is in the man page: `man kmd`.
 
-## Themes
+## 🧭 Viewer
 
-Bundled: `tokyo-night` (default dark), `tokyo-night-day` (default light),
-`catppuccin-mocha`, `catppuccin-latte`, `dracula`, `nord`, `gruvbox-dark`,
-`gruvbox-light`, `solarized-dark`, `solarized-light`, `one-dark`,
-`github-dark`, `github-light`. With `theme = auto`, kmd picks a light or dark
-theme based on `COLORFGBG`.
+Documents longer than the terminal open in kmd's viewer. Links to other
+Markdown files open in the viewer itself, at the target `#heading` if there
+is one, so a folder of documents can be browsed like a wiki.
 
-A theme is defined by a **17-color palette** from which every role is derived
-(headings, code, syntax, math, diagrams, charts). To create your own:
+| Keys | Action |
+|---|---|
+| `Tab` / `Shift-Tab`, click | select the next / previous link |
+| `Enter` `l` `→` | open the selected link: `.md` files in the viewer; web links, images and PDFs in the desktop's default application |
+| `Backspace` `h` `←` · `H` | back one document · back to the first document |
+| `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the mouse wheel also work) |
+| `/` `n` `N` | search, next / previous match |
+| `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |
+
+The status bar shows the target of the selected link and the documents
+visited. Links that leave kmd (web, mail, desktop applications) need two
+clicks: the first shows the target, the second opens it.
+
+Inside the viewer, images are drawn with Unicode blocks, since terminal
+graphics protocols cannot scroll with the text. To use an external pager
+instead, set `pager = less -R` in the configuration or `KMD_PAGER`.
+`mouse = off` leaves the mouse to the terminal for text selection.
+
+## 🎨 Themes
+
+| Dark | Light |
+|---|---|
+| `tokyo-night` (default) | `tokyo-night-day` (default) |
+| `catppuccin-mocha` | `catppuccin-latte` |
+| `gruvbox-dark` | `gruvbox-light` |
+| `solarized-dark` | `solarized-light` |
+| `github-dark` | `github-light` |
+| `dracula`, `nord`, `one-dark` | |
+
+`kmd --list-themes` shows each theme with color swatches. With
+`theme = auto`, kmd chooses the light or dark default based on `COLORFGBG`.
+
+Each theme is defined by a 17-color palette from which every element
+(headings, code, syntax, math, diagrams) is derived. To create a theme:
 
 ```sh
 mkdir -p ~/.config/kmd/themes
-kmd --theme-template nord > ~/.config/kmd/themes/mine.theme   # edit colors
+kmd --theme-template nord > ~/.config/kmd/themes/mine.theme
 kmd -t mine README.md
 ```
 
 ```ini
-inherit  = nord         # base theme
-blue     = #5e81ac      # change a palette color (re-derives every role)
+inherit  = nord         # start from an existing theme
+blue     = #5e81ac      # change a palette color; every derived role follows
 heading2 = #bf616a      # or override a single role
 ```
 
-## Viewer
+## ⚙️ Configuration
 
-Documents longer than the terminal open in kmd's own viewer, which knows where
-the links are. Linked Markdown files open in the viewer itself, so a folder of
-docs or tickets can be browsed like a wiki:
-
-| Keys | |
-|---|---|
-| `Tab` / `Shift-Tab`, click | select the next / previous link, or click one (links that leave kmd: the first click shows the target, the second opens it) |
-| `Enter` `l` `→` | open the selected link (`.md` here, at its `#anchor`; web links, images and PDFs in the desktop's app) |
-| `Backspace` `h` `←` · `H` | back one document · back to the first one |
-| `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the wheel too) |
-| `/` `n` `N` | search, next / previous match |
-| `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |
-
-The status bar shows where the selected link goes and the trail of documents
-visited (with a `⌫ back` hint once there is somewhere to go back to). Images are drawn with Unicode blocks inside the viewer (terminal
-graphics cannot scroll with the text). `kmd -f` runs the live preview in the
-viewer: it keeps your position on every save and the links stay navigable
-(whatever document is on screen is the one watched). `--view` (or
-`view = always`) opens the viewer even for documents that fit on the screen.
-`pager = less -R` (or `KMD_PAGER`)
-restores an external pager; `mouse = off` leaves the mouse to the terminal
-(text selection without holding Shift).
-
-## Configuration
-
-`~/.config/kmd/config` (or `$XDG_CONFIG_HOME/kmd/config`, or `$KMD_CONFIG`):
+kmd reads `~/.config/kmd/config` (or `$XDG_CONFIG_HOME/kmd/config`, or the
+path in `$KMD_CONFIG`). `kmd --config` prints the file in use, the effective
+settings and a template.
 
 ```ini
 theme       = auto
@@ -119,55 +226,18 @@ light-theme = github-light
 max-width   = 100
 images      = auto
 pager       = builtin   # or "less -R", or "-" to never page
-mouse       = true      # click links / scroll with the wheel in the viewer
-view        = auto      # or "always": the viewer even for short documents
+mouse       = true      # click links and scroll with the wheel in the viewer
+view        = auto      # "always": use the viewer even for short documents
 ```
 
-Precedence: flags > environment variables (`KMD_THEME`, `KMD_PAGER`,
-`NO_COLOR`) > config file.
+Precedence: command-line flags, then environment variables (`KMD_THEME`,
+`KMD_PAGER`, `NO_COLOR`), then the configuration file.
 
-## Installation
+## 🔒 Security
 
-Prebuilt binaries for Linux, macOS, FreeBSD and Windows are attached to every
-[GitHub release](https://github.com/DipaolaFederico/kmd/releases) (with
-`SHA256SUMS`). From source:
-
-```sh
-make install                          # ~/.local/bin/kmd + man page + completions
-sudo make install PREFIX=/usr/local
-```
-
-Fedora (RPM): see [docs/PACKAGING.md](docs/PACKAGING.md).
-
-## Local CI
-
-```sh
-make ci      # every gate, in order; stops at the first failure
-make hooks   # run `make ci` before every git push
-```
-
-| Stage       | Tool                                                 | Gate                            |
-|-------------|------------------------------------------------------|---------------------------------|
-| format      | `gofmt -s`                                           | no diff                         |
-| lint        | `go vet` + `staticcheck`                             | no findings                     |
-| test        | `go test -race` (includes CommonMark/GFM spec)       | all green                       |
-| coverage    | `go test -coverprofile`                              | ≥ 90 % (`COVER_MIN`)            |
-| security    | `govulncheck` + `gosec`                              | no issues                       |
-| build       | `go build -trimpath`, `CGO_ENABLED=0`                | static binary                   |
-| packaging   | `groff`, `appstreamcli --pedantic`, completions      | valid Fedora metadata           |
-| performance | `scripts/perf.sh` (whole process, 200 runs)          | p95 < 10 ms (`PERF_MAX_MS`)     |
-
-Extras: `make spec` (conformance), `make fuzz` (5 fuzzers), `make bench`,
-`make rpm`.
-
-Lint and security tools are installed at pinned versions into `.tools/` (the
-first run needs network access). **The binary has no external dependencies**:
-`go.mod` has no `require` lines.
-
-## Security
-
-Documents are treated as untrusted (READMEs from cloned repos, downloads,
-`curl | kmd`). The design was reviewed and fuzzed against that threat model:
+Documents are treated as untrusted (READMEs from cloned repositories,
+downloads, `curl | kmd`). The design was reviewed and fuzzed against that
+threat model:
 
 - **Terminal injection**: C0/C1 control characters, DEL and Unicode bidi
   overrides ("Trojan Source") are stripped from all document text on output,
@@ -205,29 +275,14 @@ Documents are treated as untrusted (READMEs from cloned repos, downloads,
 Images cost what decoding costs: a large PNG adds a few milliseconds
 (`-i none` disables images; kitty passes PNGs through without decoding).
 
-## Layout
+To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
-```
-main.go             entry point: terminal and cell size, GC disabled
-internal/md         CommonMark/GFM parser → tree; HTML exporter
-internal/render     layout, themes, tables, code, extras integration
-internal/diagram    Mermaid/DOT → Unicode art (layered layout)
-internal/tex        LaTeX → Unicode (linear and 2D)
-internal/termimg    images: kitty, iTerm2, sixel, blocks
-internal/styled     shared vocabulary (spans + Unicode width)
-internal/term       terminal size and raw mode via ioctl
-internal/view       interactive viewer: link navigation, search, live reload
-internal/cli        flags, configuration, commands, pager, follow mode
-packaging/          RPM spec and AppStream metadata
-docs/kmd.1          man page
-```
+## 🤝 Contributing
 
-## Contributing
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) describes the
+workflow, the local CI (`make ci`) and the source layout.
 
-Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md).
-Security issues: see [SECURITY.md](SECURITY.md).
-
-## License
+## 📄 License
 
 MIT. The CommonMark/GFM specification examples in `internal/md/testdata`
 (CC-BY-SA 4.0) are used by the tests only.

@@ -2,3 +2,7 @@
 /.tools/
 coverage.out
 /dist/
+
+# local Claude Code instructions and settings
+CLAUDE.md
+.claude/

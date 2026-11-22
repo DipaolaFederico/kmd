@@ -60,6 +60,13 @@ Open the viewer even when the document fits on the screen.
 .B \-\-toc
 Print only the table of contents.
 .TP
+.BR \-s ", " \-\-section " " \fINAME\fR
+Show only one section: the heading whose anchor is \fINAME\fR (with or
+without \fB#\fR, as in \fB#getting\-started\fR), or else the first heading
+whose text contains \fINAME\fR, ignoring case, and everything under it up to
+the next heading of the same or a higher level. Works with \fB\-\-toc\fR,
+\fB\-\-html\fR and the viewer. Exits with status 1 when no heading matches.
+.TP
 .B \-\-html
 Export a standalone HTML page using the selected theme colors. Documents are
 treated as untrusted: raw HTML is omitted, \fBjavascript:\fR, \fBvbscript:\fR,

@@ -114,6 +114,7 @@ kmd -f notes.md               # live preview: re-render on every save
 kmd --view short.md           # open the viewer even if the document fits
 kmd -P README.md | less -R    # print without the viewer
 kmd --toc CHANGELOG.md        # table of contents only
+kmd -s install README.md      # only the section under the "Installation" heading
 kmd --html doc.md > doc.html  # export a standalone HTML page
 kmd -t catppuccin-mocha doc.md
 kmd -w 80 doc.md              # fixed render width
@@ -126,6 +127,7 @@ kmd -w 80 doc.md              # fixed render width
 | 📖 Read a project's documentation and follow its links | `kmd README.md`, then `Tab` and `Enter` |
 | ✍️ Preview a file while editing it | `kmd -f draft.md` |
 | 📋 Get an overview of a long document | `kmd --toc doc.md` |
+| 🎯 Read one section, or print it from a script | `kmd -s install README.md` |
 | 📤 Share a rendered document | `kmd --html doc.md > doc.html` |
 | 🔌 Render remote Markdown without downloading it to disk | `curl -s https://…/README.md \| kmd` |
 | 🖨️ Plain output for scripts or logs | `kmd -c never -P doc.md` |
@@ -146,6 +148,7 @@ Display:
       --view               open the viewer even when the document fits
 Output modes:
       --toc                print only the table of contents
+  -s, --section NAME       only the section under heading NAME (anchor or text)
       --html               export a standalone HTML page (safe: raw HTML removed)
       --unsafe-html        with --html: keep raw HTML and every URL
   -f, --follow             live preview: re-render whenever the file changes

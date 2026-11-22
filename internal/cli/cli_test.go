@@ -667,3 +667,76 @@ func TestVersionFromBuildInfo(t *testing.T) {
 		}
 	}
 }
+
+func TestSection(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "doc.md")
+	src := "# Doc\n\nintro\n\n## 📦 Install\n\nstep one\n\n## Usage\n\nrun it\n"
+	if err := os.WriteFile(p, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{"install", "#-install", "INST", "📦 Install"} {
+		r := run(t, nil, "-c", "never", "-s", q, p)
+		if r.code != 0 || !strings.Contains(r.out, "step one") || strings.Contains(r.out, "intro") || strings.Contains(r.out, "run it") {
+			t.Errorf("-s %q: %+v", q, r)
+		}
+	}
+	// the anchor wins over a heading that merely contains the text
+	if r := run(t, nil, "-c", "never", "--section", "doc", p); !strings.Contains(r.out, "intro") || !strings.Contains(r.out, "run it") {
+		t.Errorf("level-1 section: %+v", r)
+	}
+	if r := run(t, nil, "--toc", "-c", "never", "-s", "usage", p); r.code != 0 || !strings.Contains(r.out, "Usage") || strings.Contains(r.out, "Install") {
+		t.Errorf("toc of a section: %+v", r)
+	}
+	if r := run(t, nil, "--html", "-s", "usage", p); r.code != 0 || !strings.Contains(r.out, "run it") || strings.Contains(r.out, "step one") {
+		t.Errorf("html of a section: %+v", r)
+	}
+	r := run(t, nil, "-s", "nope\x1b[2J", p)
+	if r.code != 1 || !strings.Contains(r.errOut, "no section matching") || strings.Contains(r.errOut, "\x1b") {
+		t.Errorf("missing section: %+v", r)
+	}
+	if r := run(t, nil, "-s", "  ", p); r.code != 1 {
+		t.Errorf("blank section name: %+v", r)
+	}
+	// the viewer keeps the section when it re-renders the start document
+	var got view.Options
+	viewer := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 80, 3
+		e.View = func(o view.Options) error { got = o; return nil }
+	}
+	if r := run(t, viewer, "-s", "install", p); r.code != 0 {
+		t.Fatalf("viewer: %+v", r)
+	}
+	pg, err := got.Load(got.Start, 70)
+	if err != nil || strings.Contains(stripTest(strings.Join(pg.Lines, "\n")), "intro") {
+		t.Errorf("viewer reload lost the section: %v", err)
+	}
+	if _, err := got.Load(got.Start+"x", 70); err == nil {
+		t.Error("other documents are loaded whole (and missing ones fail)")
+	}
+}
+
+// Every long option in --help must be offered by every shell completion.
+func TestCompletionsCoverFlags(t *testing.T) {
+	var flags []string
+	for _, f := range strings.Fields(usage) {
+		f = strings.TrimRight(f, ",:")
+		if strings.HasPrefix(f, "--") && len(f) > 2 && !strings.ContainsAny(f, "=|") {
+			flags = append(flags, f)
+		}
+	}
+	if len(flags) < 20 {
+		t.Fatalf("parsed only %d flags from the usage text", len(flags))
+	}
+	for shell, script := range map[string]string{"bash": bashCompletion, "zsh": zshCompletion, "fish": fishCompletion} {
+		for _, f := range flags {
+			name := f
+			if shell == "fish" {
+				name = "-l " + f[2:]
+			}
+			if !strings.Contains(script, name) {
+				t.Errorf("%s completion lacks %s", shell, f)
+			}
+		}
+	}
+}

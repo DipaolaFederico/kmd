@@ -31,12 +31,20 @@ type inlineParser struct {
 	opt       *Options
 	tickRuns  map[int][]int // backtick run length -> start offsets (built lazily)
 	htmlEnds  htmlEnds      // absent HTML terminators (see scanHTMLTag)
+	refBudget *int          // see refBudget
 }
+
+// refBudget is how many bytes of destinations and titles the reference links
+// of a document of n bytes may copy from their definitions. Without it,
+// "[x]: <64 KiB URL>" followed by thousands of "[x]" makes every renderer
+// write gigabytes: each use repeats the URL. Once it is spent, further
+// reference links keep their text but lose their destination and title.
+func refBudget(n int) int { return 1<<20 + n }
 
 func text(s string) *Node { return &Node{Type: Text, Literal: s} }
 
 func (p *blockParser) processInlines() {
-	ip := &inlineParser{refs: p.refs, footnotes: p.footnotes, opt: &p.opt}
+	ip := &inlineParser{refs: p.refs, footnotes: p.footnotes, opt: &p.opt, refBudget: &p.refBudget}
 	Walk(p.doc, func(n *Node, entering bool) bool {
 		if entering && (n.Type == Paragraph || n.Type == Heading || n.Type == TableCell) {
 			ip.parse(n, string(n.content))
@@ -597,7 +605,11 @@ func (p *inlineParser) closeBracket() {
 		}
 		if has {
 			if r, ok := p.refs[normalizeLabel(label[1:len(label)-1])]; ok {
-				dest, title, matched = r.dest, r.title, true
+				matched = true
+				if cost := len(r.dest) + len(r.title); *p.refBudget >= cost {
+					*p.refBudget -= cost
+					dest, title = r.dest, r.title
+				}
 			}
 		}
 	}

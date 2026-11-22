@@ -1,0 +1,67 @@
+const DefaultWidth untyped int = 80
+
+const ImagesBlocks ImageMode = 1
+
+const ImagesITerm2 ImageMode = 3
+
+const ImagesKitty ImageMode = 2
+
+const ImagesNone ImageMode = 0
+
+const ImagesSixel ImageMode = 4
+
+const MaxWidth untyped int = 1000
+
+func (m ImageMode) String() string
+
+func (t *Theme) Dark() bool
+
+func (t *Theme) Name() string
+
+func DefaultTheme(dark bool) *Theme
+
+func HTML(src string, o HTMLOptions) (string, error)
+
+func LoadTheme(name string, dirs ...string) (*Theme, error)
+
+func ParseImageMode(s string) (ImageMode, error)
+
+func ParseTheme(name string, r io.Reader) (*Theme, error)
+
+func Render(src string, o Options) (string, error)
+
+func Themes(dirs ...string) []string
+
+type HTMLOptions struct {
+	CommonMark bool
+	NoMath bool
+	Unsafe bool
+	Standalone bool
+	Title string
+	Theme *Theme
+}
+
+type ImageMode uint8
+
+type Options struct {
+	Width int
+	Theme *Theme
+	Color bool
+	TrueColor bool
+	Hyperlinks bool
+	Images ImageMode
+	ImageRows int
+	CellWidth, CellHeight int
+	BaseDir string
+	CommonMark bool
+	NoMath bool
+	NoDiagrams bool
+}
+
+type Theme struct {
+	// contains filtered or unexported fields
+}
+
+var ErrTooLarge = errors.New("render: document larger than 16 MiB")
+
+var ErrUnknownTheme = irender.ErrUnknownTheme

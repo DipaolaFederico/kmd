@@ -3,10 +3,12 @@ package render
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Palette is the small set of base colors a theme is built from. Every
@@ -234,18 +236,14 @@ func loadTheme(name string, dirs []string, depth int) (*Theme, error) {
 	if path == "" {
 		p, dark, ok := builtin(name)
 		if !ok {
-			return nil, fmt.Errorf("%w %q (see kmd --list-themes)", ErrUnknownTheme, name)
+			return nil, fmt.Errorf("%w %q", ErrUnknownTheme, name)
 		}
 		t := p.Theme(name, dark)
 		return &t, nil
 	}
-	// #nosec G304 G703 -- theme files are chosen by the user (config dir or explicit path).
-	data, err := os.ReadFile(path)
+	data, err := readThemeFile(path)
 	if err != nil {
 		return nil, err
-	}
-	if len(data) > 64<<10 {
-		return nil, fmt.Errorf("%s: theme file too large", path)
 	}
 	base := strings.TrimSuffix(filepath.Base(path), ".theme")
 	return parseTheme(base, string(data), func(parent string) (*Theme, Palette, error) {
@@ -259,6 +257,50 @@ func loadTheme(name string, dirs []string, depth int) (*Theme, error) {
 		t, err := loadTheme(parent, dirs, depth+1)
 		return t, Palette{}, err
 	})
+}
+
+// maxThemeBytes bounds a theme file.
+const maxThemeBytes = 64 << 10
+
+// ParseTheme parses theme file syntax without touching the file system: the
+// theme may inherit only from a bundled theme.
+func ParseTheme(name, src string) (*Theme, error) {
+	if len(src) > maxThemeBytes {
+		return nil, fmt.Errorf("theme %s: too large", name)
+	}
+	return parseTheme(name, src, func(parent string) (*Theme, Palette, error) {
+		p, dark, ok := builtin(parent)
+		if !ok {
+			return nil, Palette{}, fmt.Errorf("theme %s: %w %q (only bundled themes can be inherited)", name, ErrUnknownTheme, parent)
+		}
+		t := p.Theme(parent, dark)
+		return &t, p, nil
+	})
+}
+
+// readThemeFile reads a theme file: a regular file (a FIFO would block, a
+// device could be endless) of at most maxThemeBytes.
+func readThemeFile(path string) ([]byte, error) {
+	// #nosec G304 G703 -- theme files are chosen by the user (config dir or
+	// explicit path); opened non-blocking, checked and size-limited.
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if st, err := f.Stat(); err != nil {
+		return nil, err
+	} else if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s: not a regular file", path)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxThemeBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxThemeBytes {
+		return nil, fmt.Errorf("%s: theme file too large", path)
+	}
+	return data, nil
 }
 
 func fileExists(p string) bool {

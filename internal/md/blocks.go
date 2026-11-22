@@ -26,6 +26,7 @@ type blockParser struct {
 	footnotes map[string]*Node
 	opt       Options
 	cells     int // table cells created so far (bounded by maxTableCells)
+	refBudget int // bytes reference links may still copy from definitions
 	blocks    int // block nodes created so far (bounded by MaxBlocks)
 }
 
@@ -48,7 +49,7 @@ func Parse(src string, opt Options) *Node {
 	if strings.IndexByte(src, 0) >= 0 {
 		src = strings.ReplaceAll(src, "\x00", "�")
 	}
-	p := &blockParser{opt: opt, refs: map[string]ref{}, footnotes: map[string]*Node{}}
+	p := &blockParser{opt: opt, refs: map[string]ref{}, footnotes: map[string]*Node{}, refBudget: refBudget(len(src))}
 	p.doc = &Node{Type: Document, open: true, startLine: 1}
 	p.tip, p.lastMatched = p.doc, p.doc
 	if opt.FrontMatter {

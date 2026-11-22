@@ -191,9 +191,13 @@ func (r *renderer) loadImage(src string, width, rows int) (imageResult, bool) {
 		return imageResult{}, false
 	}
 	var res imageResult
-	if img, err := termimg.Load(src, r.opt.BaseDir); err == nil {
-		if f, err := termimg.Render(img, r.opt.Images, width, rows, r.opt.Cell); err == nil && len(f.Lines) > 0 {
-			res = imageResult{frame: f, ok: true}
+	if img := r.image(src); img != nil {
+		w, h := img.Size()
+		if r.imgPixels+w*h <= maxImagePixels {
+			r.imgPixels += w * h
+			if f, err := termimg.Render(img, r.opt.Images, width, rows, r.opt.Cell); err == nil && len(f.Lines) > 0 {
+				res = imageResult{frame: f, ok: true}
+			}
 		}
 	}
 	r.images[key] = res
@@ -202,6 +206,27 @@ func (r *renderer) loadImage(src string, width, rows int) (imageResult, bool) {
 	}
 	r.imgBytes += frameBytes(res.frame)
 	return res, true
+}
+
+// image loads src once per document, whatever sizes it is drawn at: the
+// image decodes its pixels at most once. nil when it cannot be loaded.
+func (r *renderer) image(src string) *termimg.Image {
+	if img, ok := r.loaded[src]; ok {
+		return img
+	}
+	if r.loaded == nil {
+		r.loaded = map[string]*termimg.Image{}
+	}
+	load := termimg.LoadIn
+	if r.opt.AnyImagePath {
+		load = termimg.Load
+	}
+	img, err := load(src, r.opt.BaseDir)
+	if err != nil {
+		img = nil
+	}
+	r.loaded[src] = img
+	return img
 }
 
 func frameBytes(f termimg.Frame) int {

@@ -345,3 +345,44 @@ func TestSecurityHardening(t *testing.T) {
 		t.Error("inline math budget not applied")
 	}
 }
+
+// TestImageLoadedOnce: an image drawn at many sizes (nesting depths) is
+// loaded once, and the source pixels scaled per document are bounded.
+func TestImageLoadedOnce(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir)
+	var src strings.Builder
+	for i := range 30 {
+		src.WriteString(strings.Repeat("> ", i) + "![a](pic.png)\n\n")
+	}
+	doc := md.Parse(src.String(), md.GFM)
+	b := &Budget{}
+	res := Render(doc, Options{Width: 100, Color: true, Images: termimg.Blocks, BaseDir: dir, Budget: b})
+	if len(b.loaded) != 1 || !strings.Contains(res.Text, "▀") {
+		t.Errorf("image loaded %d times", len(b.loaded))
+	}
+	spent := &Budget{imgPixels: maxImagePixels}
+	if res := Render(doc, Options{Width: 100, Color: true, Images: termimg.Blocks, BaseDir: dir, Budget: spent}); strings.Contains(res.Text, "▀") {
+		t.Error("image drawn past the pixel budget")
+	}
+}
+
+// TestThemeFileKinds: theme paths must name regular files; a device or a
+// FIFO would be read forever or block.
+func TestThemeFileKinds(t *testing.T) {
+	for _, p := range []string{"/dev/zero", t.TempDir() + "/"} {
+		if _, err := os.Stat(p); err != nil {
+			continue
+		}
+		if _, err := LoadTheme(p, nil); err == nil {
+			t.Errorf("LoadTheme(%q) succeeded", p)
+		}
+	}
+	big := filepath.Join(t.TempDir(), "big.theme")
+	if err := os.WriteFile(big, []byte(strings.Repeat("#\n", maxThemeBytes)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadTheme(big, nil); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("large theme file: %v", err)
+	}
+}

@@ -166,6 +166,28 @@ build-provenance attestation; its notes list the merged pull requests.
   copies in the repository are not rewritten (`main` only accepts reviewed
   pull requests, the release workflow cannot push to it).
 
+### The public Go package
+
+`render/` is the only public package; everything else is `internal/` and may
+change at any time. From v1.0.0 on, `render` follows semantic versioning:
+
+- Adding an exported identifier, a field to `Options`/`HTMLOptions`, or an
+  `ImageMode` is a `feat`. Removing or changing one (a signature, a type, a
+  constant's value, a field's meaning or a safe default) is a breaking
+  change and needs a new major version, which for a Go module also means a
+  `/v2` import path. Avoid it: add a new identifier and deprecate the old
+  one instead.
+- `render/testdata/api.txt` records the exported API and `make test` (or
+  `make api`) compares it. Accept additions with `make api-update`; a
+  reported removal or change means the pull request is breaking.
+- The rendered output is not part of the API: layout and colour changes are
+  `feat` or `fix` as for the command.
+- A change only to `render/` that leaves the `kmd` binary byte-identical
+  does not publish a release by itself (see condition 2 above); the
+  maintainer releases it by hand when library users need it.
+- The safe defaults are part of the contract: the zero `Options` must never
+  read files, and images stay confined to `BaseDir`.
+
 ## Local CI
 
 ```sh
@@ -203,6 +225,8 @@ first run needs network access). They are never linked into the binary.
 | `internal/term`    | terminal size and raw mode via ioctl                 |
 | `internal/view`    | interactive viewer: links, search, live reload       |
 | `internal/cli`     | flags, config, pager, `--follow`, `--html`           |
+| `render/`          | public Go package: the stable rendering API          |
+| `internal/bridge`  | public options → internal ones, shared with the CLI  |
 | `main.go`          | entry point: terminal and cell size, GC tuning       |
 | `docs/`            | man page, packaging guide, README screenshot         |
 | `scripts/`         | perf gate, release helpers and their tests           |

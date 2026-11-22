@@ -3,7 +3,7 @@
 The goal is `sudo dnf install kmd` on Fedora. There are two stages:
 
 1. **COPR** (a Fedora-hosted package repository, no review): users run
-   `sudo dnf copr enable dipaolafederico/kmd` once, then `dnf install kmd`.
+   `sudo dnf copr enable fdipa/kmd` once, then `dnf install kmd`.
    Packit builds every release there automatically.
 2. **Official Fedora repositories**: plain `sudo dnf install kmd`, and kmd
    is listed in the AppStream catalog. This needs a package review and a
@@ -55,8 +55,8 @@ mock -r fedora-rawhide-x86_64 dist/rpmbuild/SRPMS/kmd-*.src.rpm
 ## Stage 1: COPR with Packit (manual steps, once)
 
 1. Create a Fedora account (FAS) at <https://accounts.fedoraproject.org>.
-   The COPR owner in `.packit.yaml` (`owner: dipaolafederico`) must be the
-   FAS user name; change it if yours differs.
+   The COPR owner in `.packit.yaml` (`owner: fdipa`) is the FAS user
+   name.
 2. Log in at <https://copr.fedorainfracloud.org> with that account (this
    creates your COPR user) and create a project named **kmd**:
    - Chroots: every `fedora-*` release (x86_64 and aarch64).
@@ -70,7 +70,7 @@ mock -r fedora-rawhide-x86_64 dist/rpmbuild/SRPMS/kmd-*.src.rpm
    install kmd with:
 
    ```sh
-   sudo dnf copr enable dipaolafederico/kmd
+   sudo dnf copr enable fdipa/kmd
    sudo dnf install kmd
    ```
 

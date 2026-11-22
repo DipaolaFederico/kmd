@@ -93,7 +93,7 @@ the binary, without the man page or completions).
 ### 🐧 Fedora
 
 ```sh
-sudo dnf copr enable dipaolafederico/kmd
+sudo dnf copr enable fdipa/kmd
 sudo dnf install kmd
 ```
 

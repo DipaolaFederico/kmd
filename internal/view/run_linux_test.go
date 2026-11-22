@@ -1,6 +1,7 @@
 package view
 
 import (
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -63,7 +64,7 @@ func (s *screen) drain(f *os.File) {
 // waitFor waits until the output contains want, then forgets the output.
 func (s *screen) waitFor(t *testing.T, want string) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(testlimit.Scale() * 5 * time.Second)
 	for time.Now().Before(deadline) {
 		s.mu.Lock()
 		out := s.buf.String()

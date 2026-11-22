@@ -19,15 +19,23 @@
       <li>Mermaid and Graphviz diagrams drawn with Unicode box characters</li>
       <li>LaTeX math formulas rendered with Unicode</li>
       <li>Thirteen bundled color themes and fully customizable themes</li>
-      <li>Live preview mode, table of contents and HTML export</li>
+      <li>A viewer that follows links between documents and folders, with a table of contents and search</li>
+      <li>Live preview, presentation mode, single-section output and HTML export</li>
     </ul>
   </description>
+  <screenshots>
+    <screenshot type="default">
+      <caption>A document rendered with the tokyo-night theme</caption>
+      <image type="source" width="785" height="805">https://raw.githubusercontent.com/DipaolaFederico/kmd/main/docs/images/screenshot.png</image>
+    </screenshot>
+  </screenshots>
   <developer id="io.github.dipaolafederico">
     <name>Federico Di Paola</name>
   </developer>
   <url type="homepage">https://github.com/DipaolaFederico/kmd</url>
   <url type="bugtracker">https://github.com/DipaolaFederico/kmd/issues</url>
   <url type="vcs-browser">https://github.com/DipaolaFederico/kmd</url>
+  <url type="contribute">https://github.com/DipaolaFederico/kmd/blob/main/CONTRIBUTING.md</url>
   <provides>
     <binary>kmd</binary>
   </provides>

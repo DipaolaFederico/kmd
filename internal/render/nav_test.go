@@ -1,6 +1,7 @@
 package render
 
 import (
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -172,7 +173,7 @@ func TestRepeatedHeadingsAreLinear(t *testing.T) {
 	if len(res.Anchors) != 40000 {
 		t.Errorf("%d anchors", len(res.Anchors))
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > testlimit.Scale()*5*time.Second {
 		t.Errorf("40,000 repeated headings took %v", d)
 	}
 }
@@ -202,7 +203,7 @@ func TestHrefHostileInputs(t *testing.T) {
 	src := "[r]: <" + dest + ">\n\n" + strings.Repeat("[a][r] ", 4000)
 	start := time.Now()
 	res := Render(md.Parse(src, md.GFM), Options{Width: 80, Color: true, Hyperlinks: true, Navigate: true})
-	if d := time.Since(start); d > 5*time.Second {
+	if d := time.Since(start); d > testlimit.Scale()*5*time.Second {
 		t.Errorf("long reference destination took %v", d)
 	}
 	if strings.Contains(res.Text, "\x1b]8;;"+dest[:10]) || res.Links[0].Href != dest {

@@ -1,0 +1,26 @@
+# Packit configuration for Fedora dist-git (src.fedoraproject.org/rpms/kmd),
+# to be committed there as .packit.yaml once the package is accepted.
+# For every GitHub release it opens a dist-git pull request with the new
+# version, then builds it in Koji and files the Bodhi updates.
+upstream_project_url: https://github.com/DipaolaFederico/kmd
+upstream_tag_template: v{version}
+specfile_path: kmd.spec
+downstream_package_name: kmd
+
+jobs:
+  - job: pull_from_upstream
+    trigger: release
+    dist_git_branches:
+      - fedora-all
+
+  - job: koji_build
+    trigger: commit
+    allowed_committers: ["packit"]
+    dist_git_branches:
+      - fedora-all
+
+  - job: bodhi_update
+    trigger: commit
+    allowed_builders: ["packit"]
+    dist_git_branches:
+      - fedora-branched

@@ -23,6 +23,9 @@ type Options struct {
 
 	Math     bool // render LaTeX math as Unicode
 	Diagrams bool // render mermaid / dot code blocks as diagrams
+
+	// Navigate fills Result.Links and Result.Anchors (interactive viewer).
+	Navigate bool
 }
 
 // Result is the rendered document.
@@ -31,6 +34,10 @@ type Result struct {
 	// Graphics is true when terminal graphics sequences (kitty, iTerm2,
 	// sixel) were emitted; such output must not be sent through a pager.
 	Graphics bool
+	// Links and Anchors locate links and top-level headings (by GitHub
+	// slug) in Text; only filled with Options.Navigate.
+	Links   []Link
+	Anchors map[string]int
 }
 
 const margin = "  "
@@ -53,9 +60,13 @@ type renderer struct {
 	imgBytes  int
 	specials  int
 	mathCount int
+
+	links  *nav   // link registry (Navigate)
+	absDir string // absolute BaseDir, resolved once for href
 }
 
 const (
+	maxLinks      = 100000   // links the viewer can select per document
 	maxImages     = 50       // distinct images drawn per document
 	maxImageBytes = 64 << 20 // total escape-sequence bytes for images
 	maxSpecials   = 100      // diagrams and display formulas per document
@@ -70,16 +81,28 @@ func Render(doc *md.Node, o Options) Result {
 	r := &renderer{th: o.Theme, opt: o}
 	width := max(o.Width-2*len(margin), 10)
 	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
+	var anchors *anchorSet
+	if o.Navigate {
+		r.links = &nav{row: 1} // Text starts with a blank line
+		p.nav = r.links
+		anchors = &anchorSet{lines: map[string]int{}, next: map[string]int{}}
+	}
 	var b strings.Builder
 	b.WriteByte('\n')
+	blank := func() {
+		b.WriteByte('\n')
+		if p.nav != nil {
+			p.nav.row++
+		}
+	}
 	paint := func(lines []rline) {
 		for _, l := range lines {
 			if len(l) == 0 {
-				b.WriteByte('\n')
+				blank()
 				continue
 			}
 			b.WriteString(margin)
-			p.line(&b, l)
+			p.line(&b, l, len(margin))
 		}
 	}
 	// Top-level blocks are painted as soon as they are laid out, so memory
@@ -94,12 +117,15 @@ func Render(doc *md.Node, o Options) Result {
 			continue
 		}
 		if !first {
-			b.WriteByte('\n')
+			blank()
 			if c.Type == md.Heading && c.Level <= 2 {
-				b.WriteByte('\n')
+				blank()
 			}
 		}
 		first = false
+		if anchors != nil && c.Type == md.Heading {
+			anchors.add(md.PlainText(c), r.links.row)
+		}
 		paint(lines)
 	}
 	if defs := md.Footnotes(doc); len(defs) > 0 {
@@ -114,7 +140,18 @@ func Render(doc *md.Node, o Options) Result {
 		}
 	}
 	b.WriteByte('\n')
-	return Result{Text: b.String(), Graphics: r.graphics}
+	res := Result{Text: b.String(), Graphics: r.graphics}
+	if anchors != nil {
+		res.Anchors = anchors.lines
+	}
+	if r.links != nil {
+		for _, l := range r.links.links {
+			if len(l.Spans) > 0 { // a link can be laid out and then dropped
+				res.Links = append(res.Links, l)
+			}
+		}
+	}
+	return res
 }
 
 // RenderString parses Markdown (with all GFM extensions) and renders it.
@@ -180,6 +217,25 @@ func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 		case md.Link:
 			st := base
 			st.Fg, st.URL = th.Link, n.Dest
+			href := n.Dest
+			if r.opt.Hyperlinks || r.links != nil {
+				var local bool
+				href, local = r.href(n.Dest)
+				switch {
+				case local:
+					st.URL = href
+				case strings.HasPrefix(strings.ToLower(n.Dest), "file:") && !openable(n.Dest):
+					// a clicked file:// link is opened by the desktop: never a
+					// script or .desktop file
+					st.URL = ""
+				}
+			}
+			if r.links != nil {
+				if n := len(r.links.links); n < maxLinks {
+					r.links.links = append(r.links.links, Link{Href: href})
+					st.Link = int32(n + 1)
+				}
+			}
 			st.Attr |= Underline
 			out = r.runs(n, st, out)
 			if !r.opt.Hyperlinks && n.Dest != "" && n.Dest != md.PlainText(n) &&
@@ -674,7 +730,7 @@ func TOC(doc *md.Node, o Options) string {
 	var b strings.Builder
 	for _, l := range lines {
 		b.WriteString(margin)
-		p.line(&b, l)
+		p.line(&b, l, len(margin))
 	}
 	return b.String()
 }

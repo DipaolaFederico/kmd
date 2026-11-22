@@ -18,7 +18,8 @@ adds syntax highlighting, clickable OSC 8 hyperlinks, inline images,
 Mermaid and Graphviz diagrams and LaTeX math rendered with Unicode.
 .PP
 With no \fIFILE\fR, or when \fIFILE\fR is \fB\-\fR, standard input is read.
-Long documents are shown through a pager when standard output is a terminal.
+Long documents are shown in the built\-in viewer when standard output is a
+terminal (see \fBVIEWER\fR).
 .SH OPTIONS
 .SS Display
 .TP
@@ -50,7 +51,10 @@ Show Mermaid and Graphviz source instead of diagrams.
 Strict CommonMark: disable all GitHub extensions.
 .TP
 .BR \-P ", " \-\-no\-pager
-Never page long output.
+Never page long output (no viewer).
+.TP
+.B \-\-view
+Open the viewer even when the document fits on the screen.
 .SS Output modes
 .TP
 .B \-\-toc
@@ -66,7 +70,11 @@ restrictive Content-Security-Policy.
 With \fB\-\-html\fR: keep raw HTML and every URL. Use only with trusted input.
 .TP
 .BR \-f ", " \-\-follow
-Live preview: re-render the file whenever it changes. Stop with Ctrl+C.
+Live preview: re-render the file whenever it changes. On a terminal this
+happens in the viewer, which keeps the scroll position and lets links be
+followed (the document on screen is the one watched); quit with \fBq\fR.
+With \fB\-P\fR, or when the output is not a terminal, the screen is redrawn
+instead; stop with Ctrl+C.
 .SS Themes and configuration
 .TP
 .B \-\-list\-themes
@@ -92,9 +100,46 @@ Settings are read from \fI$XDG_CONFIG_HOME/kmd/config\fR (by default
 \fI~/.config/kmd/config\fR), one \fBkey = value\fR per line; \fB#\fR starts a
 comment. Keys: \fBtheme\fR, \fBdark-theme\fR, \fBlight-theme\fR, \fBwidth\fR,
 \fBmax-width\fR, \fBcolor\fR, \fBimages\fR, \fBimage-rows\fR,
-\fBhyperlinks\fR, \fBpager\fR, \fBmath\fR, \fBdiagrams\fR.
+\fBhyperlinks\fR, \fBpager\fR, \fBmouse\fR, \fBview\fR, \fBmath\fR, \fBdiagrams\fR.
 Command-line options take precedence over environment variables, which take
 precedence over the configuration file.
+.SH VIEWER
+The built\-in viewer pages through long documents and follows their links.
+Links to Markdown files open in the viewer itself, at the right heading when
+the link has a \fB#anchor\fR, and \fBBackspace\fR goes back; web links,
+\fBmailto:\fR links and local images or PDFs are handed to the desktop
+(\fBxdg\-open\fR, or \fBopen\fR on macOS). Images are drawn with Unicode
+blocks in the viewer, since terminal graphics cannot scroll with the text.
+.TP
+.B Tab\fR, \fBShift\-Tab
+Select the next or previous link (or click a link with the mouse; a link
+that leaves kmd is selected by the first click and opened by the second).
+.TP
+.B Enter\fR, \fBl\fR, \fBRight
+Open the selected link.
+.TP
+.B Backspace\fR, \fBh\fR, \fBLeft
+Go back to the previous document (or position, after an in\-page link).
+.TP
+.B H
+Go back to the first document, the one kmd was started with.
+.TP
+.B j\fR, \fBk\fR, \fBSpace\fR, \fBb\fR, \fBd\fR, \fBu\fR, \fBg\fR, \fBG
+Scroll by a line, a page, half a page; go to the top or the bottom (arrow,
+page and Home/End keys and the mouse wheel work too).
+.TP
+.B /\fR, \fBn\fR, \fBN
+Search (case\-insensitive unless the text has capitals); next and previous match.
+.TP
+.B e
+Edit the file with \fB$VISUAL\fR or \fB$EDITOR\fR, then reload it.
+.TP
+.B r\fR, \fB?\fR, \fBq
+Reload, help, quit.
+.PP
+With \fBmouse = off\fR in the configuration file the terminal keeps the
+mouse (clicks do not reach the viewer). Set \fBpager\fR or \fBKMD_PAGER\fR to
+a command such as \fBless \-R\fR to use an external pager instead.
 .SH THEMES
 A theme file \fI~/.config/kmd/themes/NAME.theme\fR contains \fBkey = #rrggbb\fR
 lines. \fBinherit\fR selects the base theme. The palette keys \fBbg\fR,
@@ -110,7 +155,9 @@ Run \fBkmd \-\-theme\-template tokyo-night\fR for a complete example.
 Default theme.
 .TP
 .B KMD_PAGER
-Pager command (default: \fBless \-R\fR).
+How long documents are shown: \fBbuiltin\fR (the default, see
+\fBVIEWER\fR), a pager command such as \fBless \-R\fR, or \fB\-\fR to
+disable paging.
 .TP
 .B KMD_CONFIG
 Path of the configuration file.
@@ -129,7 +176,9 @@ Used by the \fBauto\fR theme to detect light terminals.
 Documents are treated as untrusted. Control characters, escape sequences and
 bidi overrides contained in documents are removed before output, so a
 document cannot control or visually reorder the terminal. Remote images are
-never downloaded. Inputs are limited to 16 MiB and 250,000 blocks, images to
+never downloaded. Linked documents are only read when the user follows the
+link in the viewer, and only local images, PDFs and other data files (never
+programs) are handed to the desktop. Inputs are limited to 16 MiB and 250,000 blocks, images to
 20 MiB and 40 megapixels (at most 50 per document), and the number of
 diagrams and display formulas per document is bounded.
 .SH EXAMPLES

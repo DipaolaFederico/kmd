@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/DipaolaFederico/kmd/internal/view"
 )
 
 type result struct {
@@ -52,6 +54,8 @@ func run(t *testing.T, mod func(*Env), args ...string) result {
 			res.paged = c
 			return nil
 		},
+		// never open the real terminal from tests
+		View: func(view.Options) error { return errors.New("no viewer in tests") },
 	}
 	if mod != nil {
 		mod(&env)
@@ -388,4 +392,253 @@ func TestSystemPager(t *testing.T) {
 	if err := systemPager(&out, &errOut)("x", ""); err == nil {
 		t.Fatal("empty pager did not fail")
 	}
+}
+
+func TestBuiltinViewer(t *testing.T) {
+	dir := t.TempDir()
+	long := strings.Repeat("line\n\n", 50)
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	a := write("a.md", "# A\n\n[to b](b.md#end)\n\n"+long+"![img](pic.png)\n")
+	b := write("b.md", "# B\n\n"+long+"## End\n\n[back](a.md)\n")
+
+	var got view.Options
+	viewer := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 20
+		e.Getenv = envMap(map[string]string{"TERM": "xterm-kitty", "COLORTERM": "truecolor", "HOME": t.TempDir()})
+		e.View = func(o view.Options) error { got = o; return nil }
+	}
+	r := run(t, viewer, a)
+	if r.out != "" || r.paged != "" || r.code != 0 {
+		t.Fatalf("viewer not used: %+v", r)
+	}
+	if got.Start != a || !got.Mouse || got.Select == "" || got.Bar == "" {
+		t.Errorf("options: %+v", got)
+	}
+	p, err := got.Load(got.Start, 60)
+	if err != nil || len(p.Links) != 1 || !strings.HasSuffix(p.Links[0].Href, "/b.md#end") || p.Anchors["a"] == 0 {
+		t.Fatalf("load a: %v %+v", err, p)
+	}
+	if strings.Contains(strings.Join(p.Lines, "\n"), "\x1b_G") {
+		t.Error("kitty graphics in the viewer (should be blocks)")
+	}
+	for _, l := range p.Lines {
+		if w := len([]rune(stripTest(l))); w > 60 {
+			t.Errorf("line wider than the terminal: %d", w)
+		}
+	}
+	p, err = got.Load(b, 300) // explicit page; wide terminal capped by max-width
+	if err != nil || p.Anchors["end"] == 0 {
+		t.Fatalf("load b: %v", err)
+	}
+	if _, err := got.Load(filepath.Join(dir, "missing.md"), 80); err == nil || !strings.Contains(err.Error(), "missing.md") {
+		t.Errorf("missing page: %v", err)
+	}
+
+	// several files: one page, anchors and links shifted to their file
+	r = run(t, viewer, a, b)
+	if got.Start != "" {
+		t.Errorf("start for several files: %q", got.Start)
+	}
+	p, _ = got.Load("", 80)
+	if len(p.Links) != 2 || p.Links[1].Spans[0].Line <= p.Links[0].Spans[0].Line || p.Anchors["end"] <= p.Anchors["a"] {
+		t.Errorf("merged page: %+v %v", p.Links, p.Anchors)
+	}
+	if !strings.Contains(strings.Join(p.Lines, "\n"), "b.md") {
+		t.Error("file titles missing")
+	}
+
+	// stdin is read once and kept for re-renders
+	r = run(t, func(e *Env) {
+		viewer(e)
+		e.Stdin = strings.NewReader(long + "[x](x.md)")
+	})
+	p1, _ := got.Load("", 80)
+	p2, _ := got.Load("", 50)
+	if r.code != 0 || len(p1.Links) != 1 || len(p2.Links) != 1 || len(p2.Lines) <= len(p1.Lines)-1 {
+		t.Errorf("stdin re-render: %d %d", len(p1.Lines), len(p2.Lines))
+	}
+
+	// a fixed width is kept (but never wider than the terminal)
+	run(t, viewer, "-w", "70", a)
+	p, _ = got.Load("", 50)
+	for _, l := range p.Lines {
+		if w := len([]rune(stripTest(l))); w > 50 {
+			t.Errorf("fixed width exceeds terminal: %d", w)
+		}
+	}
+
+	// mouse = off; KMD_PAGER selects an external pager instead
+	home := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(home, ".config", "kmd"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".config", "kmd", "config"), []byte("mouse = off\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	run(t, func(e *Env) {
+		viewer(e)
+		e.Getenv = envMap(map[string]string{"HOME": home})
+	}, a)
+	if got.Mouse {
+		t.Error("mouse = off ignored")
+	}
+	r = run(t, func(e *Env) {
+		viewer(e)
+		e.Getenv = envMap(map[string]string{"HOME": home, "KMD_PAGER": "less -R"})
+		e.View = func(view.Options) error { t.Error("viewer used with KMD_PAGER"); return nil }
+	}, a)
+	if r.paged == "" {
+		t.Error("KMD_PAGER pager not used")
+	}
+	r = run(t, nil, "--config")
+	if !strings.Contains(r.out, "pager        builtin") || !strings.Contains(r.out, "mouse        on") {
+		t.Errorf("--config: %s", r.out)
+	}
+	if _, err := loadConfig(writeConfig(t, "mouse = maybe\n")); err == nil {
+		t.Error("bad mouse value accepted")
+	}
+}
+
+func writeConfig(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// stripTest removes SGR and OSC sequences from a painted line.
+func stripTest(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[':
+			for i < len(s) && (s[i] < 0x40 || s[i] > 0x7e || s[i] == '[') {
+				i++
+			}
+		case s[i] == 0x1b && i+1 < len(s) && s[i+1] == ']':
+			i += strings.Index(s[i:], "\x1b\\") + 1
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
+func TestViewAlwaysAndFollow(t *testing.T) {
+	dir := t.TempDir()
+	short := filepath.Join(dir, "short.md")
+	if err := os.WriteFile(short, []byte("# Short\n\n[x](x.md)\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got *view.Options
+	tty := func(home string, extra ...string) func(*Env) {
+		return func(e *Env) {
+			e.StdoutTTY, e.Cols, e.Rows = true, 100, 40
+			env := map[string]string{"HOME": home}
+			for i := 0; i+1 < len(extra); i += 2 {
+				env[extra[i]] = extra[i+1]
+			}
+			e.Getenv = envMap(env)
+			e.View = func(o view.Options) error { got = &o; return nil }
+		}
+	}
+	home := t.TempDir()
+
+	got = nil
+	if r := run(t, tty(home), short); got != nil || r.out == "" {
+		t.Error("short document opened the viewer without --view")
+	}
+	got = nil
+	if r := run(t, tty(home), "--view", short); got == nil || r.out != "" || got.Watch {
+		t.Error("--view ignored")
+	}
+	got = nil
+	run(t, tty(home, "KMD_PAGER", "less -R"), "--view", short) // explicit flag wins over the pager
+	if got == nil {
+		t.Error("--view with an external pager")
+	}
+
+	cfgHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(cfgHome, ".config", "kmd"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgHome, ".config", "kmd", "config"), []byte("view = always\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got = nil
+	if run(t, tty(cfgHome), short); got == nil {
+		t.Error("view = always ignored")
+	}
+	got = nil
+	if run(t, tty(cfgHome), "-P", short); got != nil {
+		t.Error("-P must win over view = always")
+	}
+	if r := run(t, tty(cfgHome), "--config"); !strings.Contains(r.out, "view         always") {
+		t.Errorf("--config view: %s", r.out)
+	}
+	if _, err := loadConfig(writeConfig(t, "view = sometimes\n")); err == nil {
+		t.Error("bad view value accepted")
+	}
+
+	// -f on a terminal: the viewer, watching the file
+	got = nil
+	if r := run(t, tty(home), "-f", short); got == nil || !got.Watch || got.Start != short || r.code != 0 {
+		t.Errorf("-f did not use the watching viewer: %+v", got)
+	}
+	// stdin, --html and -P keep the classic follow
+	stop := make(chan struct{})
+	close(stop)
+	got = nil
+	run(t, func(e *Env) { tty(home)(e); e.Interrupt = stop; e.Poll = time.Millisecond }, "-f", "-P", short)
+	if got != nil {
+		t.Error("-f -P used the viewer")
+	}
+}
+
+func TestViewerRendersOnce(t *testing.T) {
+	dir := t.TempDir()
+	png := filepath.Join(dir, "p.png")
+	if err := os.WriteFile(png, gradientPNG(t), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := filepath.Join(dir, "long.md")
+	short := filepath.Join(dir, "short.md")
+	_ = os.WriteFile(long, []byte("![p](p.png)\n\n"+strings.Repeat("line\n\n", 60)), 0o600)
+	_ = os.WriteFile(short, []byte("![p](p.png)\n\n[x](x.md)\n"), 0o600)
+	var got *view.Options
+	kitty := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 90, 30
+		e.Getenv = envMap(map[string]string{"TERM": "xterm-kitty", "COLORTERM": "truecolor", "HOME": t.TempDir()})
+		e.View = func(o view.Options) error { got = &o; return nil }
+	}
+	run(t, kitty, long)
+	if got == nil || got.First == nil || got.FirstCols != 90 || len(got.First.Lines) < 60 {
+		t.Fatalf("long document: first page not handed over: %+v", got)
+	}
+	if strings.Contains(strings.Join(got.First.Lines, ""), "\x1b_G") {
+		t.Error("first page has kitty graphics")
+	}
+	got = nil
+	r := run(t, kitty, short) // fits: printed with real terminal graphics
+	if got != nil || !strings.Contains(r.out, "\x1b_G") {
+		t.Errorf("short document: viewer=%v kitty=%v", got != nil, strings.Contains(r.out, "\x1b_G"))
+	}
+}
+
+// gradientPNG returns the repository's small test image.
+func gradientPNG(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "testdata", "gradient.png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

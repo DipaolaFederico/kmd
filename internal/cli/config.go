@@ -28,6 +28,8 @@ type config struct {
 	Pager      string
 	Math       *bool
 	Diagrams   *bool
+	Mouse      *bool
+	View       string
 }
 
 // configPath returns $KMD_CONFIG, or $XDG_CONFIG_HOME/kmd/config, or ~/.config/kmd/config.
@@ -54,7 +56,10 @@ const configTemplate = `# kmd configuration (key = value). Command-line flags ta
 # images      = auto            # auto | blocks | kitty | iterm2 | sixel | none
 # image-rows  = 20              # maximum image height in terminal rows
 # hyperlinks  = auto            # auto | always | never
-# pager       = less -R         # pager for long documents ("" disables paging)
+# pager       = builtin         # long documents: builtin (viewer that follows
+#                               # links), a command such as "less -R", or "-"
+# mouse       = true            # builtin viewer: click links, scroll with the wheel
+# view        = auto            # auto: viewer for long documents | always
 # math        = true            # render LaTeX formulas
 # diagrams    = true            # render mermaid / graphviz diagrams
 `
@@ -149,6 +154,13 @@ func (c *config) set(k, v string) error {
 		c.Math, err = parseBool(v)
 	case "diagrams":
 		c.Diagrams, err = parseBool(v)
+	case "mouse":
+		c.Mouse, err = parseBool(v)
+	case "view":
+		c.View = v
+		if v != "auto" && v != "always" {
+			err = fmt.Errorf("invalid view %q (auto | always)", v)
+		}
 	default:
 		return fmt.Errorf("unknown setting %q", k)
 	}

@@ -104,6 +104,9 @@ func (r *renderer) href(dest string) (h string, local bool) {
 	return u.String(), MarkdownExt[ext] || DocumentExt[ext]
 }
 
+// IndexNames are the documents that stand for a folder, in order.
+var IndexNames = []string{"README.md", "readme.md", "Readme.md", "README.markdown", "index.md"}
+
 // MarkdownExt are the extensions of documents the viewer opens itself.
 var MarkdownExt = map[string]bool{".md": true, ".markdown": true, ".mdown": true, ".mkd": true, ".mkdn": true, ".mdwn": true}
 

@@ -3,7 +3,7 @@
 kmd \- beautiful Markdown previews in the terminal
 .SH SYNOPSIS
 .B kmd
-[\fIOPTIONS\fR] [\fIFILE\fR ...]
+[\fIOPTIONS\fR] [\fIFILE\fR|\fIFOLDER\fR ...]
 .br
 .B cat
 \fIFILE\fR |
@@ -18,6 +18,10 @@ adds syntax highlighting, clickable OSC 8 hyperlinks, inline images,
 Mermaid and Graphviz diagrams and LaTeX math rendered with Unicode.
 .PP
 With no \fIFILE\fR, or when \fIFILE\fR is \fB\-\fR, standard input is read.
+A \fIFOLDER\fR shows its \fBREADME.md\fR (or \fBindex.md\fR); a folder without
+one is shown as a list of its Markdown files and subfolders (hidden entries
+excluded, at most 2000 entries read), whose links can be followed in the
+viewer. Links to folders in documents behave the same way.
 Long documents are shown in the built\-in viewer when standard output is a
 terminal (see \fBVIEWER\fR).
 .SH OPTIONS

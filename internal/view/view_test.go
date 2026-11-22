@@ -317,7 +317,6 @@ func TestFollowTargets(t *testing.T) {
 		{"/run.sh", "not a Markdown file: run.sh"},
 		{"/tool.png", "not a Markdown file: tool.png"},
 		{"/nope.md", "not found: nope.md"},
-		{"/empty", "no README.md in empty"},
 		{"mailto:a@b.c", "opened mailto:a@b.c"},
 		{"javascript:alert(1)", "unsupported link: javascript:alert(1)"},
 	} {
@@ -739,5 +738,40 @@ func TestFirstPage(t *testing.T) {
 	}
 	if m, _ := newModel(opt, 100, 20); m.page == first || loads != 1 {
 		t.Error("first page used at another width")
+	}
+}
+
+func TestFollowFolderWithoutReadme(t *testing.T) {
+	dir := fixture(t)
+	h := newHarness(t, dir)
+	base := h.opt.Load
+	var loaded []string
+	h.opt.Load = func(path string, cols int) (*Page, error) {
+		loaded = append(loaded, path)
+		if st, err := os.Stat(path); err == nil && st.IsDir() {
+			return &Page{Lines: []string{"listing of " + path}}, nil
+		}
+		return base(path, cols)
+	}
+	h.selectLink(t, "/empty")
+	h.keys("enter")
+	empty := filepath.Join(dir, "empty")
+	if h.path != empty || len(h.hist) != 1 || h.page.Lines[0] != "listing of "+empty {
+		t.Fatalf("folder listing: path %q msg %q", h.path, h.msg)
+	}
+	h.follow("file://" + filepath.ToSlash(empty)) // already there: no reload
+	if len(loaded) != 1 {
+		t.Errorf("reloaded the listing: %v", loaded)
+	}
+	h.keys("e")
+	if h.msg != "a folder listing cannot be edited" || len(h.edited) != 0 {
+		t.Errorf("edit a folder: %q %v", h.msg, h.edited)
+	}
+	h.keys("backspace", "esc", "g")
+	h.opt.Load = func(string, int) (*Page, error) { return nil, errors.New("unreadable") }
+	h.selectLink(t, "/empty")
+	h.keys("enter")
+	if h.msg != "unreadable" {
+		t.Errorf("listing error: %q", h.msg)
 	}
 }

@@ -1,6 +1,9 @@
 package view
 
-import "unicode"
+import (
+	"os"
+	"unicode"
+)
 
 // handle applies one input event to the model.
 func (m *model) handle(k key) {
@@ -128,6 +131,8 @@ func (m *model) edit() {
 	switch {
 	case m.path == "":
 		m.msg = "only files can be edited (not stdin or several documents)"
+	case isDir(m.path):
+		m.msg = "a folder listing cannot be edited"
 	case m.opt.Edit == nil:
 		m.msg = "no editor available"
 	default:
@@ -136,4 +141,9 @@ func (m *model) edit() {
 		}
 		m.reload()
 	}
+}
+
+func isDir(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.IsDir()
 }

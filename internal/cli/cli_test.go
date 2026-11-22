@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -135,7 +136,7 @@ func TestErrors(t *testing.T) {
 	if r.code != 1 || !strings.Contains(r.errOut, "exist.md") || !strings.Contains(r.out, "ok") {
 		t.Errorf("missing file: %+v", r)
 	}
-	if r := run(t, nil, t.TempDir()); r.code != 1 || !strings.Contains(r.errOut, "is a directory") {
+	if r := run(t, nil, t.TempDir()); r.code != 0 || r.errOut != "" {
 		t.Errorf("directory: %+v", r)
 	}
 	if r := run(t, func(e *Env) { e.Stdin = errReader{} }); r.code != 1 {
@@ -144,7 +145,7 @@ func TestErrors(t *testing.T) {
 	if r := run(t, func(e *Env) { e.Stdout = errWriter{} }, p); r.code != 1 {
 		t.Errorf("write error: %+v", r)
 	}
-	if _, err := readSource("-", strings.NewReader(strings.Repeat("a", maxInput+1))); err == nil {
+	if _, _, err := readSource("-", strings.NewReader(strings.Repeat("a", maxInput+1))); err == nil {
 		t.Error("oversized input accepted")
 	}
 }
@@ -738,5 +739,104 @@ func TestCompletionsCoverFlags(t *testing.T) {
 				t.Errorf("%s completion lacks %s", shell, f)
 			}
 		}
+	}
+}
+
+func TestDirectories(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name, body string) {
+		p := filepath.Join(dir, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("withreadme/README.md", "# Readme here\n\n[guide](guide.md)\n")
+	mk("withreadme/guide.md", "# Guide\n")
+	mk("plain/b.md", "# B\n")
+	mk("plain/a b.md", "# A\n")
+	mk("plain/http:x.md", "# colon\n")
+	mk("plain/*star*.md", "# star\n")
+	mk("plain/notes.txt", "no")
+	mk("plain/.hidden.md", "# hidden\n")
+	mk("plain/sub/c.md", "# C\n")
+	if err := os.Symlink(filepath.Join(dir, "plain", "sub"), filepath.Join(dir, "plain", "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "missing"), filepath.Join(dir, "plain", "dangling.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "empty"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	// a README symlinked to a file that is not Markdown is not shown
+	mk("secret", "TOKEN=123")
+	if err := os.Mkdir(filepath.Join(dir, "trap"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(dir, "secret"), filepath.Join(dir, "trap", "README.md")); err != nil {
+		t.Fatal(err)
+	}
+	if r := run(t, nil, "-c", "never", filepath.Join(dir, "trap")); strings.Contains(r.out, "TOKEN") || !strings.Contains(r.out, "README.md") {
+		t.Errorf("symlinked README: %+v", r)
+	}
+
+	// a folder with a README renders it, with links relative to the folder
+	r := run(t, nil, "-c", "never", "--hyperlinks", "always", filepath.Join(dir, "withreadme"))
+	if r.code != 0 || !strings.Contains(r.out, "README HERE") || !strings.Contains(r.out, filepath.ToSlash(filepath.Join(dir, "withreadme", "guide.md"))) {
+		t.Fatalf("readme: %+v", r)
+	}
+	// otherwise a listing: folders, then Markdown files, without hidden ones
+	r = run(t, nil, "-c", "never", filepath.Join(dir, "plain"))
+	out := r.out
+	for _, want := range []string{"PLAIN/", "Folders", "link/", "sub/", "Documents", "a b.md (./a%20b.md)", "b.md", "http:x.md (./http:x.md)", "*star*.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("listing lacks %q:\n%s", want, out)
+		}
+	}
+	for _, bad := range []string{"notes.txt", ".hidden", "dangling"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("listing shows %q", bad)
+		}
+	}
+	if strings.Index(out, "sub/") > strings.Index(out, "Documents") {
+		t.Error("folders come first")
+	}
+	if r := run(t, nil, "-c", "never", filepath.Join(dir, "empty")); r.code != 0 || !strings.Contains(r.out, "No Markdown documents") {
+		t.Errorf("empty folder: %+v", r)
+	}
+	// the viewer follows the listing's links
+	var got view.Options
+	viewer := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 80, 3
+		e.View = func(o view.Options) error { got = o; return nil }
+	}
+	run(t, viewer, filepath.Join(dir, "plain"))
+	p, err := got.Load(got.Start, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hrefs []string
+	for _, l := range p.Links {
+		hrefs = append(hrefs, l.Href)
+	}
+	want := "file://" + filepath.ToSlash(filepath.Join(dir, "plain", "a b.md"))
+	if !strings.Contains(strings.Join(hrefs, " "), strings.ReplaceAll(want, " ", "%20")) {
+		t.Errorf("links %v lack %s", hrefs, want)
+	}
+}
+
+func TestDirectoryListingBound(t *testing.T) {
+	dir := t.TempDir()
+	for i := range maxDirEntries + 5 {
+		if err := os.WriteFile(filepath.Join(dir, "f"+strconv.Itoa(i)+".md"), nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := run(t, nil, "-c", "never", "-P", dir)
+	if !strings.Contains(r.out, "Only the first 2000 entries") || strings.Count(r.out, "(./f") != maxDirEntries {
+		t.Errorf("bound: %d entries", strings.Count(r.out, "(./f"))
 	}
 }

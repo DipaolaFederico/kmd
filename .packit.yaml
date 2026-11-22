@@ -19,7 +19,7 @@ copy_upstream_release_description: false
 jobs:
   - job: copr_build
     trigger: release
-    owner: dipaolafederico
+    owner: fdipa
     project: kmd
     targets:
       - fedora-all

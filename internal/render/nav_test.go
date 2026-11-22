@@ -22,7 +22,7 @@ func TestHasScheme(t *testing.T) {
 
 func TestHref(t *testing.T) {
 	dir := t.TempDir()
-	r := &renderer{opt: Options{BaseDir: dir}}
+	r := &renderer{Budget: &Budget{}, opt: Options{BaseDir: dir}}
 	for dest, want := range map[string]string{
 		"":                  "",
 		"#sec":              "#sec",
@@ -235,5 +235,21 @@ func TestCodeBlockPositions(t *testing.T) {
 	// without navigation nothing is recorded
 	if res := Render(md.Parse(src, md.GFM), Options{Width: 60}); res.Code != nil {
 		t.Error("code blocks recorded without Navigate")
+	}
+}
+
+func TestSharedBudget(t *testing.T) {
+	src := strings.Repeat("```mermaid\ngraph LR\n  A --> B\n```\n\n", 60)
+	diagrams := func(res Result) int { return strings.Count(res.Text, "┌") }
+	b := &Budget{}
+	o := Options{Width: 60, Diagrams: true, Budget: b}
+	first := Render(md.Parse(src, md.GFM), o)
+	second := Render(md.Parse(src, md.GFM), o)
+	if d1, d2 := diagrams(first), diagrams(second); d1 == 0 || d2 >= d1 {
+		t.Errorf("a shared budget must carry over: %d then %d boxes", d1, d2)
+	}
+	o.Budget = nil
+	if d := diagrams(Render(md.Parse(src, md.GFM), o)); d != diagrams(first) {
+		t.Errorf("without a shared budget each document has its own: %d", d)
 	}
 }

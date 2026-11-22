@@ -96,6 +96,9 @@ func (m *model) status(b *strings.Builder) {
 	case m.visible(m.sel):
 		left = "→ " + m.target(m.page.Links[m.sel].Href)
 		right = "Enter open · Esc clear"
+	case m.slides != nil:
+		left = m.slideStatus()
+		right = "← → slides · q quit"
 	default:
 		left = m.breadcrumb()
 		if len(m.matches) > 0 && m.cur >= 0 {
@@ -208,6 +211,9 @@ var helpText = []string{
 	"e                edit the file ($VISUAL / $EDITOR)",
 	"r                reload",
 	"q                quit",
+	"",
+	"Presentation (--slides): → Space PgDn next,",
+	"← PgUp previous, g G first / last slide.",
 	"",
 	"Markdown links open here; web links and",
 	"images open in the desktop's default app.",

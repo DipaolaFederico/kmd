@@ -280,3 +280,70 @@ func Section(doc *Node, match func(heading *Node) bool) *Node {
 	}
 	return out
 }
+
+// Slides splits doc into slides, moving its blocks into one new document
+// per slide: at every top-level thematic break (---), or, when there is
+// none, before every level 1 or 2 heading. At most limit slides are made:
+// the rest of the document goes on the last one. Front matter
+// is dropped and footnote definitions go to the first slide that
+// references them. A document without content gives one empty slide.
+func Slides(doc *Node, limit int) []*Node {
+	byBreaks := false
+	for c := doc.FirstChild; c != nil; c = c.Next {
+		if c.Type == ThematicBreak {
+			byBreaks = true
+			break
+		}
+	}
+	var slides []*Node
+	cur := &Node{Type: Document}
+	defs := map[string]*Node{}
+	flush := func() {
+		if cur.FirstChild != nil && len(slides) < limit-1 {
+			slides = append(slides, cur)
+			cur = &Node{Type: Document}
+		}
+	}
+	for c := doc.FirstChild; c != nil; {
+		next := c.Next
+		switch {
+		case c.Type == FrontMatter:
+		case c.Type == FootnoteDef:
+			if _, dup := defs[c.Label]; !dup {
+				defs[c.Label] = c
+			}
+		case byBreaks && c.Type == ThematicBreak:
+			flush()
+		case !byBreaks && c.Type == Heading && c.Level <= 2:
+			flush()
+			cur.AppendChild(c)
+		default:
+			cur.AppendChild(c)
+		}
+		c = next
+	}
+	if cur.FirstChild != nil {
+		slides = append(slides, cur)
+	}
+	if len(slides) == 0 {
+		return []*Node{{Type: Document}}
+	}
+	if len(defs) > 0 { // linear: each reference looks its definition up once
+		for _, s := range slides {
+			var used []*Node
+			Walk(s, func(n *Node, entering bool) bool {
+				if entering && n.Type == FootnoteRef {
+					if d := defs[n.Label]; d != nil {
+						used = append(used, d)
+						delete(defs, n.Label)
+					}
+				}
+				return true
+			})
+			for _, d := range used {
+				s.AppendChild(d)
+			}
+		}
+	}
+	return slides
+}

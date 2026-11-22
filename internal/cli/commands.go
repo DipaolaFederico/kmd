@@ -105,7 +105,7 @@ _kmd() {
         -w|--width|-s|--section) return ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark -P --no-pager --view --toc -s --section --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark -P --no-pager --view --slides --toc -s --section --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
         return
     fi
     COMPREPLY=($(compgen -f -X '!*.@(md|markdown|mdown|mkd|txt|MD)' -- "$cur") $(compgen -d -- "$cur"))
@@ -128,6 +128,7 @@ _arguments -s \
   '(-P --no-pager)'{-P,--no-pager}'[never page output]' \
   '--view[open the viewer even for short documents]' \
   '--toc[print table of contents]' \
+  '--slides[present as slides]' \
   '(-s --section)'{-s,--section}'[only the section under a heading]:heading:' \
   '--html[export HTML]' \
   '--unsafe-html[keep raw HTML in --html]' \
@@ -154,6 +155,7 @@ complete -c kmd -l commonmark -d 'Strict CommonMark'
 complete -c kmd -s P -l no-pager -d 'Never page output'
 complete -c kmd -l view -d 'Open the viewer even for short documents'
 complete -c kmd -l toc -d 'Print table of contents'
+complete -c kmd -l slides -d 'Present as slides'
 complete -c kmd -s s -l section -x -d 'Only the section under a heading'
 complete -c kmd -l html -d 'Export HTML'
 complete -c kmd -l unsafe-html -d 'Keep raw HTML in --html'

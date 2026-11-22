@@ -79,6 +79,8 @@ func showConfig(env Env, cfg config, s settings) int {
 		"math":       onOff[s.opts.Math],
 		"diagrams":   onOff[s.opts.Diagrams],
 		"pager":      firstNonEmpty(s.pager, "(disabled)"),
+		"mouse":      onOff[s.mouse],
+		"view":       map[bool]string{true: "always", false: "auto"}[s.alwaysView],
 	}
 	path := firstNonEmpty(cfg.path, "(no HOME)")
 	fmt.Fprintf(env.Stdout, "Config file:  %s\nTheme dirs:   %s\n\nEffective settings:\n%s\nTemplate (copy to the config file and uncomment):\n\n%s",
@@ -103,7 +105,7 @@ _kmd() {
         -w|--width) return ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark -P --no-pager --toc --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark -P --no-pager --view --toc --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
         return
     fi
     COMPREPLY=($(compgen -f -X '!*.@(md|markdown|mdown|mkd|txt|MD)' -- "$cur") $(compgen -d -- "$cur"))
@@ -124,6 +126,7 @@ _arguments -s \
   '--no-diagrams[show diagram source]' \
   '--commonmark[strict CommonMark]' \
   '(-P --no-pager)'{-P,--no-pager}'[never page output]' \
+  '--view[open the viewer even for short documents]' \
   '--toc[print table of contents]' \
   '--html[export HTML]' \
   '--unsafe-html[keep raw HTML in --html]' \
@@ -148,6 +151,7 @@ complete -c kmd -l no-math -d 'Show LaTeX source'
 complete -c kmd -l no-diagrams -d 'Show diagram source'
 complete -c kmd -l commonmark -d 'Strict CommonMark'
 complete -c kmd -s P -l no-pager -d 'Never page output'
+complete -c kmd -l view -d 'Open the viewer even for short documents'
 complete -c kmd -l toc -d 'Print table of contents'
 complete -c kmd -l html -d 'Export HTML'
 complete -c kmd -l unsafe-html -d 'Keep raw HTML in --html'

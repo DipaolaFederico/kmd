@@ -1,0 +1,228 @@
+package view
+
+import (
+	"net/url"
+	"path/filepath"
+	"strconv"
+	"strings"
+
+	"github.com/DipaolaFederico/kmd/internal/styled"
+)
+
+const reset = "\x1b[0m"
+
+func moveTo(b *strings.Builder, row, col int) {
+	b.WriteString("\x1b[" + strconv.Itoa(row+1) + ";" + strconv.Itoa(col+1) + "H")
+}
+
+// draw paints the whole screen. Synchronized output (mode 2026) keeps
+// terminals that support it from showing half-drawn frames.
+func (m *model) draw(b *strings.Builder) {
+	b.WriteString("\x1b[?2026h")
+	h := m.viewH()
+	for y := range h {
+		moveTo(b, y, 0)
+		if i := m.top + y; i < len(m.page.Lines) {
+			b.WriteString(m.page.Lines[i])
+		}
+		b.WriteString(reset + "\x1b[K")
+	}
+	for i, mt := range m.matches {
+		if mt.line >= m.top && mt.line < m.top+h {
+			st := m.opt.Match
+			if i == m.cur {
+				st = m.opt.Select
+			}
+			m.overlay(b, mt.line-m.top, mt.col, mt.width, st)
+		}
+	}
+	if m.visible(m.sel) {
+		for _, s := range m.page.Links[m.sel].Spans {
+			if s.Line >= m.top && s.Line < m.top+h {
+				moveTo(b, s.Line-m.top, s.Col)
+				b.WriteString(m.opt.Select + s.Text + reset)
+			}
+		}
+	}
+	m.status(b)
+	if m.help {
+		m.drawHelp(b)
+	}
+	b.WriteString("\x1b[?2026l")
+}
+
+// overlay repaints columns [col, col+w) of a screen row with style st.
+func (m *model) overlay(b *strings.Builder, row, col, w int, st string) {
+	plain := m.plainLine(m.top + row)
+	start, end, c := -1, len(plain), 0
+	for i, r := range plain {
+		if c >= col+w {
+			end = i
+			break
+		}
+		if c >= col && start < 0 {
+			start = i
+		}
+		c += styled.RuneWidth(r)
+	}
+	if start < 0 {
+		return
+	}
+	moveTo(b, row, col)
+	b.WriteString(st + plain[start:end] + reset)
+}
+
+func (m *model) plainLine(i int) string {
+	if m.plain != nil {
+		return m.plain[i]
+	}
+	return stripEscapes(m.page.Lines[i])
+}
+
+// status draws the bottom line: prompt, message, link target or position.
+func (m *model) status(b *strings.Builder) {
+	moveTo(b, m.rows-1, 0)
+	left, right := "", ""
+	switch {
+	case m.prompt:
+		left = "/" + string(m.input)
+	case m.msg != "":
+		left = m.msg
+	case m.visible(m.sel):
+		left = "→ " + m.target(m.page.Links[m.sel].Href)
+		right = "Enter open · Esc clear"
+	default:
+		left = m.breadcrumb()
+		if len(m.matches) > 0 && m.cur >= 0 {
+			right = strconv.Itoa(m.cur+1) + "/" + strconv.Itoa(len(m.matches)) + " · n/N · "
+		}
+		if len(m.hist) > 0 {
+			right += "⌫ back · "
+		}
+		right += "Tab links · ? help"
+	}
+	if right != "" {
+		right += "  " + m.percent()
+	}
+	right = " " + right + " "
+	left = " " + clip(left, max(m.cols-styled.Width(right)-2, 4))
+	pad := max(m.cols-styled.Width(left)-styled.Width(right), 0)
+	b.WriteString(m.opt.Bar + left + strings.Repeat(" ", pad) + right + reset)
+	if m.prompt {
+		moveTo(b, m.rows-1, styled.Width(left))
+		b.WriteString("\x1b[?25h")
+	} else {
+		b.WriteString("\x1b[?25l")
+	}
+}
+
+func (m *model) percent() string {
+	n := len(m.page.Lines)
+	if n <= m.viewH() {
+		return "all"
+	}
+	switch m.top {
+	case 0:
+		return "top"
+	case m.maxTop():
+		return "end"
+	}
+	return strconv.Itoa((m.top+m.viewH())*100/n) + "%"
+}
+
+// target describes a link destination for the status bar.
+func (m *model) target(href string) string {
+	if strings.HasPrefix(href, "#") {
+		return href
+	}
+	if u, err := url.Parse(href); err == nil && u.Scheme == "file" {
+		s := m.rel(u.Path)
+		if u.Fragment != "" {
+			s += "#" + u.Fragment
+		}
+		return s
+	}
+	return href
+}
+
+// breadcrumb shows the documents visited to get here.
+func (m *model) breadcrumb() string {
+	var parts []string
+	for _, e := range m.hist {
+		if len(parts) == 0 || parts[len(parts)-1] != pageName(e.path) {
+			parts = append(parts, pageName(e.path))
+		}
+	}
+	if n := pageName(m.path); len(parts) == 0 || parts[len(parts)-1] != n {
+		parts = append(parts, n)
+	}
+	s := strings.Join(parts, " › ")
+	if w := m.cols / 2; styled.Width(s) > w {
+		for len(parts) > 1 && styled.Width("… › "+strings.Join(parts, " › ")) > w {
+			parts = parts[1:]
+		}
+		s = "… › " + strings.Join(parts, " › ")
+	}
+	return s
+}
+
+// pageName is a short label for a page: "etapa-5/README.md" for READMEs
+// (which are all called the same), the file name otherwise.
+func pageName(p string) string {
+	if p == "" {
+		return "kmd"
+	}
+	base := filepath.Base(p)
+	if strings.EqualFold(strings.TrimSuffix(base, filepath.Ext(base)), "readme") || strings.EqualFold(base, "index.md") {
+		if a, err := filepath.Abs(p); err == nil {
+			return filepath.Base(filepath.Dir(a)) + "/" + base
+		}
+	}
+	return base
+}
+
+var helpText = []string{
+	"kmd — keys",
+	"",
+	"j k ↓ ↑          scroll a line",
+	"Space b          scroll a page (also PgDn PgUp)",
+	"d u              scroll half a page",
+	"g G              top / bottom (also Home End)",
+	"",
+	"Tab Shift-Tab    select next / previous link",
+	"Enter l →        open the selected link",
+	"click            open a link (web: click twice)",
+	"Backspace h ←    back",
+	"H                back to the first document",
+	"",
+	"/ n N            search, next / previous match",
+	"Esc              clear selection and search",
+	"e                edit the file ($VISUAL / $EDITOR)",
+	"r                reload",
+	"q                quit",
+	"",
+	"Markdown links open here; web links and",
+	"images open in the desktop's default app.",
+}
+
+func (m *model) drawHelp(b *strings.Builder) {
+	w := 0
+	for _, l := range helpText {
+		w = max(w, styled.Width(l))
+	}
+	w += 4
+	top := max((m.viewH()-len(helpText)-2)/2, 0)
+	left := max((m.cols-w)/2, 0)
+	line := func(row int, s string) {
+		if row >= m.viewH() {
+			return
+		}
+		moveTo(b, row, left)
+		b.WriteString(m.opt.Bar + s + reset)
+	}
+	line(top, "╭"+strings.Repeat("─", w-2)+"╮")
+	for i, l := range helpText {
+		line(top+1+i, "│ "+l+strings.Repeat(" ", w-4-styled.Width(l))+" │")
+	}
+	line(top+1+len(helpText), "╰"+strings.Repeat("─", w-2)+"╯")
+}

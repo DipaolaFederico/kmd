@@ -26,6 +26,7 @@ const (
 type Style struct {
 	Fg, Bg Color
 	Attr   uint8
+	Link   int32 // 1-based index of the document link (0: none), for navigation; fits in Attr's padding
 	URL    string
 }
 
@@ -35,6 +36,7 @@ func (s Style) sgrEqual(o Style) bool { return s.Fg == o.Fg && s.Bg == o.Bg && s
 type painter struct {
 	color, truecolor, links bool
 	cache                   map[Style]string // SGR sequence per style (URL excluded)
+	nav                     *nav             // records link positions (nil: off)
 }
 
 func (p *painter) colorCode(b *strings.Builder, c Color, base int) {
@@ -73,7 +75,7 @@ func to256(r, g, b uint32) int {
 }
 
 func (p *painter) sgr(out *strings.Builder, s Style) {
-	s.URL = ""
+	s.URL, s.Link = "", 0
 	if seq, ok := p.cache[s]; ok {
 		out.WriteString(seq)
 		return
@@ -100,8 +102,11 @@ func (p *painter) sgr(out *strings.Builder, s Style) {
 }
 
 // safeURL drops URLs that could terminate an OSC 8 sequence early.
+// maxURL is the longest link target kmd emits or resolves.
+const maxURL = 2048
+
 func safeURL(u string) string {
-	if len(u) > 2048 {
+	if len(u) > maxURL {
 		return ""
 	}
 	if !utf8.ValidString(u) || hasInvisible(u) {
@@ -162,12 +167,22 @@ func clean(s string) string {
 // Clean is clean for other packages (e.g. file names in error messages).
 func Clean(s string) string { return clean(s) }
 
-func (p *painter) line(b *strings.Builder, l rline) {
+// line paints one line; col is the display column it starts at (for nav).
+func (p *painter) line(b *strings.Builder, l rline, col int) {
 	var cur Style
 	reset := false // terminal state unknown after raw output
 	url := ""
-	for _, r := range l {
+	lastLink := -1 // widths are only needed up to the line's last link
+	if p.nav != nil {
+		for i, r := range l {
+			if r.st.Link != 0 && !r.raw {
+				lastLink = i
+			}
+		}
+	}
+	for i, r := range l {
 		if r.raw {
+			col += r.w
 			if url != "" {
 				b.WriteString("\x1b]8;;\x1b\\")
 				url = ""
@@ -192,7 +207,18 @@ func (p *painter) line(b *strings.Builder, l rline) {
 			}
 			url = u
 		}
-		b.WriteString(clean(r.text))
+		text := clean(r.text)
+		if i <= lastLink {
+			w := strWidth(text)
+			if r.st.Link != 0 {
+				p.nav.span(r.st.Link, col, w, text)
+			}
+			col += w
+		}
+		b.WriteString(text)
+	}
+	if p.nav != nil {
+		p.nav.row++
 	}
 	if url != "" {
 		b.WriteString("\x1b]8;;\x1b\\")

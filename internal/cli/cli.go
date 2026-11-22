@@ -17,6 +17,7 @@ import (
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/termimg"
+	"github.com/DipaolaFederico/kmd/internal/view"
 )
 
 // Version is overridden at build time via -ldflags.
@@ -44,6 +45,8 @@ type Env struct {
 	CellW, CellH   int // terminal cell size in pixels (0 = unknown)
 	// Pager displays content through a pager; nil uses the system pager.
 	Pager func(content, command string) error
+	// View runs the built-in interactive viewer; nil uses the terminal.
+	View func(view.Options) error
 	// Interrupt stops --follow when closed (nil: runs until killed).
 	Interrupt <-chan struct{}
 	// Poll is the --follow polling interval (0 = 250ms).
@@ -64,6 +67,7 @@ type options struct {
 	html         bool
 	unsafeHTML   bool
 	follow       bool
+	view         bool
 	listThemes   bool
 	template     string
 	showConfig   bool
@@ -88,7 +92,8 @@ Display:
       --no-math            show LaTeX source instead of rendered formulas
       --no-diagrams        show mermaid/graphviz source instead of diagrams
       --commonmark         strict CommonMark: disable GitHub extensions
-  -P, --no-pager           never page long output
+  -P, --no-pager           never page long output (no viewer)
+      --view               open the viewer even when the document fits
 
 Output modes:
       --toc                print only the table of contents
@@ -111,8 +116,14 @@ Files:
   ~/.config/kmd/config            settings (kmd --config shows a template)
   ~/.config/kmd/themes/*.theme    custom themes
 
+Viewer (long documents):
+  Tab/Shift-Tab select a link (or click it) · Enter open it · Backspace back
+  H back to the first document
+  / search · e edit · ? all keys · q quit
+
 Environment:
-  KMD_THEME, KMD_PAGER, KMD_CONFIG, NO_COLOR, COLORFGBG, XDG_CONFIG_HOME
+  KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG, NO_COLOR,
+  COLORFGBG, XDG_CONFIG_HOME
 `
 
 func parseArgs(args []string, stderr io.Writer) (options, error) {
@@ -146,6 +157,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	boolean(&o.html, "html")
 	boolean(&o.unsafeHTML, "unsafe-html")
 	boolean(&o.follow, "f", "follow")
+	boolean(&o.view, "view")
 	boolean(&o.listThemes, "list-themes")
 	boolean(&o.showConfig, "config")
 	boolean(&o.version, "v", "version")
@@ -190,11 +202,18 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 
 // settings is the resolved configuration for one run.
 type settings struct {
-	opts    render.Options
-	pager   string
-	mdOpt   md.Options
-	themeNm string
+	opts       render.Options
+	pager      string // "builtin" = the interactive viewer
+	mdOpt      md.Options
+	themeNm    string
+	fixedWidth int  // --width / width (0 = follow the terminal)
+	maxWidth   int  // cap for the automatic width
+	mouse      bool // the viewer reports clicks and the wheel
+	alwaysView bool // --view / view = always: viewer even for short documents
 }
+
+// builtinPager names the interactive viewer in KMD_PAGER / pager.
+const builtinPager = "builtin"
 
 func firstNonEmpty(v ...string) string {
 	for _, s := range v {
@@ -228,21 +247,15 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	links := firstNonEmpty(o.hyperlinks, cfg.Hyperlinks, "auto")
 	s.opts.Hyperlinks = links == "always" || (links == "auto" && s.opts.Color && env.StdoutTTY)
 
-	width := o.width
-	if width == 0 {
-		width = min(cfg.Width, maxWidth)
+	s.fixedWidth = o.width
+	if s.fixedWidth == 0 {
+		s.fixedWidth = min(cfg.Width, maxWidth)
 	}
-	if width == 0 {
-		maxW := defaultMaxWidth
-		if cfg.MaxWidth > 0 {
-			maxW = cfg.MaxWidth
-		}
-		width = 80
-		if env.Cols > 0 {
-			width = min(env.Cols, maxW)
-		}
+	s.maxWidth = defaultMaxWidth
+	if cfg.MaxWidth > 0 {
+		s.maxWidth = cfg.MaxWidth
 	}
-	s.opts.Width = width
+	s.opts.Width = s.width(env.Cols)
 
 	name := firstNonEmpty(o.theme, get("KMD_THEME"), cfg.Theme, "auto")
 	if name == "auto" {
@@ -282,11 +295,27 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	if !s.opts.Math {
 		s.mdOpt.Math = false
 	}
-	s.pager = firstNonEmpty(get("KMD_PAGER"), cfg.Pager, "less -R")
+	s.pager = firstNonEmpty(get("KMD_PAGER"), cfg.Pager, builtinPager)
+	if s.pager == builtinPager && !view.Supported {
+		s.pager = "less -R"
+	}
 	if o.noPager || s.pager == "-" {
 		s.pager = ""
 	}
+	s.mouse = cfg.Mouse == nil || *cfg.Mouse
+	s.alwaysView = o.view || cfg.View == "always" && !o.noPager
 	return s, nil
+}
+
+// width is the render width for a terminal cols wide (0 = unknown).
+func (s settings) width(cols int) int {
+	switch {
+	case s.fixedWidth > 0:
+		return s.fixedWidth
+	case cols > 0:
+		return min(cols, s.maxWidth)
+	}
+	return 80
 }
 
 func readSource(name string, stdin io.Reader) (string, error) {
@@ -367,13 +396,46 @@ func Run(env Env) int {
 		}
 		o.files = []string{"-"}
 	}
+	viewable := !o.html && !o.toc && env.StdoutTTY && (s.pager == builtinPager || s.alwaysView)
 	if o.follow {
+		// live preview in the viewer: links stay navigable, position is kept
+		if viewable && o.files[0] != "-" && runViewer(env, o, s, &stdinCache{}, true, nil, 0) == nil {
+			return 0
+		}
 		return follow(env, o, s)
 	}
 
-	content, graphics, code := renderFiles(env, o, s)
-	if !o.html && !o.toc && !graphics && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
-		strings.Count(content, "\n") > env.Rows {
+	in := &stdinCache{}
+	var res output
+	vs := viewerSettings(s, env.Cols)
+	if viewable {
+		// render once, the way the viewer shows it: a long document goes
+		// to the viewer without being rendered again
+		res = renderFiles(env, o, vs, in)
+	} else {
+		res = renderFiles(env, o, s, in)
+	}
+	long := !o.html && !o.toc && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
+		strings.Count(res.text, "\n") > env.Rows
+	if viewable && (s.alwaysView || long && s.pager == builtinPager) {
+		if err := runViewer(env, o, s, in, false, pageOf(res), env.Cols); err == nil {
+			return res.code
+		}
+		if s.pager == builtinPager {
+			s.pager = "less -R" // no usable terminal: fall back to less
+		}
+	}
+	if viewable && (vs.opts.Images != s.opts.Images || vs.opts.Width != s.opts.Width) {
+		// printed (or paged) after all: render with terminal graphics and the
+		// normal width; errors were already reported by the first pass
+		quiet := env
+		quiet.Stderr = io.Discard
+		code := res.code
+		res = renderFiles(quiet, o, s, in)
+		res.code = code
+	}
+	content, code := res.text, res.code
+	if long && !res.graphics {
 		pager := env.Pager
 		if pager == nil {
 			pager = systemPager(env.Stdout, env.Stderr)
@@ -388,26 +450,45 @@ func Run(env Env) int {
 	return code
 }
 
-func renderFiles(env Env, o options, s settings) (string, bool, int) {
+// stdinCache keeps stdin, which can only be read once ("kmd - -", and the
+// viewer re-rendering on resize or when going back).
+type stdinCache struct {
+	src  string
+	read bool
+}
+
+// output is the result of rendering the documents of a run.
+type output struct {
+	text     string
+	graphics bool
+	code     int
+	links    []render.Link  // with s.opts.Navigate
+	anchors  map[string]int // with s.opts.Navigate
+}
+
+func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	var out strings.Builder
-	code, graphics := 0, false
+	res := output{}
+	if s.opts.Navigate {
+		res.anchors = map[string]int{}
+	}
 	var htmlParts []string
 	title := ""
-	stdin, stdinRead := "", false
+	lines := 0 // lines written so far (offset of the next document's links)
 	for _, name := range o.files {
 		var src string
 		var err error
-		if name == "-" && stdinRead {
-			src = stdin // "kmd - -": stdin can only be read once
+		if name == "-" && in.read {
+			src = in.src
 		} else {
 			src, err = readSource(name, env.Stdin)
 			if name == "-" {
-				stdin, stdinRead = src, true
+				in.src, in.read = src, true
 			}
 		}
 		if err != nil {
 			fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
-			code = 1
+			res.code = 1
 			continue
 		}
 		doc := md.Parse(src, s.mdOpt)
@@ -425,17 +506,40 @@ func renderFiles(env Env, o options, s settings) (string, bool, int) {
 			out.WriteString(render.TOC(doc, opts))
 		default:
 			if len(o.files) > 1 {
-				out.WriteString(render.RenderString("# "+fileTitle(name), opts))
+				t := render.RenderString("# "+fileTitle(name), opts)
+				out.WriteString(t)
+				lines += strings.Count(t, "\n")
 			}
-			res := render.Render(doc, opts)
-			graphics = graphics || res.Graphics
-			out.WriteString(res.Text)
+			r := render.Render(doc, opts)
+			res.graphics = res.graphics || r.Graphics
+			if s.opts.Navigate {
+				res.addNav(r, lines)
+				lines += strings.Count(r.Text, "\n")
+			}
+			out.WriteString(r.Text)
 		}
 	}
 	if o.html {
-		return htmlPage(title, strings.Join(htmlParts, "<hr />\n"), s.opts.Theme), false, code
+		res.text = htmlPage(title, strings.Join(htmlParts, "<hr />\n"), s.opts.Theme)
+		return res
 	}
-	return out.String(), graphics, code
+	res.text = out.String()
+	return res
+}
+
+// addNav appends a document's links and anchors, shifted to line offset.
+func (res *output) addNav(r render.Result, offset int) {
+	for _, l := range r.Links {
+		for i := range l.Spans {
+			l.Spans[i].Line += offset
+		}
+		res.links = append(res.links, l)
+	}
+	for k, v := range r.Anchors {
+		if _, dup := res.anchors[k]; !dup {
+			res.anchors[k] = v + offset
+		}
+	}
 }
 
 func docTitle(doc *md.Node, name string) string {
@@ -504,7 +608,7 @@ func follow(env Env, o options, s settings) int {
 		// a failed stat is usually an editor replacing the file: keep polling
 		if st, err := os.Stat(name); err == nil && (!st.ModTime().Equal(lastMod) || st.Size() != lastSize) {
 			lastMod, lastSize = st.ModTime(), st.Size()
-			content, _, _ := renderFiles(env, o, s)
+			content := renderFiles(env, o, s, &stdinCache{}).text
 			if env.StdoutTTY {
 				content = "\x1b[H\x1b[2J\x1b[3J" + content
 			}
@@ -518,4 +622,62 @@ func follow(env Env, o options, s settings) int {
 		case <-time.After(poll):
 		}
 	}
+}
+
+// runViewer shows the documents in the interactive viewer. Pages are
+// rendered for the viewer's terminal size, with graphics images drawn as
+// Unicode blocks (terminal graphics cannot scroll with the text).
+// viewerSettings are the render settings of the viewer on a terminal cols
+// wide: navigation data on, terminal graphics drawn as Unicode blocks, and
+// never wider than the terminal.
+func viewerSettings(s settings, cols int) settings {
+	s.opts.Navigate = true
+	switch s.opts.Images {
+	case termimg.Kitty, termimg.ITerm2, termimg.Sixel:
+		s.opts.Images = termimg.Blocks
+	}
+	if cols > 0 {
+		s.opts.Width = min(s.width(cols), max(cols, 20))
+	}
+	return s
+}
+
+// pageOf turns a render into a viewer page.
+func pageOf(res output) *view.Page {
+	return &view.Page{
+		Lines:   strings.Split(strings.TrimSuffix(res.text, "\n"), "\n"),
+		Links:   res.links,
+		Anchors: res.anchors,
+	}
+}
+
+// runViewer opens the viewer; first (rendered for a terminal firstCols
+// wide) is its first page, or nil to render it.
+func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first *view.Page, firstCols int) error {
+	load := func(path string, cols int) (*view.Page, error) {
+		s := viewerSettings(s, max(cols, 1))
+		files := o.files
+		if path != "" {
+			files = []string{path}
+		}
+		var errs strings.Builder
+		quiet := env
+		quiet.Stderr = &errs // errors go to the status bar, not the screen
+		res := renderFiles(quiet, options{files: files}, s, in)
+		if res.code != 0 && len(files) == 1 {
+			return nil, errors.New(strings.TrimPrefix(strings.TrimSpace(errs.String()), "kmd: "))
+		}
+		return pageOf(res), nil
+	}
+	start := ""
+	if len(o.files) == 1 && o.files[0] != "-" {
+		start = o.files[0]
+	}
+	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
+	opt := view.Options{Load: load, Start: start, Mouse: s.mouse, Watch: watch, Poll: env.Poll,
+		Select: sel, Match: match, Bar: bar, First: first, FirstCols: firstCols}
+	if env.View != nil {
+		return env.View(opt)
+	}
+	return view.Run(opt)
 }

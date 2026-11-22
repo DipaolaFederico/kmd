@@ -128,7 +128,7 @@ func TestSanitizeOutput(t *testing.T) {
 	}
 	var b strings.Builder
 	p := &painter{color: true, links: true}
-	p.line(&b, rline{{text: "a", st: Style{URL: "u", Attr: Bold}}, {text: "IMG", raw: true, w: 3}, {text: "b", st: Style{Attr: Bold}}})
+	p.line(&b, rline{{text: "a", st: Style{URL: "u", Attr: Bold}}, {text: "IMG", raw: true, w: 3}, {text: "b", st: Style{Attr: Bold}}}, 0)
 	if got := b.String(); strings.Count(got, "\x1b[0;1m") != 2 || !strings.Contains(got, "IMG") {
 		t.Errorf("raw run handling: %q", got)
 	}

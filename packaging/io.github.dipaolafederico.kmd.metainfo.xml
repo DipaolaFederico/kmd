@@ -14,6 +14,7 @@
     </p>
     <ul>
       <li>Full CommonMark 0.31.2 and GitHub Flavored Markdown support</li>
+      <li>Emoji shortcodes and wiki links between documents</li>
       <li>Syntax highlighting for more than 20 languages</li>
       <li>Clickable hyperlinks and inline images</li>
       <li>Mermaid (flowchart, state, sequence, class, ER, Gantt, pie) and Graphviz diagrams drawn with Unicode box characters</li>

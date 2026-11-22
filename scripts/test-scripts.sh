@@ -50,6 +50,18 @@ eq '.TH KMD 1 "2030-01-02" "kmd 9.8.7" "User Commands"' "$(head -1 "$tmp/docs/km
 eq 1 "$(grep -c '<release version="9.8.7" date="2030-01-02"/>' "$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml")" "metainfo"
 if "$tmp/scripts/stamp-version.sh" 1.2 2030-01-02 >/dev/null 2>&1; then eq rejected accepted "stamp bad version"; fi
 
+# gen-emoji.py: the committed emoji table matches its Unicode-name source
+if command -v python3 >/dev/null && command -v gofmt >/dev/null; then
+  # a Python whose Unicode database is too old exits 3: skip the check
+  if python3 -I scripts/gen-emoji.py >"$tmp/emoji_raw.go"; then
+    gofmt <"$tmp/emoji_raw.go" >"$tmp/emoji_table.go"
+    cmp -s "$tmp/emoji_table.go" internal/md/emoji_table.go ||
+      eq current stale "internal/md/emoji_table.go (run: python3 -I scripts/gen-emoji.py | gofmt > internal/md/emoji_table.go)"
+  elif [ $? -ne 3 ]; then
+    eq ok failed "scripts/gen-emoji.py"
+  fi
+fi
+
 if [ "$fails" -gt 0 ]; then
   echo "$fails script test(s) failed"
   exit 1

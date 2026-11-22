@@ -13,8 +13,10 @@ kmd \- beautiful Markdown previews in the terminal
 .B kmd
 renders Markdown documents as rich, colorful previews in the terminal.
 It implements CommonMark 0.31.2 and GitHub Flavored Markdown (tables, task
-lists, strikethrough, extended autolinks), footnotes and GitHub alerts, and
-adds syntax highlighting, clickable OSC 8 hyperlinks, inline images,
+lists, strikethrough, extended autolinks), footnotes, GitHub alerts, emoji
+shortcodes such as \fB:rocket:\fR and wiki links (\fB[[Page]]\fR,
+\fB[[Page#Heading|label]]\fR, links to \fIPage\fB.md\fR next to the document),
+and adds syntax highlighting, clickable OSC 8 hyperlinks, inline images,
 Mermaid diagrams (flowchart, state, sequence, class, entity\-relationship,
 Gantt and pie), Graphviz diagrams and LaTeX math rendered with Unicode.
 .PP
@@ -53,7 +55,8 @@ Show LaTeX source instead of rendered formulas.
 Show Mermaid and Graphviz source instead of diagrams.
 .TP
 .B \-\-commonmark
-Strict CommonMark: disable all GitHub extensions.
+Strict CommonMark: disable all GitHub extensions, emoji shortcodes and wiki
+links.
 .TP
 .BR \-P ", " \-\-no\-pager
 Never page long output (no viewer).

@@ -309,6 +309,25 @@ func TestFollowAndBack(t *testing.T) {
 	}
 }
 
+// Wiki links are followed like relative links, headings by their text.
+func TestFollowWikiLink(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"README.md":   "# Index\n\nSee [[My Notes#Deep Dive|the notes]].\n",
+		"My Notes.md": "# Notes\n\n" + strings.Repeat("x\n\n", 40) + "## Deep Dive\n\ndeep text\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := newHarness(t, dir)
+	h.selectLink(t, "/My%20Notes.md#Deep%20Dive")
+	h.keys("enter")
+	if l := h.page.Anchors["deep-dive"]; h.path != filepath.Join(dir, "My Notes.md") || l == 0 || l < h.top || l >= h.top+h.viewH() {
+		t.Errorf("wiki link: path=%q top=%d msg=%q", h.path, h.top, h.msg)
+	}
+}
+
 func TestFollowTargets(t *testing.T) {
 	dir := fixture(t)
 	h := newHarness(t, dir)

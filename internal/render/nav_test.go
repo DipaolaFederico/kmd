@@ -109,6 +109,32 @@ func TestNavigateLinksAndAnchors(t *testing.T) {
 	}
 }
 
+// Wiki links and emoji shortcodes reach the terminal like ordinary relative
+// links and text: resolved OSC 8 targets, navigable links, emoji widths.
+func TestWikiLinksAndEmoji(t *testing.T) {
+	dir := t.TempDir()
+	src := "Go to [[My Notes#Deep Dive|notes]] :rocket: [[sub/Other]] `[[x]]`\n"
+	res := Render(md.Parse(src, md.GFM), Options{Width: 80, Color: true, Hyperlinks: true, Navigate: true, BaseDir: dir})
+	base := "file://" + filepath.ToSlash(dir)
+	if len(res.Links) != 2 || res.Links[0].Href != base+"/My%20Notes.md#Deep%20Dive" || res.Links[1].Href != base+"/sub/Other.md" {
+		t.Fatalf("links: %+v", res.Links)
+	}
+	if !strings.Contains(res.Text, "\x1b]8;;"+base+"/My%20Notes.md#Deep%20Dive\x1b\\") {
+		t.Errorf("OSC 8 target: %q", res.Text)
+	}
+	plain := stripSGR(res.Text)
+	if !strings.Contains(plain, "Go to notes 🚀 sub/Other \u00a0[[x]]\u00a0") {
+		t.Errorf("text: %q", plain)
+	}
+	if s := res.Links[1].Spans[0]; s.Text != "sub/Other" || s.Col != strWidth("  Go to notes 🚀 ") {
+		t.Errorf("span after an emoji: %+v", s)
+	}
+	cm := Render(md.Parse(src, md.Options{}), Options{Width: 80})
+	if !strings.Contains(cm.Text, "[[My Notes#Deep Dive|notes]] :rocket:") {
+		t.Errorf("CommonMark: %q", cm.Text)
+	}
+}
+
 // stripSGR removes SGR and OSC 8 sequences.
 func stripSGR(s string) string {
 	var b strings.Builder

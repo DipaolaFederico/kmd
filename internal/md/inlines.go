@@ -42,6 +42,9 @@ func (p *blockParser) processInlines() {
 			ip.parse(n, string(n.content))
 			n.content = nil
 			flattenDeep(n, maxInlineDepth)
+			if p.opt.Emoji || p.opt.WikiLinks {
+				shortcuts(n, &p.opt, false)
+			}
 			if p.opt.Autolinks {
 				emailAutolinks(n)
 			}
@@ -64,6 +67,12 @@ func (p *inlineParser) parse(block *Node, content string) {
 }
 
 func (p *inlineParser) appendText(s string) { p.block.AppendChild(text(s)) }
+
+// appendLiteral appends text the emoji and wiki link extensions must not
+// touch (an escaped or entity-encoded character).
+func (p *inlineParser) appendLiteral(s string) {
+	p.block.AppendChild(&Node{Type: Text, Literal: s, noExt: true})
+}
 
 func (p *inlineParser) parseInline() {
 	c := p.subj[p.pos]
@@ -104,7 +113,7 @@ func (p *inlineParser) parseInline() {
 	case '&':
 		if dec, n, ok := entityAt(p.subj, p.pos); ok {
 			p.pos += n
-			p.appendText(dec)
+			p.appendLiteral(dec)
 		} else {
 			p.pos++
 			p.appendText("&")
@@ -140,7 +149,7 @@ func (p *inlineParser) str() {
 	st := p.pos
 	if p.opt.Autolinks && p.brackets == nil && (st == 0 || autolinkBoundary(p.subj[st-1])) {
 		if n, dest := extAutolink(p.subj[st:]); n > 0 {
-			l := &Node{Type: Link, Dest: dest}
+			l := &Node{Type: Link, Dest: dest, noExt: true}
 			l.AppendChild(text(p.subj[st : st+n]))
 			p.block.AppendChild(l)
 			p.pos += n
@@ -188,7 +197,7 @@ func (p *inlineParser) backslash() {
 		p.pos++
 		p.block.AppendChild(&Node{Type: LineBreak})
 	case p.pos < len(p.subj) && isEscapable(p.subj[p.pos]):
-		p.appendText(p.subj[p.pos : p.pos+1])
+		p.appendLiteral(p.subj[p.pos : p.pos+1])
 		p.pos++
 	default:
 		p.appendText("\\")
@@ -628,7 +637,7 @@ func (p *inlineParser) angle() {
 	s, i := p.subj, p.pos
 	if e := scanURIAutolink(s, i); e > 0 {
 		uri := s[i+1 : e-1]
-		l := &Node{Type: Link, Dest: normalizeURI(uri)}
+		l := &Node{Type: Link, Dest: normalizeURI(uri), noExt: true}
 		l.AppendChild(text(uri))
 		p.block.AppendChild(l)
 		p.pos = e
@@ -636,7 +645,7 @@ func (p *inlineParser) angle() {
 	}
 	if e := scanEmailAutolink(s, i); e > 0 {
 		addr := s[i+1 : e-1]
-		l := &Node{Type: Link, Dest: normalizeURI("mailto:" + addr)}
+		l := &Node{Type: Link, Dest: normalizeURI("mailto:" + addr), noExt: true}
 		l.AppendChild(text(addr))
 		p.block.AppendChild(l)
 		p.pos = e

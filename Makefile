@@ -62,7 +62,9 @@ spec:
 
 cover:
 	@echo '» coverage (min $(COVER_MIN)%)'
-	@$(GO) test -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... >/dev/null
+	@# quiet on success; on failure show the failing tests (not the ok lines)
+	@out=$$($(GO) test -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... 2>&1) || \
+		{ printf '%s\n' "$$out" | grep -vE '^(ok|\?) '; exit 1; }
 	@$(GO) tool cover -func=coverage.out | awk -v min=$(COVER_MIN) '/^total:/ { \
 		sub("%", "", $$3); printf "  total coverage: %s%%\n", $$3; \
 		if ($$3 + 0 < min) { print "  coverage below " min "%"; exit 1 } }'

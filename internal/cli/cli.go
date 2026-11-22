@@ -140,7 +140,7 @@ Files:
 
 Viewer (long documents):
   Tab/Shift-Tab select a link (or click it) · Enter open it · Backspace back
-  H back to the first document
+  H back to the first document · t contents · [ ] previous/next section
   / search · e edit · ? all keys · q quit
 
 Environment:
@@ -490,6 +490,7 @@ type output struct {
 	code     int
 	links    []render.Link  // with s.opts.Navigate
 	anchors  map[string]int // with s.opts.Navigate
+	headings []render.Heading
 }
 
 func renderFiles(env Env, o options, s settings, in *stdinCache) output {
@@ -546,6 +547,9 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 		default:
 			if len(o.files) > 1 {
 				t := render.RenderString("# "+fileTitle(name), opts)
+				if s.opts.Navigate { // Text starts with a blank line
+					res.headings = append(res.headings, render.Heading{Level: 1, Text: displayName(name), Line: lines + 1})
+				}
 				out.WriteString(t)
 				lines += strings.Count(t, "\n")
 			}
@@ -573,6 +577,10 @@ func (res *output) addNav(r render.Result, offset int) {
 			l.Spans[i].Line += offset
 		}
 		res.links = append(res.links, l)
+	}
+	for _, h := range r.Headings {
+		h.Line += offset
+		res.headings = append(res.headings, h)
 	}
 	for k, v := range r.Anchors {
 		if _, dup := res.anchors[k]; !dup {
@@ -706,9 +714,10 @@ func viewerSettings(s settings, cols int) settings {
 // pageOf turns a render into a viewer page.
 func pageOf(res output) *view.Page {
 	return &view.Page{
-		Lines:   strings.Split(strings.TrimSuffix(res.text, "\n"), "\n"),
-		Links:   res.links,
-		Anchors: res.anchors,
+		Lines:    strings.Split(strings.TrimSuffix(res.text, "\n"), "\n"),
+		Links:    res.links,
+		Anchors:  res.anchors,
+		Headings: res.headings,
 	}
 }
 

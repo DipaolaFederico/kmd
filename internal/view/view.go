@@ -18,9 +18,10 @@ import (
 
 // Page is a rendered document.
 type Page struct {
-	Lines   []string // painted lines (escape sequences included)
-	Links   []render.Link
-	Anchors map[string]int
+	Lines    []string // painted lines (escape sequences included)
+	Links    []render.Link
+	Anchors  map[string]int
+	Headings []render.Heading // the outline, in document order
 }
 
 // Loader renders the document at path for a terminal cols columns wide.
@@ -84,6 +85,9 @@ type model struct {
 	cur     int // current match
 
 	quit bool
+
+	outline    bool // the outline (t) is open
+	ocur, otop int  // its selected heading and first visible row
 
 	// watched file and its last seen state (Watch)
 	watched string
@@ -149,7 +153,7 @@ func newModel(opt Options, cols, rows int) (*model, error) {
 func (m *model) setPage(p *Page) {
 	m.page, m.plain = p, nil
 	m.sel, m.matches, m.query = -1, nil, ""
-	m.top = 0
+	m.top, m.outline = 0, false
 }
 
 func (m *model) viewH() int { return max(m.rows-1, 1) }

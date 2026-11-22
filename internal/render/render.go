@@ -36,9 +36,20 @@ type Result struct {
 	Graphics bool
 	// Links and Anchors locate links and top-level headings (by GitHub
 	// slug) in Text; only filled with Options.Navigate.
-	Links   []Link
-	Anchors map[string]int
+	Links    []Link
+	Anchors  map[string]int
+	Headings []Heading // top-level headings in order (Navigate)
 }
+
+// Heading is a top-level heading of the rendered document.
+type Heading struct {
+	Level int
+	Text  string // plain text, not yet cleaned for the terminal
+	Line  int    // 0-based line of Result.Text
+}
+
+// maxHeadings bounds the outline kept for the viewer.
+const maxHeadings = 10000
 
 const margin = "  "
 
@@ -108,6 +119,7 @@ func Render(doc *md.Node, o Options) Result {
 	// Top-level blocks are painted as soon as they are laid out, so memory
 	// holds the tree and the output, never every styled line at once.
 	first := true
+	var headings []Heading
 	for c := doc.FirstChild; c != nil; c = c.Next {
 		if c.Type == md.FootnoteDef {
 			continue
@@ -124,7 +136,11 @@ func Render(doc *md.Node, o Options) Result {
 		}
 		first = false
 		if anchors != nil && c.Type == md.Heading {
-			anchors.add(md.PlainText(c), r.links.row)
+			text := md.PlainText(c)
+			anchors.add(text, r.links.row)
+			if len(headings) < maxHeadings {
+				headings = append(headings, Heading{Level: c.Level, Text: text, Line: r.links.row})
+			}
 		}
 		paint(lines)
 	}
@@ -142,7 +158,7 @@ func Render(doc *md.Node, o Options) Result {
 	b.WriteByte('\n')
 	res := Result{Text: b.String(), Graphics: r.graphics}
 	if anchors != nil {
-		res.Anchors = anchors.lines
+		res.Anchors, res.Headings = anchors.lines, headings
 	}
 	if r.links != nil {
 		for _, l := range r.links.links {

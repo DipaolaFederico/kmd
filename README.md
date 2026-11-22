@@ -179,6 +179,7 @@ list of its Markdown files and subfolders.
 | `Enter` `l` `→` | open the selected link: `.md` files in the viewer; web links, images and PDFs in the desktop's default application |
 | `Backspace` `h` `←` · `H` | back one document · back to the first document |
 | `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the mouse wheel also work) |
+| `t` · `[` `]` | table of contents (choose a heading and press Enter) · previous / next section |
 | `/` `n` `N` | search, next / previous match |
 | `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |
 

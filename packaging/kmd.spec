@@ -32,6 +32,8 @@ URL:            %{gourl}
 Source:         %{gourl}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:  go-rpm-macros
+# go.mod requires Go 1.25: fail early instead of half-way through the build
+BuildRequires:  golang >= 1.25
 BuildRequires:  libappstream-glib
 
 %description %{common_description}
@@ -60,8 +62,10 @@ install -Dpm 0644 packaging/io.github.dipaolafederico.kmd.metainfo.xml \
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/*.metainfo.xml
 %{buildroot}%{_bindir}/kmd --version | grep -q %{version}
 %if %{with check}
-# the tests bound the time hostile inputs take; build machines can be slow
-export KMD_TEST_TIME_SCALE=10
+# the tests bound the time hostile inputs take, to catch super-linear
+# behaviour; build machines can be far slower than a desktop (COPR's
+# riscv64 builders: ~70x), and a quadratic case would still take minutes
+export KMD_TEST_TIME_SCALE=50
 %gotest ./...
 %endif
 

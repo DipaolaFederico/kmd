@@ -20,8 +20,8 @@ The goal is `sudo dnf install kmd` on Fedora. There are two stages:
   (`console-application`, with a screenshot) are installed.
 - `%check` runs the whole test suite, including the CommonMark/GFM
   specification, and validates the AppStream file. Tests that bound the
-  time of hostile inputs are scaled with `KMD_TEST_TIME_SCALE=10`, so slow
-  builders (s390x, ppc64le) do not fail them.
+  time of hostile inputs are scaled with `KMD_TEST_TIME_SCALE=50`, so slow
+  builders (riscv64, s390x, ppc64le) do not fail them.
 - Verified: `rpmbuild` in clean `fedora:45` and `fedora:rawhide`
   containers (tests pass, the package installs and runs), `rpmlint` with
   0 errors and 0 warnings, the code and tests cross-compile for aarch64,

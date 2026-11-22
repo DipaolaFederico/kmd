@@ -116,7 +116,7 @@ func loader(start string) Loader {
 		}
 		res := render.Render(md.Parse(string(src), md.GFM), render.Options{
 			Width: cols, Color: true, Navigate: true, BaseDir: filepath.Dir(path)})
-		return &Page{Lines: strings.Split(strings.TrimSuffix(res.Text, "\n"), "\n"), Links: res.Links, Anchors: res.Anchors}, nil
+		return &Page{Lines: strings.Split(strings.TrimSuffix(res.Text, "\n"), "\n"), Links: res.Links, Anchors: res.Anchors, Headings: res.Headings}, nil
 	}
 }
 

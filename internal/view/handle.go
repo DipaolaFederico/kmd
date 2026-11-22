@@ -11,6 +11,11 @@ func (m *model) handle(k key) {
 		m.handlePrompt(k)
 		return
 	}
+	if m.outline {
+		m.msg = ""
+		m.handleOutline(k)
+		return
+	}
 	if m.help {
 		m.help = false
 		if k.name != "char" || k.r != 'q' {
@@ -74,6 +79,12 @@ func (m *model) handle(k key) {
 		m.edit()
 	case "?":
 		m.help = true
+	case "t":
+		m.openOutline()
+	case "]":
+		m.nextHeading(1)
+	case "[":
+		m.nextHeading(-1)
 	case "mouse":
 		m.mouse(k)
 	}

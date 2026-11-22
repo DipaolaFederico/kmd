@@ -45,6 +45,9 @@ func (m *model) draw(b *strings.Builder) {
 		}
 	}
 	m.status(b)
+	if m.outline {
+		m.drawOutline(b)
+	}
 	if m.help {
 		m.drawHelp(b)
 	}
@@ -86,6 +89,8 @@ func (m *model) status(b *strings.Builder) {
 	switch {
 	case m.prompt:
 		left = "/" + string(m.input)
+	case m.outline:
+		left = "↑↓ choose · Enter jump · Esc close"
 	case m.msg != "":
 		left = m.msg
 	case m.visible(m.sel):
@@ -195,6 +200,8 @@ var helpText = []string{
 	"Backspace h ←    back",
 	"H                back to the first document",
 	"",
+	"t                contents: jump to a heading",
+	"[ ]              previous / next section",
 	"/ n N            search, next / previous match",
 	"Esc              clear selection and search",
 	"e                edit the file ($VISUAL / $EDITOR)",

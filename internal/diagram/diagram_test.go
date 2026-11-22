@@ -686,8 +686,8 @@ func TestUnsupportedAndInvalid(t *testing.T) {
 		"",
 		"   \n\n",
 		"%% only a comment",
-		"classDiagram\nA <|-- B",
-		"erDiagram\nA ||--o{ B : has",
+		"classDiagram\nA <|-- ",
+		"erDiagram\nA ||--x{ B : has",
 		"gantt\ntitle x",
 		"journey\ntitle x",
 		"mindmap\nroot",
@@ -905,6 +905,9 @@ func FuzzMermaid(f *testing.F) {
 		"sequenceDiagram\nautonumber\nAlice->>Bob: Hi\nloop L\nBob-->>Alice: Yo\nend\nNote over Alice,Bob: n",
 		"pie showData title T\n\"a\" : 1\n\"b\" : 2",
 		"---\ntitle: X\n---\ngraph RL\nA([x]) --- B[[y]]",
+		"classDiagram\ndirection LR\nclass A~T~ {\n<<interface>>\n+x int\n+f() bool\n}\nA \"1\" <|-- \"*\" B : is\nB *-- C\nC ..> D\nD ()-- E\nnamespace N {\nclass F\n}",
+		"erDiagram\nA ||--o{ B : has\nB }|..|{ C : \"uses\"\nA one or more to zero or more D : x\nA {\nstring id PK, FK \"key\"\n}",
+		"gantt\ntitle T\ndateFormat YYYY-MM-DD\naxisFormat %b %d\nsection S\nA :done, a, 2024-01-01, 3d\nB :crit, active, after a, 1w\nC :milestone, until a, 0d\nD :12h",
 	}
 	for _, s := range seeds {
 		f.Add(s, 60)

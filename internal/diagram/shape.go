@@ -1,6 +1,8 @@
 package diagram
 
 import (
+	"strconv"
+
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
@@ -22,14 +24,83 @@ const (
 	shapeStart                   // state diagram start marker
 	shapeEnd                     // state diagram end marker
 	shapeBar                     // state diagram fork/join bar
+	shapeClass                   // class / entity box with compartments
+)
+
+// Bounds for compartment boxes: rows shown per compartment and the extra
+// width members may take beyond the label wrap width.
+const (
+	maxSectionRows = 30
+	memberSlack    = 10
+	minNameWrap    = 16 // class names this long are never broken
 )
 
 // box is a sized node: its shape, wrapped label and outer dimensions.
 type box struct {
-	shape shape
-	lines []string
-	w, h  int
-	lr    bool
+	shape    shape
+	lines    []string
+	sections [][]string // shapeClass compartments below the label
+	w, h     int
+	lr       bool
+}
+
+// makeClassBox sizes a box with a centered name compartment followed by
+// left-aligned compartments (attributes, methods), each separated by a
+// rule. Rows are truncated and long compartments elided so a hostile
+// class cannot make an arbitrarily large box.
+func makeClassBox(label string, sections [][]string, wrapW int) box {
+	b := box{shape: shapeClass, lines: wrap(label, max(wrapW, minNameWrap))}
+	w := maxWidth(b.lines)
+	h := len(b.lines) + 2
+	memberMax := wrapW + memberSlack
+	for _, sec := range sections {
+		if len(sec) == 0 {
+			continue
+		}
+		rows := sec
+		if len(rows) > maxSectionRows {
+			rows = append(rows[:maxSectionRows-1:maxSectionRows-1], "… +"+strconv.Itoa(len(sec)-maxSectionRows+1)+" more")
+		}
+		out := make([]string, len(rows))
+		for i, r := range rows {
+			out[i] = truncate(r, memberMax)
+			w = max(w, styled.Width(out[i]))
+		}
+		b.sections = append(b.sections, out)
+		h += 1 + len(out)
+	}
+	b.w, b.h = w+4, h
+	return b
+}
+
+// drawClass paints a compartment box: the outline, a rule above every
+// compartment, the centered name and the left-aligned rows.
+func (b *box) drawClass(c *canvas, x, y int) {
+	rule := func(r int, l, rt rune) {
+		c.put(x, y+r, l, styled.Border)
+		c.fill(x+1, y+r, b.w-2, '─', styled.Border)
+		c.put(x+b.w-1, y+r, rt, styled.Border)
+	}
+	rule(0, '┌', '┐')
+	for r := 1; r < b.h-1; r++ {
+		c.put(x, y+r, '│', styled.Border)
+		c.put(x+b.w-1, y+r, '│', styled.Border)
+	}
+	rule(b.h-1, '└', '┘')
+	inner := b.w - 2
+	r := 1
+	for _, l := range b.lines {
+		c.text(x+1+(inner-styled.Width(l))/2, y+r, l, styled.Node)
+		r++
+	}
+	for _, sec := range b.sections {
+		rule(r, '├', '┤')
+		r++
+		for _, l := range sec {
+			c.text(x+2, y+r, l, styled.Plain)
+			r++
+		}
+	}
 }
 
 // makeBox wraps label to max columns and computes the node's size.
@@ -167,6 +238,9 @@ func (b *box) outline(r int) (l, rt, fill rune) {
 // draw paints the node outline and its centered label at (x, y).
 func (b *box) draw(c *canvas, x, y int) {
 	switch b.shape {
+	case shapeClass:
+		b.drawClass(c, x, y)
+		return
 	case shapeStart:
 		c.put(x, y, '●', styled.Node)
 		return

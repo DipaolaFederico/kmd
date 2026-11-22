@@ -128,6 +128,10 @@ Precedence: flags > environment variables (`KMD_THEME`, `KMD_PAGER`,
 
 ## Installation
 
+Prebuilt binaries for Linux, macOS, FreeBSD and Windows are attached to every
+[GitHub release](https://github.com/DipaolaFederico/kmd/releases) (with
+`SHA256SUMS`). From source:
+
 ```sh
 make install                          # ~/.local/bin/kmd + man page + completions
 sudo make install PREFIX=/usr/local

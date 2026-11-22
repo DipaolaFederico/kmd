@@ -1,0 +1,282 @@
+# Release: every merge to main publishes a new version once CI has passed on
+# it. The version is the latest vX.Y.Z tag plus the largest increment asked
+# for by the pull requests merged since that tag:
+#
+#   release:major  → X+1.0.0     breaking change
+#   release:minor  → X.Y+1.0     new feature, backwards compatible
+#   release:patch  → X.Y.Z+1     fix / internal change (also: no label)
+#   release:skip   → no release  docs, CI, refactors users cannot notice
+#
+# Looking at every PR since the last tag (not only the one that triggered the
+# run) keeps labels from being lost when merges land close together and
+# GitHub drops queued runs. It can also be run by hand (Actions → Release →
+# Run workflow); only the repository owner may do that.
+# See CONTRIBUTING.md, "Releases".
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version increment"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+# one release at a time; never cancel one half-way
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.27.x"
+  GOTOOLCHAIN: local
+  # the repository owner (DipaolaFederico); ids never change, logins can
+  OWNER_ID: "65874112"
+
+jobs:
+  plan:
+    name: Plan version
+    # automatic runs: only after CI passed on a push to main
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.sha.outputs.sha }}
+    steps:
+      - name: Only the owner may release by hand
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          ACTOR_ID: ${{ github.actor_id }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          ACTOR: ${{ github.actor }}
+          REF: ${{ github.ref }}
+        run: |
+          if [ "$ACTOR_ID" != "$OWNER_ID" ] || [ "$TRIGGERING_ACTOR" != "$ACTOR" ]; then
+            echo "::error::Manual releases are restricted to the repository owner."
+            exit 1
+          fi
+          if [ "$REF" != "refs/heads/main" ]; then
+            echo "::error::Releases are only made from main (got $REF)."
+            exit 1
+          fi
+
+      - name: Commit to release
+        id: sha
+        env:
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          SHA: ${{ github.sha }}
+        run: echo "sha=${RUN_SHA:-$SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # history and tags
+          persist-credentials: false
+
+      - name: Decide the increment
+        id: bump
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          INPUT_BUMP: ${{ inputs.bump }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          # strict vX.Y.Z only: a stray tag like v1.2.3-rc1 must not stop releases
+          last=$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)
+          echo "last=${last:-v0.0.0}" >> "$GITHUB_OUTPUT"
+          # already released (a re-run, or an older run after a newer release)
+          if [ -n "$last" ] && git merge-base --is-ancestor "$SHA" "$last^{commit}"; then
+            echo "$SHA is already part of $last: nothing to release."
+            exit 0
+          fi
+          if [ "$EVENT" = workflow_dispatch ]; then
+            echo "Manual release: $INPUT_BUMP"
+            echo "bump=$INPUT_BUMP" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          rank() { case $1 in major) echo 3 ;; minor) echo 2 ;; patch) echo 1 ;; *) echo 0 ;; esac; }
+          bump=""
+          range=$SHA; [ -n "$last" ] && range="$last..$SHA"
+          for c in $(git rev-list --first-parent "$range"); do
+            # one call: the merged PR's number and its release labels
+            info=$(gh api "repos/$REPO/commits/$c/pulls" --jq \
+              '[.[] | select(.merged_at != null)][0] // empty | [(.number | tostring)] + [.labels[].name | select(startswith("release:"))] | join(" ")')
+            pr=${info%% *}
+            labels=${info#"$pr"}; labels=${labels# }
+            case " $labels " in
+              *" release:major "*) want=major ;;
+              *" release:minor "*) want=minor ;;
+              *" release:patch "*) want=patch ;;
+              *" release:skip "*)  want=skip ;;
+              *)                   want=patch ;; # no label, or a direct push
+            esac
+            echo "${c:0:7} PR #${pr:-none} [${labels:-no label}] → $want"
+            [ "$(rank "$want")" -gt "$(rank "$bump")" ] && bump=$want
+          done
+          if [ -z "$bump" ]; then
+            echo "Only release:skip changes since ${last:-the start}: nothing to release."
+            exit 0
+          fi
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Compute the version
+        id: version
+        if: steps.bump.outputs.bump != ''
+        env:
+          BUMP: ${{ steps.bump.outputs.bump }}
+          LAST: ${{ steps.bump.outputs.last }}
+        run: |
+          next=$(scripts/next-version.sh "$LAST" "$BUMP")
+          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
+            echo "::error::Tag v$next already exists."
+            exit 1
+          fi
+          echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "### Release v$next ($LAST + $BUMP)" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    name: Build
+    needs: plan
+    if: needs.plan.outputs.version != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read # building never holds a token that can write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # released binaries are built from scratch, never from a cache
+          # another workflow could have written
+          cache: false
+      - name: Install packaging validators
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends groff appstream
+
+      - name: Stamp the version into spec, man page and AppStream metadata
+        run: scripts/stamp-version.sh "$VERSION" "$(date -u +%F)"
+
+      - name: Validate packaging
+        run: make packaging VERSION="v$VERSION"
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          ldflags="-s -w -X github.com/DipaolaFederico/kmd/internal/cli.Version=v$VERSION"
+          targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 windows/amd64"
+          pids=()
+          for t in $targets; do
+            os=${t%/*} arch=${t#*/}
+            exe=kmd; [ "$os" = windows ] && exe=kmd.exe
+            GOOS=$os GOARCH=$arch CGO_ENABLED=0 go build -trimpath -ldflags "$ldflags" \
+              -o "dist/kmd-v$VERSION-$os-$arch/$exe" . &
+            pids+=($!)
+          done
+          for p in "${pids[@]}"; do wait "$p"; done # fail if any build failed
+          for t in $targets; do
+            os=${t%/*} arch=${t#*/}
+            name=kmd-v$VERSION-$os-$arch
+            cp LICENSE README.md docs/kmd.1 "dist/$name/"
+            if [ "$os" = windows ]; then
+              (cd dist && zip -qr "$name.zip" "$name")
+            else
+              tar -C dist --owner=0 --group=0 -czf "dist/$name.tar.gz" "$name"
+            fi
+            rm -rf "dist/$name"
+          done
+
+      - name: Source tarball
+        run: |
+          # only the stamped files may differ from the commit: make dist packs
+          # untracked files too, so nothing else may be lying around
+          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected changes before packing the source:"; echo "$unexpected"
+            exit 1
+          fi
+          make dist
+
+      - name: Smoke test the release binary
+        run: |
+          tar -xzf "dist/kmd-v$VERSION-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
+          bin=$RUNNER_TEMP/kmd-v$VERSION-linux-amd64/kmd
+          got=$("$bin" --version)
+          [ "$got" = "kmd v$VERSION" ] || { echo "::error::version is '$got'"; exit 1; }
+          echo "# ok" | "$bin" -c never
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum kmd-* > SHA256SUMS
+          { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # the only job that can write: no checkout, no build tools
+    permissions:
+      contents: write # tag + GitHub release
+      id-token: write # provenance attestation
+      attestations: write
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist
+
+      - name: Verify checksums
+        run: cd dist && sha256sum --strict -c SHA256SUMS
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/kmd-*
+
+      - name: Create tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
+          gh release create "v$VERSION" \
+            --repo "$REPO" \
+            --target "$SHA" \
+            --title "kmd v$VERSION" \
+            --generate-notes \
+            dist/kmd-* dist/SHA256SUMS

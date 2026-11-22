@@ -8,6 +8,7 @@
 
 ## Checklist
 
+- [ ] One release label: `release:major`, `release:minor`, `release:patch` (default) or `release:skip` — see CONTRIBUTING.md, "Releases"
 - [ ] `make ci` passes locally (including the perf gate)
 - [ ] New behaviour is covered by tests (coverage stays ≥ 90%)
 - [ ] No new dependencies (`go.mod` has no `require`)

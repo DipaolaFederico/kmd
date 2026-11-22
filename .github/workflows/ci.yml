@@ -39,6 +39,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: Formatting (gofmt -s)
         run: make fmt-check
       - name: go vet
@@ -63,6 +64,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: Tests (race detector)
         run: make test
       - name: CommonMark / GFM conformance
@@ -85,6 +87,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: govulncheck (known vulnerabilities)
         run: make vuln
       - name: gosec (static security analysis)
@@ -101,6 +104,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: Install packaging validators
         run: sudo apt-get update -qq && sudo apt-get install -y -qq groff appstream
       - name: Build and validate packaging metadata

@@ -16,13 +16,12 @@ and GNOME Software use). The package follows the
 
 ## 1. Publish the source (once per release)
 
-```sh
-git tag -a v0.2.0 -m "kmd 0.2.0"
-git push origin main --tags
-```
-
-The spec's `Source` is the tarball GitHub generates for the tag
-(`https://github.com/DipaolaFederico/kmd/archive/v0.2.0/kmd-0.2.0.tar.gz`).
+Releases are published by the *Release* workflow on every merge to `main`
+(see CONTRIBUTING.md, "Releases"). Each GitHub release carries
+`kmd-X.Y.Z.tar.gz`, the source with the version stamped into the spec, the
+man page and the AppStream metadata; it is the spec's `Source`
+(`https://github.com/DipaolaFederico/kmd/releases/download/vX.Y.Z/kmd-X.Y.Z.tar.gz`).
+For dist-git, take `packaging/kmd.spec` from that tarball.
 
 ## 2. Test the RPM locally
 
@@ -56,8 +55,9 @@ copr-cli build kmd dist/rpmbuild/SRPMS/kmd-*.src.rpm
 
 ## Release checklist
 
-- [ ] `Version:` in `packaging/kmd.spec`
-- [ ] `.TH` in `docs/kmd.1`
-- [ ] `<release>` in `packaging/io.github.dipaolafederico.kmd.metainfo.xml`
-- [ ] `make ci` (checks that the three versions match)
-- [ ] tag `vX.Y.Z` + push
+Automated by `.github/workflows/release.yml`: version from the latest tag and
+the pull request's `release:*` label, stamped by `scripts/stamp-version.sh`
+into `packaging/kmd.spec`, `docs/kmd.1` and the metainfo, validated with
+`make packaging`, then tagged and published with binaries, the source
+tarball and `SHA256SUMS`. What remains manual is the Fedora side: import the
+new spec and tarball in dist-git, `fedpkg build`, `fedpkg update`.

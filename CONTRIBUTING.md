@@ -73,6 +73,44 @@ docs: document theme inheritance
 
 Explain the reason for the change in the body when it is not obvious.
 
+## Releases
+
+Releases are automatic: **every merge to `main` publishes a new version**
+once CI has passed on it (tag `vX.Y.Z`, GitHub release with binaries for
+Linux, macOS, FreeBSD and Windows, the source tarball, `SHA256SUMS` and a
+signed build-provenance attestation). The version is the latest tag plus the
+largest increment asked for by the pull requests merged since that tag, each
+choosing it with a label, following [Semantic Versioning](https://semver.org):
+
+| Label           | Version       | Use it when the change…                                                                 |
+|-----------------|---------------|------------------------------------------------------------------------------------------|
+| `release:major` | `X+1.0.0`     | breaks users: removes or renames a flag or config key, changes defaults or output in a way scripts can notice |
+| `release:minor` | `X.Y+1.0`     | adds something users can use: a flag, a config key, a feature, a theme                   |
+| `release:patch` | `X.Y.Z+1`     | fixes a bug or improves performance without changing behaviour — **default without a label** |
+| `release:skip`  | no release    | cannot be noticed by users: documentation, CI, tests, refactors                          |
+
+- Put **one** release label on the pull request before merging. The *Release
+  label* check shows which release the merge will publish and fails when
+  labels contradict each other.
+- Merges are never lost: if several land before a release runs (or CI fails
+  on one of them), the next release covers all of them with the largest
+  increment among their labels. `release:skip` changes are included in the
+  next real release.
+- Re-running a release that already succeeded does nothing.
+- Verify a download with `sha256sum -c SHA256SUMS --ignore-missing` and its
+  origin with `gh attestation verify <file> --repo DipaolaFederico/kmd`.
+- While kmd is `0.x`, breaking changes may also go out as `release:minor`;
+  `release:major` from `0.x` publishes `1.0.0`.
+- The maintainer can also release by hand: *Actions → Release → Run
+  workflow*, choosing `patch`, `minor` or `major` (from `main` only; the
+  workflow refuses any other user).
+- The release notes are generated from the titles of the merged pull
+  requests, so give pull requests titles that read well in a changelog.
+- The version is stamped into the RPM spec, the man page and the AppStream
+  metadata of the published artifacts by `scripts/stamp-version.sh`; the
+  copies in the repository are not rewritten (`main` only accepts reviewed
+  pull requests, the release workflow cannot push to it).
+
 ## Project layout
 
 | Path               | What lives there                                     |
@@ -82,7 +120,9 @@ Explain the reason for the change in the body when it is not obvious.
 | `internal/diagram` | Mermaid and Graphviz layout                          |
 | `internal/tex`     | LaTeX → Unicode                                      |
 | `internal/termimg` | image protocols (kitty, iTerm2, sixel, blocks)       |
+| `internal/view`    | interactive viewer: links, search, live reload       |
 | `internal/cli`     | flags, config, pager, `--follow`, `--html`           |
+| `scripts/`         | perf gate, release versioning helpers                |
 | `packaging/`       | Fedora RPM spec and AppStream metadata               |
 
 ## Reporting security issues

@@ -85,8 +85,8 @@ make install                        # ~/.local/bin/kmd, man page, bash/zsh/fish 
 sudo make install PREFIX=/usr/local # system-wide
 ```
 
-`go install github.com/DipaolaFederico/kmd@latest` also works, but does not
-install the man page or completions, and `kmd --version` reports `dev`.
+With Go only: `go install github.com/DipaolaFederico/kmd@latest` (installs
+the binary, without the man page or completions).
 
 ### 🐧 Fedora
 

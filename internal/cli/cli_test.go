@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"testing"
@@ -641,4 +642,28 @@ func gradientPNG(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func TestVersionFromBuildInfo(t *testing.T) {
+	info := func(v string) func() (*debug.BuildInfo, bool) {
+		return func() (*debug.BuildInfo, bool) {
+			return &debug.BuildInfo{Main: debug.Module{Version: v}}, true
+		}
+	}
+	none := func() (*debug.BuildInfo, bool) { return nil, false }
+	for _, c := range []struct {
+		stamped string
+		read    func() (*debug.BuildInfo, bool)
+		want    string
+	}{
+		{"v1.2.3", info("v9.9.9"), "v1.2.3"}, // -ldflags wins
+		{"dev", info("v0.4.0"), "v0.4.0"},    // go install …@v0.4.0
+		{"dev", info("(devel)"), "dev"},      // go build in a checkout
+		{"dev", info(""), "dev"},
+		{"dev", none, "dev"},
+	} {
+		if got := versionFrom(c.stamped, c.read); got != c.want {
+			t.Errorf("versionFrom(%q) = %q, want %q", c.stamped, got, c.want)
+		}
+	}
 }

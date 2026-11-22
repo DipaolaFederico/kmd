@@ -188,7 +188,7 @@ func htmlPage(title, body string, t *render.Theme) string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src * data:">
-<meta name="generator" content="kmd ` + esc.Replace(Version) + `">
+<meta name="generator" content="kmd ` + esc.Replace(version()) + `">
 <title>` + esc.Replace(title) + `</title>
 <style>
 :root { --bg: ` + t.Bg.Hex() + `; --fg: ` + t.Fg.Hex() + `; --muted: ` + t.Muted.Hex() + `; --border: ` + t.Border.Hex() + `;

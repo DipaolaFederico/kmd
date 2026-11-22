@@ -109,6 +109,7 @@ kmd --completion fish > ~/.config/fish/completions/kmd.fish
 ```sh
 kmd README.md                 # render; opens the viewer if it does not fit on screen
 kmd docs/*.md                 # several files, one after another
+kmd docs/                     # a folder: its README.md, or a list of its documents
 cat notes.md | kmd            # read from standard input
 kmd -f notes.md               # live preview: re-render on every save
 kmd --view short.md           # open the viewer even if the document fits
@@ -125,6 +126,7 @@ kmd -w 80 doc.md              # fixed render width
 | Task | Command |
 |---|---|
 | 📖 Read a project's documentation and follow its links | `kmd README.md`, then `Tab` and `Enter` |
+| 🗂️ Browse a folder of notes or documentation | `kmd docs/` |
 | ✍️ Preview a file while editing it | `kmd -f draft.md` |
 | 📋 Get an overview of a long document | `kmd --toc doc.md` |
 | 🎯 Read one section, or print it from a script | `kmd -s install README.md` |
@@ -167,7 +169,9 @@ The full reference is in the man page: `man kmd`.
 
 Documents longer than the terminal open in kmd's viewer. Links to other
 Markdown files open in the viewer itself, at the target `#heading` if there
-is one, so a folder of documents can be browsed like a wiki.
+is one, so a folder of documents can be browsed like a wiki. A folder
+(`kmd notes/`, or a link to one) opens its `README.md` or `index.md`, or a
+list of its Markdown files and subfolders.
 
 | Keys | Action |
 |---|---|

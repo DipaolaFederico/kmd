@@ -97,8 +97,11 @@ type options struct {
 const usage = `kmd — beautiful Markdown previews in your terminal
 
 Usage:
-  kmd [options] [file ...]
+  kmd [options] [file|folder ...]
   cat README.md | kmd [options]
+
+A folder shows its README.md (or index.md), or else a list of its
+Markdown files and subfolders to browse in the viewer.
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
@@ -338,32 +341,34 @@ func (s settings) width(cols int) int {
 	return 80
 }
 
-func readSource(name string, stdin io.Reader) (string, error) {
+// readSource reads a document; a directory reads as its listing (dir true).
+func readSource(name string, stdin io.Reader) (src string, dir bool, err error) {
 	var r io.Reader = stdin
 	if name != "-" {
 		// #nosec G304 -- reading the file the user asked for is the point of the tool.
 		f, err := os.Open(filepath.Clean(name))
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		defer func() { _ = f.Close() }()
 		st, err := f.Stat()
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 		if st.IsDir() {
-			return "", fmt.Errorf("%s: is a directory", name)
+			src, err := dirListing(name, f)
+			return src, true, err
 		}
 		r = f
 	}
 	data, err := io.ReadAll(io.LimitReader(r, maxInput+1))
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if len(data) > maxInput {
-		return "", fmt.Errorf("%s: larger than %d MiB", name, maxInput>>20)
+		return "", false, fmt.Errorf("%s: larger than %d MiB", name, maxInput>>20)
 	}
-	return string(data), nil
+	return string(data), false, nil
 }
 
 // Run executes kmd and returns the process exit code.
@@ -416,6 +421,7 @@ func Run(env Env) int {
 		}
 		o.files = []string{"-"}
 	}
+	resolveDirs(o.files)
 	viewable := !o.html && !o.toc && env.StdoutTTY && (s.pager == builtinPager || s.alwaysView)
 	if o.follow {
 		// live preview in the viewer: links stay navigable, position is kept
@@ -498,10 +504,11 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	for _, name := range o.files {
 		var src string
 		var err error
+		isDir := false
 		if name == "-" && in.read {
 			src = in.src
 		} else {
-			src, err = readSource(name, env.Stdin)
+			src, isDir, err = readSource(name, env.Stdin)
 			if name == "-" {
 				in.src, in.read = src, true
 			}
@@ -522,7 +529,10 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 			doc = sec
 		}
 		opts := s.opts
-		if name != "-" {
+		switch {
+		case isDir:
+			opts.BaseDir = name
+		case name != "-":
 			opts.BaseDir = filepath.Dir(name)
 		}
 		switch {

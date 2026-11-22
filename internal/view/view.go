@@ -369,14 +369,18 @@ func (m *model) followFile(path, frag string) {
 	}
 	if st.IsDir() {
 		found := false
-		for _, n := range []string{"README.md", "readme.md", "index.md"} {
+		for _, n := range render.IndexNames {
 			if s, err := os.Stat(filepath.Join(path, n)); err == nil && !s.IsDir() {
 				path, found = filepath.Join(path, n), true
 				break
 			}
 		}
-		if !found {
-			m.msg = "no README.md in " + m.rel(path)
+		if !found { // list its documents
+			if path != m.path {
+				if err := m.load(path); err != nil {
+					m.msg = errText(err)
+				}
+			}
 			return
 		}
 	}

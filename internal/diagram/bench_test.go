@@ -66,3 +66,33 @@ func BenchmarkSequence(b *testing.B) {
 		}
 	}
 }
+
+func BenchmarkClass(b *testing.B) {
+	var sb strings.Builder
+	sb.WriteString("classDiagram\n")
+	for i := 1; i < 20; i++ {
+		fmt.Fprintf(&sb, "  C%d <|-- C%d\n  C%d : +field%d int\n  C%d : +method%d() bool\n", (i-1)/3, i, i, i, i, i)
+	}
+	src := sb.String()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, ok := Mermaid(src, 300); !ok {
+			b.Fatal("not rendered")
+		}
+	}
+}
+
+func BenchmarkGantt(b *testing.B) {
+	var sb strings.Builder
+	sb.WriteString("gantt\n  dateFormat YYYY-MM-DD\n  section A\n  T0 :t0, 2024-01-01, 3d\n")
+	for i := 1; i < 40; i++ {
+		fmt.Fprintf(&sb, "  T%d :t%d, after t%d, %dd\n", i, i, i-1, i%5+1)
+	}
+	src := sb.String()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, ok := Mermaid(src, 120); !ok {
+			b.Fatal("not rendered")
+		}
+	}
+}

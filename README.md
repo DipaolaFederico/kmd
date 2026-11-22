@@ -37,7 +37,7 @@ untrusted input.
 | 🧭 | **Viewer** | long documents open in a built-in viewer; links between Markdown files can be followed and navigated back |
 | 🔗 | **Hyperlinks** | clickable OSC 8 links; relative links resolved to absolute `file://` URLs |
 | 🖼️ | **Images** | kitty, iTerm2, sixel or Unicode blocks; local files and `data:` URIs only |
-| 📊 | **Diagrams** | Mermaid (flowchart, state, sequence, pie) and Graphviz DOT, drawn with box-drawing characters |
+| 📊 | **Diagrams** | Mermaid (flowchart, state, sequence, class, ER, Gantt, pie) and Graphviz DOT, drawn with box-drawing characters |
 | ∑ | **Math** | `$…$`, `$$…$$` and ` ```math ` blocks rendered as Unicode, including fractions, roots, sums and matrices |
 | 🌈 | **Themes** | 13 bundled themes; custom themes from a 17-color palette |
 | 🔄 | **Live preview** | `-f` re-renders the file every time it is saved |

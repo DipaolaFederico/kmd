@@ -3,6 +3,7 @@ package diagram
 import (
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
@@ -99,7 +100,11 @@ func layoutGraph(g *graph, o layoutOpts, maxW int) (c *canvas, fatal bool) {
 	L := &layout{g: g, o: o}
 	L.boxes = make([]box, len(g.nodes))
 	for i, n := range g.nodes {
-		L.boxes[i] = makeBox(n.shape, n.label, o.labelMax, o.lr)
+		if n.shape == shapeClass {
+			L.boxes[i] = makeClassBox(n.label, n.sections, o.labelMax)
+		} else {
+			L.boxes[i] = makeBox(n.shape, n.label, o.labelMax, o.lr)
+		}
 	}
 	L.buildEdges()
 	L.assignLayers()
@@ -186,19 +191,50 @@ func (L *layout) buildEdges() {
 			continue
 		}
 		le := ledge{u: e.from, v: e.to, style: e.style, uEnd: e.tail, vEnd: e.head}
+		uCard, vCard := e.fromCard, e.toCard
 		if reversed[i] {
 			le.u, le.v, le.uEnd, le.vEnd = e.to, e.from, e.head, e.tail
+			uCard, vCard = vCard, uCard
 			le.reversed = true
 		}
-		if e.label != "" {
-			if L.o.lr {
-				le.lines = []string{truncate(oneLine(e.label), L.o.labelMax)}
-			} else {
-				le.lines = wrap(e.label, L.o.labelMax)
-			}
-		}
+		le.lines = L.edgeLines(e.label, uCard, vCard)
 		L.edges = append(L.edges, le)
 	}
+}
+
+// edgeLines lays out an edge label with the multiplicities of its upper
+// (uCard) and lower (vCard) ends: stacked top to bottom in TD layouts so
+// each sits next to its node, `u ── label ── v` on one line in LR layouts.
+func (L *layout) edgeLines(label, uCard, vCard string) []string {
+	if uCard == "" && vCard == "" {
+		switch {
+		case label == "":
+			return nil
+		case L.o.lr:
+			return []string{truncate(oneLine(label), L.o.labelMax)}
+		}
+		return wrap(label, L.o.labelMax)
+	}
+	if L.o.lr {
+		var parts []string
+		for _, p := range [...]string{uCard, oneLine(label), vCard} {
+			if p != "" {
+				parts = append(parts, p)
+			}
+		}
+		return []string{truncate(strings.Join(parts, " ── "), 2*L.o.labelMax)}
+	}
+	var lines []string
+	if uCard != "" {
+		lines = append(lines, truncate(uCard, L.o.labelMax))
+	}
+	if label != "" {
+		lines = append(lines, wrap(label, L.o.labelMax)...)
+	}
+	if vCard != "" {
+		lines = append(lines, truncate(vCard, L.o.labelMax))
+	}
+	return lines
 }
 
 // assignLayers uses longest-path layering, then pulls sources down next to
@@ -1129,6 +1165,20 @@ func (L *layout) arrow(k endKind, up bool) rune {
 		return '○'
 	case endCross:
 		return '✕'
+	case endDiamond:
+		return '◆'
+	case endODiamond:
+		return '◇'
+	case endTriangle:
+		switch {
+		case L.o.lr && up:
+			return '◁'
+		case L.o.lr:
+			return '▷'
+		case up:
+			return '△'
+		}
+		return '▽'
 	}
 	switch {
 	case L.o.lr && up:
@@ -1201,7 +1251,13 @@ func (L *layout) draw(c *canvas, sMin int) {
 				continue
 			}
 			for i, l := range sp.lines {
-				x, y := L.xy(pt{ch.start + ch.head + ch.lead + ch.tracks + sp.row + i, sp.x0 + (sp.w-styled.Width(l))/2}, sMin)
+				s := sp.x0 + (sp.w-styled.Width(l))/2
+				if sp.x0 == sp.b-sp.w/2 {
+					// A label centered on its line: center every row on the
+					// line itself so short rows (multiplicities) stay on it.
+					s = sp.b - styled.Width(l)/2
+				}
+				x, y := L.xy(pt{ch.start + ch.head + ch.lead + ch.tracks + sp.row + i, s}, sMin)
 				c.text(x, y, l, styled.Label)
 			}
 		}

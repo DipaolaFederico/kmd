@@ -49,7 +49,7 @@ func TestDiagramRendering(t *testing.T) {
 	off := render(src, Options{Width: 80})
 	mustContain(t, off, "graph LR", "mermaid")
 	// unsupported diagram types fall back to the source
-	mustContain(t, render("```mermaid\nerDiagram\n  A ||--o{ B : has\n```", Options{Width: 80, Diagrams: true}), "erDiagram")
+	mustContain(t, render("```mermaid\njourney\n  title Day\n```", Options{Width: 80, Diagrams: true}), "journey")
 	mustContain(t, render("```dot\ndigraph { a -> b }\n```", Options{Width: 80, Diagrams: true}), "a", "b")
 }
 

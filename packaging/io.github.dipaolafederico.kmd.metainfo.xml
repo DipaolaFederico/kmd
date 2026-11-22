@@ -16,7 +16,7 @@
       <li>Full CommonMark 0.31.2 and GitHub Flavored Markdown support</li>
       <li>Syntax highlighting for more than 20 languages</li>
       <li>Clickable hyperlinks and inline images</li>
-      <li>Mermaid and Graphviz diagrams drawn with Unicode box characters</li>
+      <li>Mermaid (flowchart, state, sequence, class, ER, Gantt, pie) and Graphviz diagrams drawn with Unicode box characters</li>
       <li>LaTeX math formulas rendered with Unicode</li>
       <li>Thirteen bundled color themes and fully customizable themes</li>
       <li>A viewer that follows links between documents and folders, with a table of contents and search</li>

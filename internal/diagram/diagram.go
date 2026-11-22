@@ -1,12 +1,13 @@
 // Package diagram renders Mermaid and Graphviz DOT diagrams as Unicode
 // terminal art.
 //
-// Flowcharts, state diagrams and DOT graphs share a layered layout engine
-// (cycle breaking, longest-path layering, dummy nodes, barycenter ordering,
-// least-squares coordinate assignment and orthogonal channel routing on a
-// junction-merging character canvas). Sequence diagrams and pie charts have
-// dedicated renderers. Output is a list of styled lines whose spans carry
-// semantic classes; the terminal renderer maps them to theme colors.
+// Flowcharts, state, class and entity-relationship diagrams and DOT graphs
+// share a layered layout engine (cycle breaking, longest-path layering,
+// dummy nodes, barycenter ordering, least-squares coordinate assignment and
+// orthogonal channel routing on a junction-merging character canvas).
+// Sequence diagrams, Gantt charts and pie charts have dedicated renderers.
+// Output is a list of styled lines whose spans carry semantic classes; the
+// terminal renderer maps them to theme colors.
 //
 // Input is treated as untrusted: sizes are capped, nothing recurses without
 // a bound, and any failure yields ok=false so the caller can fall back to
@@ -100,6 +101,27 @@ func mermaid(src string, width int) ([]styled.Line, bool) {
 			d.title = title
 		}
 		return renderSequence(d, width)
+	case "classDiagram", "classDiagram-v2":
+		g, ok := parseClass(body)
+		if !ok {
+			return nil, false
+		}
+		return renderGraph(g, title, width)
+	case "erDiagram":
+		g, ok := parseER(body)
+		if !ok {
+			return nil, false
+		}
+		return renderGraph(g, title, width)
+	case "gantt":
+		gc, ok := parseGantt(body)
+		if !ok {
+			return nil, false
+		}
+		if gc.title == "" {
+			gc.title = title
+		}
+		return gc.render(width)
 	case "pie":
 		p, ok := parsePie(header, body)
 		if !ok {

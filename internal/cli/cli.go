@@ -86,6 +86,7 @@ type options struct {
 	view         bool
 	listThemes   bool
 	template     string
+	section      string
 	showConfig   bool
 	completion   string
 	version      bool
@@ -113,6 +114,8 @@ Display:
 
 Output modes:
       --toc                print only the table of contents
+  -s, --section NAME       only the section under heading NAME (its #anchor or
+                           part of its text), e.g. kmd -s install README.md
       --html               export a standalone HTML page (raw HTML and
                            javascript:/file: links are removed)
       --unsafe-html        with --html: keep raw HTML and all URLs (trusted input only)
@@ -165,6 +168,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	str(&o.hyperlinks, "", "hyperlinks")
 	str(&o.template, "", "theme-template")
 	str(&o.completion, "", "completion")
+	str(&o.section, "", "s", "section")
 	boolean(&o.noPager, "P", "no-pager")
 	boolean(&o.noMath, "no-math")
 	boolean(&o.noDiagrams, "no-diagrams")
@@ -508,6 +512,15 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 			continue
 		}
 		doc := md.Parse(src, s.mdOpt)
+		if o.section != "" {
+			sec := section(doc, o.section)
+			if sec == nil {
+				fmt.Fprintf(env.Stderr, "kmd: %s: no section matching %q\n", render.Clean(displayName(name)), render.Clean(o.section))
+				res.code = 1
+				continue
+			}
+			doc = sec
+		}
 		opts := s.opts
 		if name != "-" {
 			opts.BaseDir = filepath.Dir(name)
@@ -556,6 +569,28 @@ func (res *output) addNav(r render.Result, offset int) {
 			res.anchors[k] = v + offset
 		}
 	}
+}
+
+// section extracts the section under the heading named q: the heading whose
+// anchor is q (with or without '#'), else the first heading whose text
+// contains q, ignoring case.
+func section(doc *md.Node, q string) *md.Node {
+	slug := render.Slug(strings.TrimPrefix(q, "#"))
+	if sec := md.Section(doc, func(h *md.Node) bool { return render.Slug(md.PlainText(h)) == slug }); sec != nil {
+		return sec
+	}
+	lq := strings.ToLower(strings.TrimSpace(q))
+	if lq == "" {
+		return nil
+	}
+	return md.Section(doc, func(h *md.Node) bool { return strings.Contains(strings.ToLower(md.PlainText(h)), lq) })
+}
+
+func displayName(name string) string {
+	if name == "-" {
+		return "stdin"
+	}
+	return name
 }
 
 func docTitle(doc *md.Node, name string) string {
@@ -670,24 +705,26 @@ func pageOf(res output) *view.Page {
 // runViewer opens the viewer; first (rendered for a terminal firstCols
 // wide) is its first page, or nil to render it.
 func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first *view.Page, firstCols int) error {
+	start := ""
+	if len(o.files) == 1 && o.files[0] != "-" {
+		start = o.files[0]
+	}
 	load := func(path string, cols int) (*view.Page, error) {
 		s := viewerSettings(s, max(cols, 1))
-		files := o.files
-		if path != "" {
-			files = []string{path}
+		lo := options{files: o.files}
+		if path == "" || path == start {
+			lo.section = o.section // the document kmd started with
+		} else {
+			lo.files = []string{path}
 		}
 		var errs strings.Builder
 		quiet := env
 		quiet.Stderr = &errs // errors go to the status bar, not the screen
-		res := renderFiles(quiet, options{files: files}, s, in)
-		if res.code != 0 && len(files) == 1 {
+		res := renderFiles(quiet, lo, s, in)
+		if res.code != 0 && len(lo.files) == 1 {
 			return nil, errors.New(strings.TrimPrefix(strings.TrimSpace(errs.String()), "kmd: "))
 		}
 		return pageOf(res), nil
-	}
-	start := ""
-	if len(o.files) == 1 && o.files[0] != "-" {
-		start = o.files[0]
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
 	opt := view.Options{Load: load, Start: start, Mouse: s.mouse, Watch: watch, Poll: env.Poll,

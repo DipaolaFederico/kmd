@@ -236,3 +236,47 @@ type Options struct {
 
 // GFM enables every GitHub Flavored Markdown extension.
 var GFM = Options{Tables: true, Strikethrough: true, Autolinks: true, TaskLists: true, Footnotes: true, Alerts: true, Math: true, FrontMatter: true}
+
+// Section moves the part of doc that starts at the first top-level heading
+// for which match is true into a new document: that heading and every block
+// up to the next heading of the same or a higher level. Footnote
+// definitions referenced from the section come along. It returns nil, and
+// leaves doc untouched, when no heading matches.
+func Section(doc *Node, match func(heading *Node) bool) *Node {
+	var start *Node
+	for c := doc.FirstChild; c != nil; c = c.Next {
+		if c.Type == Heading && match(c) {
+			start = c
+			break
+		}
+	}
+	if start == nil {
+		return nil
+	}
+	out := &Node{Type: Document}
+	refs := map[string]bool{}
+	for c := start; c != nil; {
+		next := c.Next
+		if c != start && c.Type == Heading && c.Level <= start.Level {
+			break
+		}
+		if c.Type != FootnoteDef {
+			Walk(c, func(n *Node, entering bool) bool {
+				if entering && n.Type == FootnoteRef {
+					refs[n.Label] = true
+				}
+				return true
+			})
+			out.AppendChild(c)
+		}
+		c = next
+	}
+	for c := doc.FirstChild; c != nil; {
+		next := c.Next
+		if c.Type == FootnoteDef && refs[c.Label] {
+			out.AppendChild(c)
+		}
+		c = next
+	}
+	return out
+}

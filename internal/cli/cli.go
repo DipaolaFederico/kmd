@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,21 @@ import (
 
 // Version is overridden at build time via -ldflags.
 var Version = "dev"
+
+// version is Version, or the module version Go recorded in the binary when
+// it was built with `go install github.com/DipaolaFederico/kmd@vX.Y.Z`
+// (no -ldflags there).
+func version() string { return versionFrom(Version, debug.ReadBuildInfo) }
+
+func versionFrom(v string, read func() (*debug.BuildInfo, bool)) string {
+	if v != "dev" {
+		return v
+	}
+	if bi, ok := read(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return bi.Main.Version
+	}
+	return v
+}
 
 // maxInput caps how much is read from a single source (16 MiB): the tree
 // and rendered lines take tens of bytes per input byte.
@@ -358,7 +374,7 @@ func Run(env Env) int {
 	}
 	switch {
 	case o.version:
-		fmt.Fprintf(env.Stdout, "kmd %s\n", Version)
+		fmt.Fprintf(env.Stdout, "kmd %s\n", version())
 		return 0
 	case o.completion != "":
 		return completion(env, o.completion)

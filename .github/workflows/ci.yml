@@ -28,8 +28,68 @@ env:
   GOTOOLCHAIN: local
 
 jobs:
+  # Changes that cannot affect kmd (README, contributing guide, templates,
+  # the release and PR-convention workflows) skip the other jobs. They are
+  # skipped rather than not started so the required checks still report
+  # (GitHub counts a skipped job as passed). Unknown paths always run CI.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      project: ${{ steps.diff.outputs.project }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Does the change touch the project?
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+          AFTER: ${{ github.sha }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          range=""
+          case $EVENT in
+            pull_request) range="$PR_BASE...$PR_HEAD" ;;
+            push)
+              # main: compare with the last release, not the previous push, so
+              # a docs-only push never "passes" CI (and triggers a release)
+              # on top of code whose CI failed or was cancelled
+              last=$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)
+              [ "$REF_TYPE" = branch ] && [ -n "$last" ] && range="$last..$AFTER" ;;
+          esac
+          # --no-renames: a code file renamed to README.md lists the deleted file too
+          if [ -z "$range" ] || ! files=$(git diff --no-renames --name-only "$range" 2>/dev/null); then
+            echo "Full run ($EVENT)."
+            echo "project=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "$files" | sed 's/^/  /'
+          # a file turned into a symlink could pull runner files into a release
+          for f in $files; do
+            if [ "$(git ls-tree "$AFTER" -- "$f" | cut -c1-6)" = 120000 ]; then
+              echo "Symlink changed ($f): full run."
+              echo "project=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          outside='^((README|CONTRIBUTING|SECURITY)\.md|LICENSE|\.gitignore|docs/PACKAGING\.md|\.github/(ISSUE_TEMPLATE/.*|pull_request_template\.md|CODEOWNERS|dependabot\.yml|workflows/(release|pr-conventions)\.yml))$'
+          if grep -qvE "$outside" <<<"$files"; then
+            echo "project=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only files outside the project changed: skipping lint, tests, security and build."
+            echo "project=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,6 +104,8 @@ jobs:
         run: make fmt-check
       - name: go vet
         run: make vet
+      - name: Release scripts
+        run: make scripts-test
       - name: staticcheck
         run: make staticcheck
       - name: No third-party dependencies
@@ -55,6 +117,8 @@ jobs:
 
   test:
     name: Test & coverage
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -78,6 +142,8 @@ jobs:
 
   security:
     name: Security
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -95,6 +161,8 @@ jobs:
 
   build:
     name: Build & packaging
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

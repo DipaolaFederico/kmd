@@ -22,10 +22,10 @@ VERSION_RPM := $(shell sed -n 's/^Version: *//p' packaging/kmd.spec)
 APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
-.PHONY: ci fmt fmt-check lint vet staticcheck test spec cover security vuln gosec \
+.PHONY: ci fmt fmt-check lint vet staticcheck scripts-test test spec cover security vuln gosec \
         build perf fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
 
-ci: fmt-check lint test cover security build packaging perf
+ci: fmt-check lint scripts-test test cover security build packaging perf
 	@printf '\n\033[1;32m✔ local CI passed\033[0m\n'
 
 ## Formatting ---------------------------------------------------------------
@@ -48,6 +48,10 @@ staticcheck: $(TOOLS)/staticcheck
 	@$(TOOLS)/staticcheck ./...
 
 ## Tests --------------------------------------------------------------------
+scripts-test:
+	@echo '» release scripts'
+	@./scripts/test-scripts.sh
+
 test:
 	@echo '» test (race detector)'
 	@$(GO) test -race -count=1 ./...

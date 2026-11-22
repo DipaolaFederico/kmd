@@ -1,17 +1,17 @@
-# Release: every merge to main publishes a new version once CI has passed on
-# it. The version is the latest vX.Y.Z tag plus the largest increment asked
-# for by the pull requests merged since that tag:
+# Release: a merge to main publishes a new version once CI has passed on it,
+# but only if it changes kmd for its users: the commits since the last
+# release must include a Conventional Commit that asks for one, and the
+# compiled binary must differ from the last release's.
 #
-#   release:major  → X+1.0.0     breaking change
-#   release:minor  → X.Y+1.0     new feature, backwards compatible
-#   release:patch  → X.Y.Z+1     fix / internal change (also: no label)
-#   release:skip   → no release  docs, CI, refactors users cannot notice
+#   feat!: … / BREAKING CHANGE footer  → X+1.0.0
+#   feat: …                            → X.Y+1.0
+#   fix: … · perf: … · revert: …       → X.Y.Z+1
+#   build, chore, ci, docs, refactor, style, test → no release
 #
-# Looking at every PR since the last tag (not only the one that triggered the
-# run) keeps labels from being lost when merges land close together and
-# GitHub drops queued runs. It can also be run by hand (Actions → Release →
-# Run workflow); only the repository owner may do that.
-# See CONTRIBUTING.md, "Releases".
+# The largest increment since the last tag wins, so nothing is lost when
+# merges land close together and GitHub drops queued runs. The owner can
+# also release by hand (Actions → Release → Run workflow), which skips both
+# conditions. See CONTRIBUTING.md, "Releases".
 name: Release
 
 on:
@@ -58,7 +58,6 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: read
-      pull-requests: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       sha: ${{ steps.sha.outputs.sha }}
@@ -92,13 +91,16 @@ jobs:
           fetch-depth: 0 # history and tags
           persist-credentials: false
 
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
+
       - name: Decide the increment
         id: bump
         env:
-          GH_TOKEN: ${{ github.token }}
           EVENT: ${{ github.event_name }}
           INPUT_BUMP: ${{ inputs.bump }}
-          REPO: ${{ github.repository }}
           SHA: ${{ steps.sha.outputs.sha }}
         run: |
           # strict vX.Y.Z only: a stray tag like v1.2.3-rc1 must not stop releases
@@ -114,28 +116,28 @@ jobs:
             echo "bump=$INPUT_BUMP" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          rank() { case $1 in major) echo 3 ;; minor) echo 2 ;; patch) echo 1 ;; *) echo 0 ;; esac; }
-          bump=""
+
+          # 1. what the commits since the last release ask for (squash
+          #    commits on main are the Conventional Commit PR titles)
           range=$SHA; [ -n "$last" ] && range="$last..$SHA"
-          for c in $(git rev-list --first-parent "$range"); do
-            # one call: the merged PR's number and its release labels
-            info=$(gh api "repos/$REPO/commits/$c/pulls" --jq \
-              '[.[] | select(.merged_at != null)][0] // empty | [(.number | tostring)] + [.labels[].name | select(startswith("release:"))] | join(" ")')
-            pr=${info%% *}
-            labels=${info#"$pr"}; labels=${labels# }
-            case " $labels " in
-              *" release:major "*) want=major ;;
-              *" release:minor "*) want=minor ;;
-              *" release:patch "*) want=patch ;;
-              *" release:skip "*)  want=skip ;;
-              *)                   want=patch ;; # no label, or a direct push
-            esac
-            echo "${c:0:7} PR #${pr:-none} [${labels:-no label}] → $want"
-            [ "$(rank "$want")" -gt "$(rank "$bump")" ] && bump=$want
-          done
+          git log --first-parent --format='  %h %s' "$range"
+          bump=$(git log -z --first-parent --format=%B "$range" | scripts/release-bump.sh)
           if [ -z "$bump" ]; then
-            echo "Only release:skip changes since ${last:-the start}: nothing to release."
+            echo "No feat, fix, perf or revert commits since ${last:-the start}: nothing to release."
             exit 0
+          fi
+
+          # 2. and the kmd binary must actually have changed
+          if [ -n "$last" ]; then
+            set +e
+            scripts/binary-changed.sh "$last" "$SHA"
+            status=$?
+            set -e
+            case $status in
+              0) ;;
+              1) echo "The commits ask for a $bump release, but the binary is identical to $last: nothing to release."; exit 0 ;;
+              *) echo "::error::Could not compare the binaries."; exit 1 ;;
+            esac
           fi
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
@@ -198,6 +200,9 @@ jobs:
             pids+=($!)
           done
           for p in "${pids[@]}"; do wait "$p"; done # fail if any build failed
+          for f in LICENSE README.md docs/kmd.1; do
+            [ -f "$f" ] && [ ! -L "$f" ] || { echo "::error::$f must be a regular file"; exit 1; }
+          done
           for t in $targets; do
             os=${t%/*} arch=${t#*/}
             name=kmd-v$VERSION-$os-$arch

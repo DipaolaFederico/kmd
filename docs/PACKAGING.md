@@ -56,7 +56,7 @@ copr-cli build kmd dist/rpmbuild/SRPMS/kmd-*.src.rpm
 ## Release checklist
 
 Automated by `.github/workflows/release.yml`: version from the latest tag and
-the pull request's `release:*` label, stamped by `scripts/stamp-version.sh`
+the Conventional Commits since it (only when the binary changed), stamped by `scripts/stamp-version.sh`
 into `packaging/kmd.spec`, `docs/kmd.1` and the metainfo, validated with
 `make packaging`, then tagged and published with binaries, the source
 tarball and `SHA256SUMS`. What remains manual is the Fedora side: import the

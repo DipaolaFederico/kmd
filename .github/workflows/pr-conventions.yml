@@ -1,0 +1,82 @@
+# Checks the repository conventions on every pull request (see
+# CONTRIBUTING.md): the title is a Conventional Commit — it becomes the
+# squash commit on main, which decides the release — and the branch is named
+# type/short-description. Then it labels the PR with the release that
+# merging it asks for (release:major/minor/patch/skip), for visibility.
+#
+# pull_request_target: runs with the base branch's code and a token that can
+# label fork PRs too. Safe because nothing from the PR is checked out or
+# executed; the title and branch name only reach the shell through env.
+name: PR conventions
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  conventions:
+    name: PR conventions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write # labels
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }} # trusted code only
+          persist-credentials: false
+
+      - name: Title is a Conventional Commit
+        id: title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          types='feat|fix|perf|revert|refactor|test|docs|build|ci|chore|style'
+          re="^($types)(\\([a-z0-9._/-]+\\))?!?: [^ ]"
+          if [[ ! $TITLE =~ $re ]]; then
+            echo "::error::PR title must be a Conventional Commit, e.g. 'feat(view): follow links' or 'fix(md): handle tabs' (types: ${types//|/, }). It becomes the commit on main."
+            exit 1
+          fi
+          bump=$(printf '%s\0' "$TITLE" | scripts/release-bump.sh)
+          echo "bump=$bump" >> "$GITHUB_OUTPUT"
+
+      - name: Branch is type/description
+        env:
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          types='feat|fix|perf|revert|refactor|test|docs|build|ci|chore|style'
+          if [ "$AUTHOR" = "dependabot[bot]" ] && [ "$SAME_REPO" = true ] && [[ $BRANCH =~ ^dependabot/ ]]; then exit 0; fi
+          re="^($types)/[a-z0-9][a-z0-9._-]*\$"
+          if [[ ! $BRANCH =~ $re ]]; then
+            echo "::error::Branch must be named type/short-description in lowercase, e.g. feat/link-navigation or fix/table-alignment (got '$BRANCH')."
+            exit 1
+          fi
+
+      - name: Label the release it asks for
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BUMP: ${{ steps.title.outputs.bump }}
+        run: |
+          want=release:${BUMP:-skip}
+          gh api "repos/$REPO/issues/$PR/labels" --jq '.[].name | select(startswith("release:"))' |
+            while IFS= read -r l; do
+              if [ "$l" != "$want" ]; then
+                gh api -X DELETE "repos/$REPO/issues/$PR/labels/$(jq -rn --arg l "$l" '$l | @uri')" >/dev/null
+              fi
+            done
+          gh api "repos/$REPO/issues/$PR/labels" -f "labels[]=$want" >/dev/null
+          case $want in
+            release:skip) msg="merging publishes no release (not a feat, fix, perf or revert)" ;;
+            *) msg="merging publishes a ${want#release:} release, if the kmd binary changed" ;;
+          esac
+          echo "::notice::$msg"
+          echo "### Release: $msg" >> "$GITHUB_STEP_SUMMARY"

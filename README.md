@@ -41,6 +41,7 @@ untrusted input.
 | ∑ | **Math** | `$…$`, `$$…$$` and ` ```math ` blocks rendered as Unicode, including fractions, roots, sums and matrices |
 | 🌈 | **Themes** | 13 bundled themes; custom themes from a 17-color palette |
 | 🔄 | **Live preview** | `-f` re-renders the file every time it is saved |
+| 🎤 | **Presentations** | `--slides` shows a document one slide at a time |
 | 🌐 | **HTML export** | standalone page with the theme colors; raw HTML and unsafe URLs removed by default |
 
 ## 📦 Installation
@@ -117,6 +118,7 @@ kmd -P README.md | less -R    # print without the viewer
 kmd --toc CHANGELOG.md        # table of contents only
 kmd -s install README.md      # only the section under the "Installation" heading
 kmd --html doc.md > doc.html  # export a standalone HTML page
+kmd --slides talk.md          # present: one slide per "---" (or per # / ## heading)
 kmd -t catppuccin-mocha doc.md
 kmd -w 80 doc.md              # fixed render width
 ```
@@ -131,6 +133,7 @@ kmd -w 80 doc.md              # fixed render width
 | 📋 Get an overview of a long document | `kmd --toc doc.md` |
 | 🎯 Read one section, or print it from a script | `kmd -s install README.md` |
 | 📤 Share a rendered document | `kmd --html doc.md > doc.html` |
+| 🎤 Present from the terminal | `kmd --slides talk.md` (`-f` reloads on save) |
 | 🔌 Render remote Markdown without downloading it to disk | `curl -s https://…/README.md \| kmd` |
 | 🖨️ Plain output for scripts or logs | `kmd -c never -P doc.md` |
 
@@ -154,6 +157,7 @@ Output modes:
       --html               export a standalone HTML page (safe: raw HTML removed)
       --unsafe-html        with --html: keep raw HTML and every URL
   -f, --follow             live preview: re-render whenever the file changes
+      --slides             present the document as slides
 Themes and configuration:
       --list-themes        bundled and user themes (with color swatches)
       --theme-template T   print theme T as an editable file
@@ -197,6 +201,28 @@ Inside the viewer, images are drawn with Unicode blocks, since terminal
 graphics protocols cannot scroll with the text. To use an external pager
 instead, set `pager = less -R` in the configuration or `KMD_PAGER`.
 `mouse = off` leaves the mouse to the terminal for text selection.
+
+### Presentations
+
+`kmd --slides talk.md` splits the document at every `---` line (or, when
+there is none, before every `#` and `##` heading) and shows one slide at a
+time, centered. `→` `Space` `PgDn` go forward, `←` `PgUp` back, `g` `G` to
+the first and last slide; `j` `k` scroll a slide taller than the screen.
+Links to web pages and files open as in the viewer. With `-f`, the slides
+are re-rendered every time the file is saved.
+
+```markdown
+# Release 2.0
+
+Highlights of the quarter
+
+---
+
+## New features
+
+- Section jumps in the viewer
+- Presentations
+```
 
 ## 🎨 Themes
 

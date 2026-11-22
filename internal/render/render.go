@@ -26,6 +26,27 @@ type Options struct {
 
 	// Navigate fills Result.Links and Result.Anchors (interactive viewer).
 	Navigate bool
+
+	// Budget, when set, is shared by several Render calls that make up
+	// one document (the slides of a presentation); nil: a new one.
+	Budget *Budget
+}
+
+// Budget holds the per-document limits: a short hostile document must not
+// be able to trigger unbounded image decoding, diagram layout or math
+// layout. Images are decoded once per budget. The zero value is ready.
+type Budget struct {
+	images    map[string]imageResult
+	imgBytes  int
+	specials  int
+	mathCount int
+}
+
+func budget(o Options) *Budget {
+	if o.Budget != nil {
+		return o.Budget
+	}
+	return &Budget{}
 }
 
 // Result is the rendered document.
@@ -66,12 +87,7 @@ type renderer struct {
 	graphics bool
 	langs    map[string]*lang // lexers built for this document
 
-	// per-document budgets: a short hostile document must not be able to
-	// trigger unbounded image decoding, diagram layout or math layout.
-	images    map[string]imageResult
-	imgBytes  int
-	specials  int
-	mathCount int
+	*Budget
 
 	links  *nav   // link registry (Navigate)
 	absDir string // absolute BaseDir, resolved once for href
@@ -91,7 +107,7 @@ func Render(doc *md.Node, o Options) Result {
 	if o.Theme == nil {
 		o.Theme = &Dark
 	}
-	r := &renderer{th: o.Theme, opt: o}
+	r := &renderer{th: o.Theme, opt: o, Budget: budget(o)}
 	width := max(o.Width-2*len(margin), 10)
 	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
 	var anchors *anchorSet
@@ -727,7 +743,7 @@ func TOC(doc *md.Node, o Options) string {
 	if o.Theme == nil {
 		o.Theme = &Dark
 	}
-	r := &renderer{th: o.Theme, opt: o}
+	r := &renderer{th: o.Theme, opt: o, Budget: budget(o)}
 	width := max(o.Width-2*len(margin), 10)
 	var counters [7]int
 	var stack []int // levels of the currently open headings

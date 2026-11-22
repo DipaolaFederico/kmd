@@ -722,7 +722,7 @@ func TestCompletionsCoverFlags(t *testing.T) {
 	var flags []string
 	for _, f := range strings.Fields(usage) {
 		f = strings.TrimRight(f, ",:")
-		if strings.HasPrefix(f, "--") && len(f) > 2 && !strings.ContainsAny(f, "=|") {
+		if strings.HasPrefix(f, "--") && len(f) > 2 && f[2] >= 'a' && f[2] <= 'z' && !strings.ContainsAny(f, "=|") {
 			flags = append(flags, f)
 		}
 	}
@@ -838,5 +838,68 @@ func TestDirectoryListingBound(t *testing.T) {
 	r := run(t, nil, "-c", "never", "-P", dir)
 	if !strings.Contains(r.out, "Only the first 2000 entries") || strings.Count(r.out, "(./f") != maxDirEntries {
 		t.Errorf("bound: %d entries", strings.Count(r.out, "(./f"))
+	}
+}
+
+func TestSlidesMode(t *testing.T) {
+	p := writeFile(t, "deck.md", "# One\n\n[web](https://x.y) and `code`\n\n```go\nx := 1\n```\n\n---\n\n## Two\n\nsecond\n")
+	var got view.Options
+	tty := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 30
+		e.View = func(o view.Options) error { got = o; return nil }
+	}
+	r := run(t, tty, "--slides", p)
+	if r.code != 0 || got.Slides == nil || got.Start != p {
+		t.Fatalf("slides: %+v", r)
+	}
+	pages, err := got.Slides(100, 30)
+	if err != nil || len(pages) != 2 {
+		t.Fatalf("pages: %d %v", len(pages), err)
+	}
+	first := pages[0]
+	// centered: indented to the middle of a 100-column terminal, moved down
+	if !strings.HasPrefix(first.Lines[first.Headings[0].Line], strings.Repeat(" ", 5)) || first.Headings[0].Line < 5 {
+		t.Errorf("not centered: %q at %d", first.Lines[first.Headings[0].Line], first.Headings[0].Line)
+	}
+	l := first.Links[0].Spans[0]
+	if line := stripTest(first.Lines[l.Line]); !strings.HasPrefix(string([]rune(line)[l.Col:]), "web") {
+		t.Errorf("link span not moved with the slide: %q col %d", line, l.Col)
+	}
+	if c := first.Code[0]; !strings.Contains(stripTest(first.Lines[c.Start]), "╭") {
+		t.Errorf("code block not moved: %q", first.Lines[c.Start])
+	}
+	if s := stripTest(strings.Join(pages[1].Lines, "\n")); !strings.Contains(s, "second") || strings.Contains(s, "One") {
+		t.Errorf("second slide: %q", s)
+	}
+	// a terminal as wide as the text: nothing to center
+	if pages, _ := got.Slides(20, 3); !strings.HasPrefix(stripTest(pages[0].Lines[1]), "  ") || pages[0].Lines[0] != "" {
+		t.Errorf("narrow: %q", pages[0].Lines[:2])
+	}
+
+	if r := run(t, tty, "--slides", "-s", "two", p); r.code != 0 {
+		t.Errorf("section: %+v", r)
+	} else if pages, _ := got.Slides(80, 24); len(pages) != 1 {
+		t.Errorf("section slides: %d", len(pages))
+	}
+	if r := run(t, nil, "--slides", p); r.code != 2 || !strings.Contains(r.errOut, "needs a terminal") {
+		t.Errorf("not a terminal: %+v", r)
+	}
+	for _, args := range [][]string{{"--slides", p, p}, {"--slides", "--html", p}, {"--slides", "--toc", p}} {
+		if r := run(t, tty, args...); r.code != 2 {
+			t.Errorf("%v: %+v", args, r)
+		}
+	}
+	if r := run(t, tty, "--slides", p+".missing"); r.code != 1 || !strings.Contains(r.errOut, "missing") {
+		t.Errorf("missing file: %+v", r)
+	}
+	r = run(t, func(e *Env) {
+		tty(e)
+		e.View = func(view.Options) error { return errors.New("no tty") }
+	}, "--slides", p)
+	if r.code != 1 || !strings.Contains(r.errOut, "no tty") {
+		t.Errorf("viewer error: %+v", r)
+	}
+	if r := run(t, tty, "--slides"); r.code != 0 || got.Start != "" {
+		t.Errorf("stdin: %+v", r)
 	}
 }

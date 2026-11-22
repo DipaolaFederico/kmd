@@ -57,6 +57,11 @@ type Options struct {
 	Edit func(path string) error
 	// Copy puts text in the clipboard (OSC 52 in the terminal).
 	Copy func(text string) error
+
+	// Slides, when set, turns the viewer into a presentation: it renders
+	// the slides for a terminal cols × rows (Load is then only used to
+	// check that Start can be read).
+	Slides func(cols, rows int) ([]*Page, error)
 }
 
 // entry is a history position.
@@ -90,6 +95,9 @@ type model struct {
 	quit bool
 
 	copied int // code block copied last (c), -1 = none
+
+	slides []*Page // presentation mode
+	slide  int
 
 	outline    bool // the outline (t) is open
 	ocur, otop int  // its selected heading and first visible row
@@ -144,6 +152,9 @@ const maxMatches = 10000
 
 func newModel(opt Options, cols, rows int) (*model, error) {
 	m := &model{opt: opt, cols: cols, rows: rows, sel: -1, path: opt.Start}
+	if opt.Slides != nil {
+		return m, m.loadSlides(0)
+	}
 	p := opt.First
 	if p == nil || opt.FirstCols != cols {
 		var err error
@@ -240,6 +251,9 @@ func (m *model) linkAt(x, y int) int {
 
 // load replaces the page with the document at path, keeping history.
 func (m *model) load(path string) error {
+	if m.opt.Load == nil {
+		return errors.New("cannot open documents here")
+	}
 	p, err := m.opt.Load(path, m.cols)
 	if err != nil {
 		return err
@@ -283,6 +297,16 @@ func (m *model) goBack(i int) {
 // reload re-renders the current page (file changed, terminal resized),
 // keeping the reading position in proportion.
 func (m *model) reload() {
+	if m.slides != nil {
+		top := m.top
+		if err := m.loadSlides(m.slide); err != nil {
+			m.msg = errText(err)
+			return
+		}
+		m.top = top
+		m.scroll(0)
+		return
+	}
 	p, err := m.opt.Load(m.path, m.cols)
 	if err != nil {
 		m.msg = errText(err)
@@ -326,6 +350,10 @@ func (m *model) follow(href string) {
 	u, err := url.Parse(href)
 	if err != nil || !render.SafeURL(href) {
 		m.msg = "invalid link"
+		return
+	}
+	if m.slides != nil && !m.slideLink(href) {
+		m.msg = "documents do not open during a presentation"
 		return
 	}
 	switch strings.ToLower(u.Scheme) {
@@ -377,6 +405,10 @@ func (m *model) followFile(path, frag string) {
 		return
 	}
 	if st.IsDir() {
+		if m.slides != nil {
+			m.msg = "documents do not open during a presentation"
+			return
+		}
 		found := false
 		for _, n := range render.IndexNames {
 			if s, err := os.Stat(filepath.Join(path, n)); err == nil && !s.IsDir() {

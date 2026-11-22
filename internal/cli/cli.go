@@ -84,6 +84,7 @@ type options struct {
 	unsafeHTML   bool
 	follow       bool
 	view         bool
+	slides       bool
 	listThemes   bool
 	template     string
 	section      string
@@ -123,6 +124,8 @@ Output modes:
                            javascript:/file: links are removed)
       --unsafe-html        with --html: keep raw HTML and all URLs (trusted input only)
   -f, --follow             live preview: re-render when the file changes
+      --slides             present the document as slides (split at --- or
+                           at level 1-2 headings); with -f, live
 
 Themes and configuration:
       --list-themes        list bundled and user themes
@@ -181,6 +184,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	boolean(&o.unsafeHTML, "unsafe-html")
 	boolean(&o.follow, "f", "follow")
 	boolean(&o.view, "view")
+	boolean(&o.slides, "slides")
 	boolean(&o.listThemes, "list-themes")
 	boolean(&o.showConfig, "config")
 	boolean(&o.version, "v", "version")
@@ -219,6 +223,9 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	}
 	if o.follow && len(o.files) != 1 {
 		return o, errors.New("--follow needs exactly one file")
+	}
+	if o.slides && (len(o.files) > 1 || o.html || o.toc) {
+		return o, errors.New("--slides shows one document, without --html or --toc")
 	}
 	return o, nil
 }
@@ -422,6 +429,17 @@ func Run(env Env) int {
 		o.files = []string{"-"}
 	}
 	resolveDirs(o.files)
+	if o.slides {
+		if !env.StdoutTTY || !view.Supported {
+			fmt.Fprintf(env.Stderr, "kmd: %v\n", errSlidesTTY)
+			return 2
+		}
+		if err := runSlides(env, o, s, o.follow); err != nil {
+			fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
+			return 1
+		}
+		return 0
+	}
 	viewable := !o.html && !o.toc && env.StdoutTTY && (s.pager == builtinPager || s.alwaysView)
 	if o.follow {
 		// live preview in the viewer: links stay navigable, position is kept
@@ -504,39 +522,14 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	title := ""
 	lines := 0 // lines written so far (offset of the next document's links)
 	for _, name := range o.files {
-		var src string
-		var err error
-		isDir := false
-		if name == "-" && in.read {
-			src = in.src
-		} else {
-			src, isDir, err = readSource(name, env.Stdin)
-			if name == "-" {
-				in.src, in.read = src, true
-			}
-		}
+		doc, base, err := loadDoc(env, name, o.section, s, in)
 		if err != nil {
 			fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
 			res.code = 1
 			continue
 		}
-		doc := md.Parse(src, s.mdOpt)
-		if o.section != "" {
-			sec := section(doc, o.section)
-			if sec == nil {
-				fmt.Fprintf(env.Stderr, "kmd: %s: no section matching %q\n", render.Clean(displayName(name)), render.Clean(o.section))
-				res.code = 1
-				continue
-			}
-			doc = sec
-		}
 		opts := s.opts
-		switch {
-		case isDir:
-			opts.BaseDir = name
-		case name != "-":
-			opts.BaseDir = filepath.Dir(name)
-		}
+		opts.BaseDir = base
 		switch {
 		case o.html:
 			htmlParts = append(htmlParts, md.HTML(doc, md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML}))
@@ -593,6 +586,38 @@ func (res *output) addNav(r render.Result, offset int) {
 			res.anchors[k] = v + offset
 		}
 	}
+}
+
+// loadDoc reads and parses a document (a file, a folder listing or stdin,
+// "-") and keeps only the section named sec, if any. base is the directory
+// its relative links resolve against.
+func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Node, base string, err error) {
+	var src string
+	isDir := false
+	if name == "-" && in.read {
+		src = in.src
+	} else {
+		src, isDir, err = readSource(name, env.Stdin)
+		if name == "-" {
+			in.src, in.read = src, true
+		}
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	doc = md.Parse(src, s.mdOpt)
+	if sec != "" {
+		if doc = section(doc, sec); doc == nil {
+			return nil, "", fmt.Errorf("%s: no section matching %q", displayName(name), sec)
+		}
+	}
+	switch {
+	case isDir:
+		base = name
+	case name != "-":
+		base = filepath.Dir(name)
+	}
+	return doc, base, nil
 }
 
 // section extracts the section under the heading named q: the heading whose

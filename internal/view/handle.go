@@ -28,6 +28,9 @@ func (m *model) handle(k key) {
 	if name == "char" {
 		name = string(k.r)
 	}
+	if m.slides != nil && m.handleSlide(name) {
+		return
+	}
 	switch name {
 	case "q", "Q", "ctrl-c":
 		m.quit = true

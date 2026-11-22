@@ -86,6 +86,18 @@ happens in the viewer, which keeps the scroll position and lets links be
 followed (the document on screen is the one watched); quit with \fBq\fR.
 With \fB\-P\fR, or when the output is not a terminal, the screen is redrawn
 instead; stop with Ctrl+C.
+.TP
+.B \-\-slides
+Present the document as slides in the viewer: it is split at every
+top\-level thematic break (\fB\-\-\-\fR), or, when there is none, before
+every level 1 and 2 heading, and each slide is shown centered (rendered at
+most 80 columns wide unless \fB\-\-width\fR is given). \fBRight\fR,
+\fBSpace\fR, \fBPgDn\fR, \fBn\fR and \fBEnter\fR go to the next slide;
+\fBLeft\fR, \fBPgUp\fR, \fBp\fR and \fBBackspace\fR to the previous one;
+\fBg\fR and \fBG\fR to the first and last; \fBj\fR and \fBk\fR scroll a slide
+taller than the screen. Web links and files open as in the viewer; linked
+Markdown documents do not. Works with \fB\-f\fR (the slides are re\-rendered
+when the file changes) and \fB\-s\fR. Needs a terminal.
 .SS Themes and configuration
 .TP
 .B \-\-list\-themes

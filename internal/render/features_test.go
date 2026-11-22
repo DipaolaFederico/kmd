@@ -315,7 +315,7 @@ func TestSecurityHardening(t *testing.T) {
 	// repeated images are decoded once and drawn from the cache
 	dir := t.TempDir()
 	writePNG(t, dir)
-	r := &renderer{th: &Dark, opt: Options{Width: 40, Color: true, Images: termimg.Blocks, BaseDir: dir}}
+	r := &renderer{Budget: &Budget{}, th: &Dark, opt: Options{Width: 40, Color: true, Images: termimg.Blocks, BaseDir: dir}}
 	doc := md.Parse(strings.Repeat("![a](pic.png)\n\n", 200), md.GFM)
 	lines := r.blocks(doc, 36, false)
 	if len(r.images) != 1 || len(lines) == 0 {

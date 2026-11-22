@@ -26,14 +26,32 @@ type Span struct {
 	Text  string // plain text of the span
 }
 
+// CodeBlock is a code block of the rendered document, so the viewer can
+// copy its source.
+type CodeBlock struct {
+	Lang       string
+	Text       string // source, as written in the document
+	Start, End int    // first and last line of its box in Result.Text (-1: not drawn)
+}
+
 // nav collects link positions while lines are painted.
 type nav struct {
 	row   int
 	links []Link
+	code  []CodeBlock
 }
 
-// span records that columns [col, col+w) of the current row belong to link id.
+// span records that columns [col, col+w) of the current row belong to link
+// id, or, for a negative id, that the row is part of code block -id.
 func (n *nav) span(id int32, col, w int, text string) {
+	if id < 0 {
+		c := &n.code[-id-1]
+		if c.Start < 0 {
+			c.Start = n.row
+		}
+		c.End = n.row
+		return
+	}
 	l := &n.links[id-1]
 	if k := len(l.Spans) - 1; k >= 0 && l.Spans[k].Line == n.row && l.Spans[k].Col+l.Spans[k].Width == col {
 		l.Spans[k].Width += w

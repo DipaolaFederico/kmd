@@ -99,6 +99,15 @@ func Run(opt Options) error {
 	if opt.Open == nil {
 		opt.Open = openExternal
 	}
+	if opt.Copy == nil {
+		opt.Copy = func(text string) error {
+			if c := clipboardCommand(os.Getenv, exec.LookPath, runtime.GOOS); c != nil {
+				return runClipboard(c, text)
+			}
+			_, err := f.WriteString(osc52(text))
+			return err
+		}
+	}
 	m, err := newModel(opt, cols, rows)
 	if err != nil {
 		return err
@@ -241,5 +250,28 @@ func openExternal(target string) error {
 		return err
 	}
 	go func() { _ = cmd.Wait() }()
+	return nil
+}
+
+// runClipboard sends text to a clipboard program on its standard input.
+// The program (wl-copy, xclip…) keeps serving the clipboard in the
+// background; its output is discarded and it is detached from the terminal.
+func runClipboard(argv []string, text string) error {
+	// #nosec G204 -- fixed programs found by clipboardCommand; the text goes to stdin.
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdin = strings.NewReader(text)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	done := make(chan error, 1)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { done <- cmd.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			return errors.New(filepath.Base(argv[0]) + " failed")
+		}
+	case <-time.After(2 * time.Second): // still serving the selection: fine
+	}
 	return nil
 }

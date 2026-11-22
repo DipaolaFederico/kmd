@@ -15,10 +15,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DipaolaFederico/kmd/internal/bridge"
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/termimg"
 	"github.com/DipaolaFederico/kmd/internal/view"
+	api "github.com/DipaolaFederico/kmd/render" // the public package: kmd is its first user
 )
 
 // Version is overridden at build time via -ldflags.
@@ -39,9 +41,8 @@ func versionFrom(v string, read func() (*debug.BuildInfo, bool)) string {
 	return v
 }
 
-// maxInput caps how much is read from a single source (16 MiB): the tree
-// and rendered lines take tens of bytes per input byte.
-const maxInput = 16 << 20
+// maxInput caps how much is read from a single source.
+const maxInput = md.MaxInput
 
 // maxWidth bounds --width so a typo cannot allocate gigabytes of padding.
 const maxWidth = 1000
@@ -265,18 +266,22 @@ func isLightBackground(getenv func(string) string) bool {
 	return err == nil && n != 8 && n >= 7 && n <= 15
 }
 
+// resolve turns flags, configuration and environment into settings. The
+// render options are built as public render.Options and converted by the
+// public package, exactly as for a library user.
 func resolve(o options, cfg config, env Env) (settings, error) {
 	get := env.Getenv
 	var s settings
+	var pub api.Options
 
 	color := firstNonEmpty(o.color, cfg.Color, "auto")
-	s.opts.Color = color == "always" ||
+	pub.Color = color == "always" ||
 		(color == "auto" && env.StdoutTTY && get("NO_COLOR") == "" && get("TERM") != "dumb")
 	ct := get("COLORTERM")
-	s.opts.TrueColor = ct == "truecolor" || ct == "24bit"
+	pub.TrueColor = ct == "truecolor" || ct == "24bit"
 
 	links := firstNonEmpty(o.hyperlinks, cfg.Hyperlinks, "auto")
-	s.opts.Hyperlinks = links == "always" || (links == "auto" && s.opts.Color && env.StdoutTTY)
+	pub.Hyperlinks = links == "always" || (links == "auto" && pub.Color && env.StdoutTTY)
 
 	s.fixedWidth = o.width
 	if s.fixedWidth == 0 {
@@ -286,7 +291,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	if cfg.MaxWidth > 0 {
 		s.maxWidth = cfg.MaxWidth
 	}
-	s.opts.Width = s.width(env.Cols)
+	pub.Width = min(s.width(env.Cols), api.MaxWidth)
 
 	name := firstNonEmpty(o.theme, get("KMD_THEME"), cfg.Theme, "auto")
 	if name == "auto" {
@@ -295,37 +300,40 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 			name = firstNonEmpty(cfg.LightTheme, "tokyo-night-day")
 		}
 	}
-	th, err := render.LoadTheme(name, render.ThemeDirs(get))
+	th, err := api.LoadTheme(name, render.ThemeDirs(get)...)
+	if errors.Is(err, api.ErrUnknownTheme) {
+		err = fmt.Errorf("%w (see kmd --list-themes)", err)
+	}
 	if err != nil {
 		return s, err
 	}
-	s.opts.Theme, s.themeNm = th, name
+	pub.Theme, s.themeNm = th, name
 
 	mode := firstNonEmpty(o.images, cfg.Images, "auto")
 	if mode == "auto" {
-		s.opts.Images = termimg.None
-		if s.opts.Color && env.StdoutTTY {
-			s.opts.Images = termimg.Detect(get, s.opts.TrueColor)
+		mode = "none"
+		if pub.Color && env.StdoutTTY {
+			mode = termimg.Detect(get, pub.TrueColor).String()
 		}
-	} else {
-		p, err := termimg.ParseProtocol(mode)
-		if err != nil {
-			return s, err
-		}
-		s.opts.Images = p
 	}
-	s.opts.Cell = termimg.Cell{W: env.CellW, H: env.CellH}
-	s.opts.ImageRows = cfg.ImageRows
+	if pub.Images, err = api.ParseImageMode(mode); err != nil {
+		return s, err
+	}
+	pub.CellWidth, pub.CellHeight = min(max(env.CellW, 0), 512), min(max(env.CellH, 0), 512)
+	pub.ImageRows = cfg.ImageRows
 
-	s.opts.Math = !o.noMath && (cfg.Math == nil || *cfg.Math)
-	s.opts.Diagrams = !o.noDiagrams && (cfg.Diagrams == nil || *cfg.Diagrams)
-	s.mdOpt = md.GFM
-	if o.commonmark {
-		s.mdOpt = md.Options{}
+	pub.NoMath = o.noMath || (cfg.Math != nil && !*cfg.Math)
+	pub.NoDiagrams = o.noDiagrams || (cfg.Diagrams != nil && !*cfg.Diagrams)
+	pub.CommonMark = o.commonmark
+
+	c, err := bridge.Resolve(pub)
+	if err != nil {
+		return s, err
 	}
-	if !s.opts.Math {
-		s.mdOpt.Math = false
-	}
+	s.opts, s.mdOpt = c.Render, c.Parse
+	// The user chose to open the document: its images may live anywhere
+	// (../assets/x.png, absolute paths), unlike in the library's default.
+	s.opts.AnyImagePath = true
 	s.pager = firstNonEmpty(get("KMD_PAGER"), cfg.Pager, builtinPager)
 	if s.pager == builtinPager && !view.Supported {
 		s.pager = "less -R"
@@ -558,7 +566,7 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 		}
 	}
 	if o.html {
-		res.text = htmlPage(title, strings.Join(htmlParts, "<hr />\n"), s.opts.Theme)
+		res.text = render.HTMLPage(title, strings.Join(htmlParts, "<hr />\n"), "kmd "+version(), s.opts.Theme)
 		return res
 	}
 	res.text = out.String()

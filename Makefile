@@ -22,7 +22,7 @@ VERSION_RPM := $(shell sed -n 's/^Version: *//p' packaging/kmd.spec)
 APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
-.PHONY: ci fmt fmt-check lint vet staticcheck scripts-test test spec cover security vuln gosec \
+.PHONY: ci fmt fmt-check lint vet staticcheck scripts-test test spec cover api api-update security vuln gosec \
         build perf fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
 
 ci: fmt-check lint scripts-test test cover security build packaging perf
@@ -63,11 +63,21 @@ spec:
 cover:
 	@echo '» coverage (min $(COVER_MIN)%)'
 	@# quiet on success; on failure show the failing tests (not the ok lines)
-	@out=$$($(GO) test -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... 2>&1) || \
+	@out=$$($(GO) test -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... ./render/... 2>&1) || \
 		{ printf '%s\n' "$$out" | grep -vE '^(ok|\?) '; exit 1; }
 	@$(GO) tool cover -func=coverage.out | awk -v min=$(COVER_MIN) '/^total:/ { \
 		sub("%", "", $$3); printf "  total coverage: %s%%\n", $$3; \
 		if ($$3 + 0 < min) { print "  coverage below " min "%"; exit 1 } }'
+
+# The public package's exported API, checked against render/testdata/api.txt
+# (also part of `make test`). api-update accepts additions; never use it to
+# hide a removal or change after v1.0.0: that needs a new major version.
+api:
+	@echo '» public API (render/testdata/api.txt)'
+	@$(GO) test -count=1 -run '^TestAPI$$' ./render/
+
+api-update:
+	$(GO) test -count=1 -run '^TestAPI$$' ./render/ -update-api
 
 fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzParse -fuzztime=$(FUZZ_TIME) ./internal/md/

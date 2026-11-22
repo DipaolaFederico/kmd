@@ -240,6 +240,10 @@ type Options struct {
 	WikiLinks     bool // [[Page]], [[Page#Heading|label]] links to Page.md
 }
 
+// MaxInput is the largest document accepted (16 MiB): the tree and the
+// rendered lines take tens of bytes per input byte.
+const MaxInput = 16 << 20
+
 // GFM enables every extension: GitHub Flavored Markdown and the GitHub and
 // Obsidian additions above.
 var GFM = Options{Tables: true, Strikethrough: true, Autolinks: true, TaskLists: true, Footnotes: true, Alerts: true,

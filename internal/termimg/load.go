@@ -24,6 +24,7 @@ const (
 	maxDataURIBytes = 10 << 20   // largest decoded data: URI payload
 	maxDimension    = 8192       // largest width or height in pixels
 	maxPixels       = 40_000_000 // largest width×height
+	maxPathBytes    = 4096       // longest confined image path (PATH_MAX)
 )
 
 // Load resolves src and validates it as a PNG, JPEG or GIF image. src is a
@@ -77,6 +78,65 @@ func urlScheme(s string) string {
 	return ""
 }
 
+// LoadIn is Load confined to the directory dir: src must be a data: URI or
+// a relative path that stays inside dir. Absolute paths, file: URLs, ".."
+// and symbolic links leading outside dir are refused: symbolic links by
+// os.Root, the others with ErrOutside. With dir == "" only data: URIs load.
+func LoadIn(src, dir string) (*Image, error) {
+	src = strings.TrimSpace(src)
+	if src == "" {
+		return nil, fmt.Errorf("termimg: empty image source")
+	}
+	if strings.HasPrefix(src, "//") {
+		return nil, ErrRemote
+	}
+	switch scheme := strings.ToLower(urlScheme(src)); scheme {
+	case "":
+	case "data":
+		return Load(src, "")
+	case "file":
+		return nil, ErrOutside
+	default:
+		return nil, ErrRemote
+	}
+	if dir == "" || len(src) > maxPathBytes {
+		return nil, ErrOutside
+	}
+	// Refuse what cannot stay inside dir before any system call (os.Root
+	// walks a long "a/../a/../…" one component at a time); os.Root still
+	// guards against symbolic links.
+	p, ok := localPath(src)
+	if !ok {
+		return nil, ErrOutside
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	img, err := loadFrom(root, p)
+	if errors.Is(err, fs.ErrNotExist) && strings.Contains(src, "%") {
+		if u, uerr := url.PathUnescape(src); uerr == nil && u != src {
+			if p, ok = localPath(u); !ok {
+				return nil, ErrOutside
+			}
+			img, err = loadFrom(root, p)
+		}
+	}
+	return img, err
+}
+
+// localPath cleans a slash-separated relative path and reports whether it
+// stays below its starting directory (no "..", absolute path, volume name
+// or leading separator).
+func localPath(p string) (string, bool) {
+	if strings.HasPrefix(p, "/") || strings.HasPrefix(p, `\`) {
+		return "", false
+	}
+	p = filepath.Clean(filepath.FromSlash(p))
+	return p, filepath.IsLocal(p)
+}
+
 // loadPath resolves a (possibly relative, possibly percent-encoded) path.
 func loadPath(p, baseDir string) (*Image, error) {
 	if !filepath.IsAbs(p) {
@@ -91,10 +151,30 @@ func loadPath(p, baseDir string) (*Image, error) {
 	return img, err
 }
 
-// loadFile reads and validates an image file. Only regular files are opened:
+// fileSystem is where image files are read from: the whole file system
+// (osFS) or an *os.Root confining every access to one directory.
+type fileSystem interface {
+	Stat(name string) (fs.FileInfo, error)
+	OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error)
+}
+
+type osFS struct{}
+
+func (osFS) Stat(name string) (fs.FileInfo, error) { return os.Stat(name) }
+
+func (osFS) OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error) {
+	// #nosec G304 -- see loadFrom: the path is checked, opened non-blocking,
+	// re-checked on the descriptor, size-limited and sniffed.
+	return os.OpenFile(name, flag, perm)
+}
+
+// loadFile reads and validates an image file anywhere on the file system.
+func loadFile(path string) (*Image, error) { return loadFrom(osFS{}, path) }
+
+// loadFrom reads and validates an image file. Only regular files are opened:
 // a FIFO or device could block forever or produce unbounded data.
-func loadFile(path string) (*Image, error) {
-	fi, err := os.Stat(path)
+func loadFrom(fsys fileSystem, path string) (*Image, error) {
+	fi, err := fsys.Stat(path)
 	if err != nil {
 		return nil, err
 	}
@@ -104,11 +184,11 @@ func loadFile(path string) (*Image, error) {
 	if fi.Size() > maxFileBytes {
 		return nil, fmt.Errorf("%w: %s is %d bytes", ErrTooLarge, path, fi.Size())
 	}
-	// #nosec G304 -- the path comes from the (untrusted) document: it was
-	// checked to be a regular file above, is opened non-blocking so a FIFO
-	// swapped in meanwhile cannot hang us, is re-checked on the descriptor,
+	// The path comes from the (untrusted) document: it was checked to be a
+	// regular file above, is opened non-blocking so a FIFO swapped in
+	// meanwhile cannot hang us, is re-checked on the descriptor,
 	// size-limited, and sniffed as PNG/JPEG/GIF before use.
-	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := fsys.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}

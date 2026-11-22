@@ -94,6 +94,7 @@ type Frame struct {
 // Errors returned by Load and Render.
 var (
 	ErrRemote      = errors.New("remote images are not fetched")
+	ErrOutside     = errors.New("termimg: image outside the document directory")
 	ErrTooLarge    = errors.New("termimg: image too large")
 	ErrUnsupported = errors.New("termimg: unsupported image format")
 	ErrNotRegular  = errors.New("termimg: not a regular file")

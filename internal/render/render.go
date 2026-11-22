@@ -21,6 +21,11 @@ type Options struct {
 	ImageRows int              // maximum image height in rows (0 = 20)
 	BaseDir   string           // directory relative image paths resolve against
 
+	// AnyImagePath lets images be read from anywhere: absolute paths, file:
+	// URLs and paths leaving BaseDir. Off, local images are confined to
+	// BaseDir (none without it). Only for documents the user chose to open.
+	AnyImagePath bool
+
 	Math     bool // render LaTeX math as Unicode
 	Diagrams bool // render mermaid / dot code blocks as diagrams
 
@@ -36,8 +41,10 @@ type Options struct {
 // be able to trigger unbounded image decoding, diagram layout or math
 // layout. Images are decoded once per budget. The zero value is ready.
 type Budget struct {
-	images    map[string]imageResult
+	images    map[string]imageResult    // frames by source and size
+	loaded    map[string]*termimg.Image // loaded images by source (nil: failed)
 	imgBytes  int
+	imgPixels int // source pixels rendered (decoded and scaled)
 	specials  int
 	mathCount int
 }
@@ -98,8 +105,12 @@ const (
 	maxCodeBlocks = 10000    // code blocks the viewer can copy per document
 	maxImages     = 50       // distinct images drawn per document
 	maxImageBytes = 64 << 20 // total escape-sequence bytes for images
-	maxSpecials   = 100      // diagrams and display formulas per document
-	maxInlineMath = 10000    // inline formulas rendered per document
+	// maxImagePixels bounds the source pixels rendered per document: one
+	// image shown at many sizes (nested quotes, list depths) is scaled from
+	// its full resolution each time. Five of the largest accepted images.
+	maxImagePixels = 200_000_000
+	maxSpecials    = 100   // diagrams and display formulas per document
+	maxInlineMath  = 10000 // inline formulas rendered per document
 )
 
 // Render renders a parsed document to terminal text.

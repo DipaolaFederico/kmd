@@ -96,7 +96,7 @@ func TestWikiLinks(t *testing.T) {
 		"[[x]](/u) [see [[Page]]](/v)":                                          `<p><a href="/u">[x]</a> <a href="/v">see [[Page]]</a></p>` + "\n",
 		"![[pic.png]]":                                                          `<p>!<a href="pic.png">pic.png</a></p>` + "\n",
 		"[[" + long + "]]":                                                      "<p>[[" + long + "]]</p>\n",
-		"[[a\x01b]]":                                                            "<p>[[a\x01b]]</p>\n",
+		"[[a\x01b]]":                                                            "<p>[[ab]]</p>\n", // not a link; HTML drops the control
 	} {
 		if got := gfmHTML(in); got != want {
 			t.Errorf("input: %q\nwant:  %q\ngot:   %q", in, want, got)

@@ -223,7 +223,11 @@ never downloaded. Linked documents are only read when the user follows the
 link in the viewer, and only local images, PDFs and other data files (never
 programs) are handed to the desktop. Inputs are limited to 16 MiB and 250,000 blocks, images to
 20 MiB and 40 megapixels (at most 50 per document), and the number of
-diagrams and display formulas per document is bounded.
+diagrams and display formulas per document is bounded, as are the bytes
+reference links may copy from their definitions (1 MiB plus the document's
+size). The
+.B \-\-html
+export drops control characters too.
 .SH EXAMPLES
 .TP
 .B kmd README.md

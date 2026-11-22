@@ -279,6 +279,46 @@ view        = auto      # "always": use the viewer even for short documents
 Precedence: command-line flags, then environment variables (`KMD_THEME`,
 `KMD_PAGER`, `NO_COLOR`), then the configuration file.
 
+## 📚 Use as a library
+
+The renderer is available to other Go programs as the package
+[`github.com/DipaolaFederico/kmd/render`](https://pkg.go.dev/github.com/DipaolaFederico/kmd/render)
+(standard library only, like kmd itself; the `kmd` command is built on it):
+
+```sh
+go get github.com/DipaolaFederico/kmd@latest
+```
+
+```go
+import "github.com/DipaolaFederico/kmd/render"
+
+theme, err := render.LoadTheme("catppuccin-mocha") // or render.DefaultTheme(dark)
+if err != nil {
+	return err
+}
+out, err := render.Render(src, render.Options{
+	Width:      100,
+	Theme:      theme,
+	Color:      true,
+	TrueColor:  true,
+	Hyperlinks: true,
+	Images:     render.ImagesBlocks,
+	BaseDir:    filepath.Dir(path), // images are read only from inside it
+})
+```
+
+`render.HTML` exports safe HTML (a fragment, or a themed page with
+`Standalone`); `render.Themes`, `LoadTheme` and `ParseTheme` list and load
+themes. The zero `render.Options` gives plain text with no file access, and
+every call applies the same sanitisation and resource limits as the command
+(see [Security](#-security)); a library caller's images are additionally
+confined to `BaseDir`: absolute paths, `file:` URLs, `..` and symlinks
+leading outside it are refused (hard links and mount points inside it are
+the caller's to trust). `LoadTheme` reads the theme files and paths it is
+given: pass it names from `Themes`, not raw user input. The functions are safe for concurrent use.
+The API follows semantic versioning from v1.0.0; the rendered output itself
+improves between releases and is not part of it.
+
 ## 🔒 Security
 
 Documents are treated as untrusted (READMEs from cloned repositories,
@@ -290,19 +330,23 @@ threat model:
   including characters produced via entities like `&#27;`. OSC 8 link targets
   must be valid UTF-8 without controls or invisible characters. File names in
   error messages are sanitized too.
-- **Images**: local regular files and `data:` URIs only, opened non-blocking
+- **Images**: local regular files and `data:` URIs only (with the
+  [library](#-use-as-a-library), only files inside `BaseDir`), opened non-blocking
   and re-checked on the descriptor; ≤ 20 MiB and ≤ 40 megapixels checked
   *before* decoding; only PNG/JPEG/GIF; nothing is ever downloaded (no
   tracking pixels). Each image is decoded once per document, at most 50
   distinct images and 64 MiB of image data per document.
 - **`--html` export**: safe by default, like cmark: raw HTML is omitted and
-  `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs are dropped;
-  the page carries a restrictive Content-Security-Policy. `--unsafe-html`
+  `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs are dropped,
+  and so are control characters; the page carries a restrictive
+  Content-Security-Policy (no scripts, forms or `<base>`). `--unsafe-html`
   keeps everything (trusted input only).
 - **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks (a notice is shown
   beyond), container nesting ≤ 100, inline nesting ≤ 100, tables ≤ 1,000
   columns and 524,288 cells, ≤ 100 diagrams/display formulas per document,
-  emoji shortcodes ≤ 40 bytes, wiki links ≤ 1 KiB (and only to relative
+  reference links copy ≤ 1 MiB + the document's size from their definitions
+  (`[x]: <huge URL>` used thousands of times), source pixels scaled for
+  images ≤ 200 megapixels per document, emoji shortcodes ≤ 40 bytes, wiki links ≤ 1 KiB (and only to relative
   paths: no scheme, no absolute or `//host` targets).
   Every construct known to make Markdown parsers quadratic (nested brackets,
   emphasis with links, backtick runs, unterminated comments, link

@@ -152,3 +152,68 @@ func TestURLScheme(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadInConfined(t *testing.T) {
+	outer := t.TempDir()
+	dir := filepath.Join(outer, "doc")
+	if err := os.MkdirAll(filepath.Join(dir, "img"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	secret := writeFile(t, outer, "secret.png", encodePNG(t, gradient(4, 4)))
+	writeFile(t, dir, "img/a.png", encodePNG(t, gradient(6, 3)))
+	writeFile(t, dir, "my image.png", encodePNG(t, gradient(5, 5)))
+	symlinks := os.Symlink(secret, filepath.Join(dir, "link.png")) == nil &&
+		os.Symlink(outer, filepath.Join(dir, "up")) == nil // not on every Windows
+
+	for _, src := range []string{"img/a.png", "./img/../img/a.png", "my%20image.png", " img/a.png ",
+		dataURI("image/png", encodePNG(t, gradient(2, 2)))} {
+		if _, err := LoadIn(src, dir); err != nil {
+			t.Errorf("LoadIn(%q): %v", src, err)
+		}
+	}
+	if _, err := LoadIn(dataURI("image/png", encodePNG(t, gradient(2, 2))), ""); err != nil {
+		t.Errorf("data: URI without a directory: %v", err)
+	}
+
+	cases := []struct {
+		src, dir string
+		want     error // nil: any error
+	}{
+		{secret, dir, ErrOutside},
+		{"file://" + secret, dir, ErrOutside},
+		{"/etc/passwd", dir, ErrOutside},
+		{`\\host\share\x.png`, dir, ErrOutside},
+		{"img/a.png", "", ErrOutside},
+		{"../secret.png", dir, nil},
+		{"img/../../secret.png", dir, nil},
+		{"..%2Fsecret.png", dir, nil},
+		{"https://example.com/x.png", dir, ErrRemote},
+		{"//example.com/x.png", dir, ErrRemote},
+		{"", dir, nil},
+		{"missing.png", dir, fs.ErrNotExist},
+		{"img/a.png", filepath.Join(outer, "nope"), fs.ErrNotExist},
+		{"../secret.png", dir, ErrOutside},
+		{"%2E%2E/secret.png", dir, ErrOutside},
+		{".", dir, nil},
+		{strings.Repeat("d/../", 1000) + "img/a.png", dir, ErrOutside}, // too long: refused before any syscall
+	}
+	if symlinks {
+		cases = append(cases, struct {
+			src, dir string
+			want     error
+		}{"link.png", dir, nil}, struct {
+			src, dir string
+			want     error
+		}{"up/secret.png", dir, nil})
+	}
+	for _, c := range cases {
+		img, err := LoadIn(c.src, c.dir)
+		if err == nil {
+			t.Errorf("LoadIn(%q, %q) = %v, want an error", c.src, c.dir, img)
+			continue
+		}
+		if c.want != nil && !errors.Is(err, c.want) {
+			t.Errorf("LoadIn(%q, %q) = %v, want %v", c.src, c.dir, err, c.want)
+		}
+	}
+}

@@ -52,11 +52,40 @@ func HTML(doc *Node, opt HTMLOptions) string {
 
 var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
 
+// esc escapes text and attribute values. It also drops C0 controls other
+// than tab and newlines, DEL and C1 controls: they are invalid in HTML and,
+// should the page reach a terminal (kmd --html x.md), could drive it.
 func esc(s string) string {
+	if hasControl(s) {
+		s = strings.Map(func(r rune) rune {
+			if isControl(r) {
+				return -1
+			}
+			return r
+		}, s)
+	}
 	if !strings.ContainsAny(s, `&<>"`) {
 		return s
 	}
 	return xmlEscaper.Replace(s)
+}
+
+func isControl(r rune) bool {
+	return r < 0x20 && r != '\t' && r != '\n' && r != '\r' || r >= 0x7f && r <= 0x9f
+}
+
+// hasControl reports whether s holds a character isControl drops; C1
+// controls are encoded in UTF-8 as 0xC2 0x80–0x9F.
+func hasControl(s string) bool {
+	for i := 0; i < len(s); i++ {
+		switch b := s[i]; {
+		case b < 0x20 && b != '\t' && b != '\n' && b != '\r', b == 0x7f:
+			return true
+		case b == 0xc2 && i+1 < len(s) && s[i+1] >= 0x80 && s[i+1] <= 0x9f:
+			return true
+		}
+	}
+	return false
 }
 
 func (w *htmlWriter) lit(s string) { w.b.WriteString(s) }

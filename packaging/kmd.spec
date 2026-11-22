@@ -24,7 +24,9 @@ Summary:        Fast, beautiful Markdown previewer for the terminal
 # are only used by the test suite and are not part of the binary package.
 License:        MIT
 URL:            %{gourl}
-Source:         %{gosource}
+# The release workflow's tarball, not GitHub's tag archive: it carries this
+# version stamped into the man page and the AppStream metadata.
+Source:         %{gourl}/releases/download/v%{version}/%{name}-%{version}.tar.gz
 
 BuildRequires:  go-rpm-macros
 BuildRequires:  libappstream-glib

@@ -8,6 +8,7 @@
 
 ## Checklist
 
+- [ ] Title is a Conventional Commit (`feat(scope): …`, `fix: …`, `docs: …`) and the branch is `type/short-description` — see CONTRIBUTING.md
 - [ ] `make ci` passes locally (including the perf gate)
 - [ ] New behaviour is covered by tests (coverage stays ≥ 90%)
 - [ ] No new dependencies (`go.mod` has no `require`)

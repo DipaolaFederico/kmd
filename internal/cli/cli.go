@@ -141,7 +141,7 @@ Files:
 Viewer (long documents):
   Tab/Shift-Tab select a link (or click it) · Enter open it · Backspace back
   H back to the first document · t contents · [ ] previous/next section
-  / search · e edit · ? all keys · q quit
+  / search · c copy a code block · e edit · ? all keys · q quit
 
 Environment:
   KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG, NO_COLOR,
@@ -491,6 +491,7 @@ type output struct {
 	links    []render.Link  // with s.opts.Navigate
 	anchors  map[string]int // with s.opts.Navigate
 	headings []render.Heading
+	blocks   []render.CodeBlock
 }
 
 func renderFiles(env Env, o options, s settings, in *stdinCache) output {
@@ -577,6 +578,11 @@ func (res *output) addNav(r render.Result, offset int) {
 			l.Spans[i].Line += offset
 		}
 		res.links = append(res.links, l)
+	}
+	for _, c := range r.Code {
+		c.Start += offset
+		c.End += offset
+		res.blocks = append(res.blocks, c)
 	}
 	for _, h := range r.Headings {
 		h.Line += offset
@@ -718,6 +724,7 @@ func pageOf(res output) *view.Page {
 		Links:    res.links,
 		Anchors:  res.anchors,
 		Headings: res.headings,
+		Code:     res.blocks,
 	}
 }
 

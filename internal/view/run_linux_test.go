@@ -232,3 +232,15 @@ func TestRunEditor(t *testing.T) {
 		t.Error("vi fallback should fail with an empty PATH")
 	}
 }
+
+func TestRunClipboard(t *testing.T) {
+	if err := runClipboard([]string{"/bin/sh", "-c", "cat >/dev/null"}, "text"); err != nil {
+		t.Errorf("clipboard program: %v", err)
+	}
+	if err := runClipboard([]string{"/bin/false"}, "x"); err == nil || err.Error() != "false failed" {
+		t.Errorf("failing program: %v", err)
+	}
+	if err := runClipboard([]string{"/nonexistent/wl-copy"}, "x"); err == nil {
+		t.Error("missing program")
+	}
+}

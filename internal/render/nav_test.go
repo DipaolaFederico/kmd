@@ -214,3 +214,26 @@ func TestHrefHostileInputs(t *testing.T) {
 		t.Errorf("file:// OSC 8 filtering: %q", res.Text)
 	}
 }
+
+func TestCodeBlockPositions(t *testing.T) {
+	src := "# T\n\n```go\nfmt.Println(1)\n```\n\n- item\n\n  ```\n  nested\x1b\n  two\n  ```\n\n> ```sh\n> quoted\n> ```\n\ntext\n"
+	res := Render(md.Parse(src, md.GFM), Options{Width: 60, Navigate: true, Color: true})
+	lines := strings.Split(res.Text, "\n")
+	if len(res.Code) != 3 {
+		t.Fatalf("%d code blocks", len(res.Code))
+	}
+	want := []struct{ lang, text string }{{"go", "fmt.Println(1)"}, {"", "nested\x1b\ntwo"}, {"sh", "quoted"}}
+	for i, c := range res.Code {
+		if c.Lang != want[i].lang || c.Text != want[i].text {
+			t.Errorf("block %d: %q %q", i, c.Lang, c.Text)
+		}
+		top, bottom := stripSGR(lines[c.Start]), stripSGR(lines[c.End])
+		if !strings.Contains(top, "╭") || !strings.Contains(bottom, "╰") || c.End-c.Start < 2 {
+			t.Errorf("block %d at %d-%d: %q … %q", i, c.Start, c.End, top, bottom)
+		}
+	}
+	// without navigation nothing is recorded
+	if res := Render(md.Parse(src, md.GFM), Options{Width: 60}); res.Code != nil {
+		t.Error("code blocks recorded without Navigate")
+	}
+}

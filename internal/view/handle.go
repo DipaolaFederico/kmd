@@ -81,6 +81,8 @@ func (m *model) handle(k key) {
 		m.help = true
 	case "t":
 		m.openOutline()
+	case "c":
+		m.copyCode()
 	case "]":
 		m.nextHeading(1)
 	case "[":

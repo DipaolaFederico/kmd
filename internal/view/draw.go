@@ -203,6 +203,7 @@ var helpText = []string{
 	"t                contents: jump to a heading",
 	"[ ]              previous / next section",
 	"/ n N            search, next / previous match",
+	"c                copy a code block on screen",
 	"Esc              clear selection and search",
 	"e                edit the file ($VISUAL / $EDITOR)",
 	"r                reload",

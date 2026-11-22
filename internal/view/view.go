@@ -22,6 +22,7 @@ type Page struct {
 	Links    []render.Link
 	Anchors  map[string]int
 	Headings []render.Heading // the outline, in document order
+	Code     []render.CodeBlock
 }
 
 // Loader renders the document at path for a terminal cols columns wide.
@@ -54,6 +55,8 @@ type Options struct {
 	// in tests; nil disables the action.
 	Open func(target string) error
 	Edit func(path string) error
+	// Copy puts text in the clipboard (OSC 52 in the terminal).
+	Copy func(text string) error
 }
 
 // entry is a history position.
@@ -85,6 +88,8 @@ type model struct {
 	cur     int // current match
 
 	quit bool
+
+	copied int // code block copied last (c), -1 = none
 
 	outline    bool // the outline (t) is open
 	ocur, otop int  // its selected heading and first visible row
@@ -153,7 +158,7 @@ func newModel(opt Options, cols, rows int) (*model, error) {
 func (m *model) setPage(p *Page) {
 	m.page, m.plain = p, nil
 	m.sel, m.matches, m.query = -1, nil, ""
-	m.top, m.outline = 0, false
+	m.top, m.outline, m.copied = 0, false, -1
 }
 
 func (m *model) viewH() int { return max(m.rows-1, 1) }

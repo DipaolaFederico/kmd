@@ -180,12 +180,18 @@ list of its Markdown files and subfolders.
 | `Backspace` `h` `←` · `H` | back one document · back to the first document |
 | `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the mouse wheel also work) |
 | `t` · `[` `]` | table of contents (choose a heading and press Enter) · previous / next section |
+| `c` | copy a code block on screen to the clipboard (press again for the next block on screen) |
 | `/` `n` `N` | search, next / previous match |
 | `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |
 
 The status bar shows the target of the selected link and the documents
 visited. Links that leave kmd (web, mail, desktop applications) need two
 clicks: the first shows the target, the second opens it.
+
+`c` copies the source of the code block, without the box or the colors.
+Locally it uses `wl-copy`, `xclip` or `xsel` (`pbcopy` on macOS); over SSH,
+or when none is installed, it asks the terminal through OSC 52, which kitty,
+WezTerm, foot, Alacritty, iTerm2, Windows Terminal and tmux support.
 
 Inside the viewer, images are drawn with Unicode blocks, since terminal
 graphics protocols cannot scroll with the text. To use an external pager

@@ -38,7 +38,8 @@ type Result struct {
 	// slug) in Text; only filled with Options.Navigate.
 	Links    []Link
 	Anchors  map[string]int
-	Headings []Heading // top-level headings in order (Navigate)
+	Headings []Heading   // top-level headings in order (Navigate)
+	Code     []CodeBlock // code blocks in order (Navigate)
 }
 
 // Heading is a top-level heading of the rendered document.
@@ -78,6 +79,7 @@ type renderer struct {
 
 const (
 	maxLinks      = 100000   // links the viewer can select per document
+	maxCodeBlocks = 10000    // code blocks the viewer can copy per document
 	maxImages     = 50       // distinct images drawn per document
 	maxImageBytes = 64 << 20 // total escape-sequence bytes for images
 	maxSpecials   = 100      // diagrams and display formulas per document
@@ -161,6 +163,11 @@ func Render(doc *md.Node, o Options) Result {
 		res.Anchors, res.Headings = anchors.lines, headings
 	}
 	if r.links != nil {
+		for _, c := range r.links.code {
+			if c.Start >= 0 { // a block can be laid out and then dropped
+				res.Code = append(res.Code, c)
+			}
+		}
 		for _, l := range r.links.links {
 			if len(l.Spans) > 0 { // a link can be laid out and then dropped
 				res.Links = append(res.Links, l)
@@ -450,6 +457,17 @@ func (r *renderer) codeBox(text, lang, label string, width int) []rline {
 		}
 	}
 	top = append(top, run{text: strings.Repeat("─", max(width-used-1, 0)) + "╮", st: border})
+	edge := border // top and bottom borders
+	if r.links != nil {
+		// they carry the block's id, so painting records its first and
+		// last line (not the sides: lines are only measured up to their
+		// last marked run)
+		if n := len(r.links.code); n < maxCodeBlocks {
+			r.links.code = append(r.links.code, CodeBlock{Lang: lang, Text: text, Start: -1, End: -1})
+			edge.Link = -int32(n + 1)
+			top[0].st = edge
+		}
+	}
 	out := []rline{top}
 	for _, l := range r.highlight(expandTabs(text), lang) {
 		for _, seg := range cut(l, inner) {
@@ -458,7 +476,8 @@ func (r *renderer) codeBox(text, lang, label string, width int) []rline {
 			out = append(out, row)
 		}
 	}
-	return append(out, rline{{text: "╰" + strings.Repeat("─", max(width-2, 0)) + "╯", st: border}})
+	// only the corner is marked: marked runs are measured when painted
+	return append(out, rline{{text: "╰", st: edge}, {text: strings.Repeat("─", max(width-2, 0)) + "╯", st: border}})
 }
 
 var alertMeta = [...][3]string{

@@ -26,8 +26,11 @@ const (
 type Style struct {
 	Fg, Bg Color
 	Attr   uint8
-	Link   int32 // 1-based index of the document link (0: none), for navigation; fits in Attr's padding
-	URL    string
+	// Link is the 1-based index of the document link, or minus the 1-based
+	// index of a code block on its box border (0: none), for navigation;
+	// it fits in Attr's padding.
+	Link int32
+	URL  string
 }
 
 func (s Style) sgrEqual(o Style) bool { return s.Fg == o.Fg && s.Bg == o.Bg && s.Attr == o.Attr }

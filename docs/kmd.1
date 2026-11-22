@@ -148,6 +148,13 @@ started.
 .B [\fR, \fB]
 Go to the previous or next section (heading).
 .TP
+.B c
+Copy the source of a code block on screen to the clipboard; pressing
+\fBc\fR again copies the next block on screen. Control characters other than
+tab and newline are removed. Locally the text is given to \fBwl\-copy\fR,
+\fBxclip\fR or \fBxsel\fR (\fBpbcopy\fR on macOS); over SSH, or when none is
+installed, the terminal is asked to set the clipboard (OSC 52).
+.TP
 .B /\fR, \fBn\fR, \fBN
 Search (case\-insensitive unless the text has capitals); next and previous match.
 .TP

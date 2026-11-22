@@ -112,7 +112,8 @@ Display:
       --hyperlinks WHEN    clickable OSC 8 links: auto | always | never
       --no-math            show LaTeX source instead of rendered formulas
       --no-diagrams        show mermaid/graphviz source instead of diagrams
-      --commonmark         strict CommonMark: disable GitHub extensions
+      --commonmark         strict CommonMark: disable GitHub extensions,
+                           emoji shortcodes and [[wiki links]]
   -P, --no-pager           never page long output (no viewer)
       --view               open the viewer even when the document fits
 

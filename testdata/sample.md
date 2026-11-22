@@ -13,7 +13,8 @@ Bare URLs work too: www.commonmark.org and hello@example.com.[^1]
 
 You can combine ***bold italic***, **bold with `code` inside**, _underscored
 emphasis_ and snake_case_words. Hard line breaks\
-are respected, as are entities like &copy; &amp; &rarr;.
+are respected, as are entities like &copy; &amp; &rarr;. Emoji shortcodes
+:rocket: :white_check_mark: and wiki links such as [[README#Features|the features]] too.
 
 > Simplicity is prerequisite for reliability.
 > — *Edsger W. Dijkstra*

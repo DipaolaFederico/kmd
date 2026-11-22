@@ -110,14 +110,18 @@ type Node struct {
 	// parser state
 	startLine, endLine int
 	open               bool
-	content            []byte
-	markerOffset       int
-	padding            int
-	fenceChar          byte
-	fenceLen           int
-	fenceOffset        int
-	htmlType           int
-	refCount           int // FootnoteDef: number of references
+	// noExt marks text from a backslash escape or an entity, and autolinks:
+	// the emoji and wiki link extensions leave them alone. (Next to open,
+	// in its padding: Node does not grow.)
+	noExt        bool
+	content      []byte
+	markerOffset int
+	padding      int
+	fenceChar    byte
+	fenceLen     int
+	fenceOffset  int
+	htmlType     int
+	refCount     int // FootnoteDef: number of references
 }
 
 // AppendChild adds child as the last child of n.
@@ -232,10 +236,14 @@ type Options struct {
 	Alerts        bool // > [!NOTE] … GitHub alerts
 	Math          bool // $inline$, $$display$$ and ```math
 	FrontMatter   bool // leading YAML front matter between --- lines
+	Emoji         bool // :rocket: GitHub emoji shortcodes
+	WikiLinks     bool // [[Page]], [[Page#Heading|label]] links to Page.md
 }
 
-// GFM enables every GitHub Flavored Markdown extension.
-var GFM = Options{Tables: true, Strikethrough: true, Autolinks: true, TaskLists: true, Footnotes: true, Alerts: true, Math: true, FrontMatter: true}
+// GFM enables every extension: GitHub Flavored Markdown and the GitHub and
+// Obsidian additions above.
+var GFM = Options{Tables: true, Strikethrough: true, Autolinks: true, TaskLists: true, Footnotes: true, Alerts: true,
+	Math: true, FrontMatter: true, Emoji: true, WikiLinks: true}
 
 // Section moves the part of doc that starts at the first top-level heading
 // for which match is true into a new document: that heading and every block

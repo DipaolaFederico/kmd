@@ -32,7 +32,8 @@ untrusted input.
 | | Feature | Details |
 |---|---|---|
 | 📝 | **CommonMark** | 652/652 examples of the 0.31.2 specification, checked in CI |
-| 🐙 | **GitHub Flavored Markdown** | tables, task lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts, YAML front matter (24/24 GFM examples) |
+| 🐙 | **GitHub Flavored Markdown** | tables, task lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts, YAML front matter (24/24 GFM examples), `:rocket:` emoji shortcodes (about 800 GitHub names) |
+| 🔗 | **Wiki links** | `[[Page]]`, `[[Page\|label]]`, `[[Page#Heading]]` link to `Page.md` next to the document, as in Obsidian |
 | 🎨 | **Syntax highlighting** | about 25 languages plus `diff`, in labeled boxes |
 | 🧭 | **Viewer** | long documents open in a built-in viewer; links between Markdown files can be followed and navigated back |
 | 🔗 | **Hyperlinks** | clickable OSC 8 links; relative links resolved to absolute `file://` URLs |
@@ -153,7 +154,7 @@ Display:
       --hyperlinks WHEN    auto | always | never
       --no-math            show LaTeX source instead of rendered formulas
       --no-diagrams        show mermaid/dot source instead of diagrams
-      --commonmark         strict CommonMark (no GitHub extensions)
+      --commonmark         strict CommonMark (no GitHub extensions, emoji or wiki links)
   -P, --no-pager           never page long output (no viewer)
       --view               open the viewer even when the document fits
 Output modes:
@@ -300,7 +301,9 @@ threat model:
   keeps everything (trusted input only).
 - **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks (a notice is shown
   beyond), container nesting ≤ 100, inline nesting ≤ 100, tables ≤ 1,000
-  columns and 524,288 cells, ≤ 100 diagrams/display formulas per document.
+  columns and 524,288 cells, ≤ 100 diagrams/display formulas per document,
+  emoji shortcodes ≤ 40 bytes, wiki links ≤ 1 KiB (and only to relative
+  paths: no scheme, no absolute or `//host` targets).
   Every construct known to make Markdown parsers quadratic (nested brackets,
   emphasis with links, backtick runs, unterminated comments, link
   parentheses) is covered by pathological tests with time limits.

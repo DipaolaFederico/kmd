@@ -134,6 +134,19 @@ func TestPathological(t *testing.T) {
 		"emphasis + links": strings.Repeat("*a* **b** `c` [d](e) ", 20000),
 		"underscore links": strings.Repeat("_a [x](y) ", 20000),
 		"backtick lengths": backtickLadder(1500),
+		"colons":           strings.Repeat(":", 100000),
+		"shortcode-like":   strings.Repeat(":"+strings.Repeat("a", 39), 5000),
+		"long shortcodes":  strings.Repeat(":"+strings.Repeat("a", 60)+":", 3000),
+		"split colons":     strings.Repeat(":_a_", 30000),
+		"emoji":            strings.Repeat(":rocket:", 30000),
+		"wiki openers":     strings.Repeat("[[", 100000),
+		"wiki closers":     strings.Repeat("]]", 100000),
+		"wiki unclosed":    strings.Repeat("[[a", 50000),
+		"wiki long":        strings.Repeat("[["+strings.Repeat("a", 2000), 50),
+		"wiki long colons": strings.Repeat("[["+strings.Repeat("a:", 1000), 50),
+		"unclosed + emoji": strings.Repeat("[[a :x: ", 30000),
+		"wiki links":       strings.Repeat("[[a|:x:]] ", 30000),
+		"wiki in emphasis": strings.Repeat("*[[a_b]]* ", 30000),
 	}
 	for name, in := range cases {
 		start := time.Now()
@@ -150,6 +163,8 @@ func FuzzParse(f *testing.F) {
 		"***a** b* [l](u) ![i](s) <http://x> `c` ~~s~~ &amp; $x$ [^1]\n\n[^1]: n",
 		"> [!NOTE]\n> x\n\n- [ ] t\n<div>\n\n<!--\n$$\nx\n$$\nwww.a.com a@b.co",
 		"\t\t- a\n\t> b\x00\r\n",
+		":rocket: :+1: ::x:: :nope: `:x:` \\:x: [[Page#H|l :tada:]] [[a]]] [[[b]] [[]] [[x\\]] *[[y]]*",
+		"[r]: /u\n\n[[r]] [[r]](/v) <http://a/:x:> www.b.com/:x: [:x:](:x:) | [[p\\|q]] |\n|-|",
 	} {
 		f.Add(e)
 	}

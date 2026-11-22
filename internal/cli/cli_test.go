@@ -97,9 +97,13 @@ func TestRenderFile(t *testing.T) {
 	if !strings.Contains(r.out, "Hello") {
 		t.Error("hyperlinks always")
 	}
-	r = run(t, nil, "--commonmark", writeFile(t, "c.md", "~~x~~ www.x.com"))
-	if !strings.Contains(r.out, "~~x~~") {
+	r = run(t, nil, "--commonmark", writeFile(t, "c.md", "~~x~~ www.x.com :rocket: [[Page]]"))
+	if !strings.Contains(r.out, "~~x~~") || !strings.Contains(r.out, ":rocket: [[Page]]") {
 		t.Errorf("--commonmark kept extensions: %q", r.out)
+	}
+	w := writeFile(t, "w.md", ":tada: [[My Page#Intro|intro]]")
+	if r := run(t, nil, "--html", w); !strings.Contains(r.out, `<p>🎉 <a href="My%20Page.md#Intro">intro</a></p>`) {
+		t.Errorf("--html wiki link and emoji: %q", r.out)
 	}
 }
 

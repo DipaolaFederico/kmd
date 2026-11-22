@@ -2,6 +2,7 @@ package view
 
 import (
 	"errors"
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -700,7 +701,7 @@ func TestClipLongAndExternalClicks(t *testing.T) {
 	if got := clip(long, 40); styled.Width(got) != 40 || !strings.HasSuffix(got, "…") {
 		t.Errorf("clip width %d", styled.Width(got))
 	}
-	if d := time.Since(start); d > time.Second {
+	if d := time.Since(start); d > testlimit.Scale()*time.Second {
 		t.Errorf("clip of 1 MiB took %v", d)
 	}
 	if clip("12345", 5) != "12345" || clip("123456", 5) != "1234…" || clip("日本語", 6) != "日本語" || clip("日本語x", 6) != "日本…" {

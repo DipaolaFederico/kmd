@@ -91,9 +91,14 @@ the binary, without the man page or completions).
 
 ### 🐧 Fedora
 
-An RPM spec and AppStream metadata are in [`packaging/`](packaging). The
-package is not yet in the Fedora repositories; to build it locally, see
-[docs/PACKAGING.md](docs/PACKAGING.md).
+```sh
+sudo dnf copr enable fdipa/kmd
+sudo dnf install kmd
+```
+
+The package (spec and AppStream metadata in [`packaging/`](packaging)) is
+built from every release. Its inclusion in the official Fedora
+repositories is in progress; see [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ### Shell completions
 

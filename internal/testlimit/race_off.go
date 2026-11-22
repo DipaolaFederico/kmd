@@ -1,5 +1,5 @@
 //go:build !race
 
-package md
+package testlimit
 
 const raceFactor = 1

@@ -1,0 +1,31 @@
+# Packit (https://packit.dev): builds kmd's RPM in Fedora COPR from GitHub.
+#
+# - every release published by .github/workflows/release.yml is built for
+#   all supported Fedora releases into the COPR project below, which users
+#   install with: sudo dnf copr enable <owner>/kmd && sudo dnf install kmd
+# - every pull request gets a test build (in Packit's own COPR namespace)
+#
+# Requires the Packit GitHub app on the repository and the COPR project
+# (see docs/PACKAGING.md). Once kmd is in the official Fedora repositories,
+# packaging/packit-distgit.yaml goes into the dist-git repository to keep
+# Fedora updated from each release.
+specfile_path: packaging/kmd.spec
+upstream_package_name: kmd
+downstream_package_name: kmd
+upstream_project_url: https://github.com/DipaolaFederico/kmd
+upstream_tag_template: v{version}
+copy_upstream_release_description: false
+
+jobs:
+  - job: copr_build
+    trigger: release
+    owner: fdipa
+    project: kmd
+    targets:
+      - fedora-all
+    preserve_project: true
+
+  - job: copr_build
+    trigger: pull_request
+    targets:
+      - fedora-rawhide-x86_64

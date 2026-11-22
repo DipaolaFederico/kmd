@@ -1,11 +1,12 @@
 # Fedora package for kmd. Follows the Fedora Go packaging guidelines
 # (https://docs.fedoraproject.org/en-US/packaging-guidelines/Golang/).
 # kmd has no Go dependencies, so no vendoring or bundled() provides are needed.
+%bcond check 1
 
 %global goipath         github.com/DipaolaFederico/kmd
 Version:                0.2.0
 
-%gometa -f
+%gometa -L -f
 
 %global common_description %{expand:
 kmd renders Markdown files as rich, colorful previews directly in the
@@ -13,7 +14,9 @@ terminal: CommonMark 0.31.2 and GitHub Flavored Markdown (tables, task lists,
 alerts, footnotes), syntax highlighting, clickable hyperlinks (OSC 8), inline
 images (kitty, iTerm2, sixel or Unicode blocks), Mermaid and Graphviz
 diagrams, LaTeX math rendered with Unicode, and customizable color themes.
-It is a single static binary without dependencies that starts in a few
+It has a built-in viewer that follows links between documents and folders,
+a table of contents, live preview, a presentation mode and HTML export.
+It is a single binary without dependencies that starts in a few
 milliseconds.}
 
 Name:           kmd
@@ -37,6 +40,7 @@ BuildRequires:  libappstream-glib
 %goprep
 
 %build
+%global gomodulesmode GO111MODULE=on
 export LDFLAGS="-X %{goipath}/internal/cli.Version=%{version}"
 %gobuild -o %{gobuilddir}/bin/kmd %{goipath}
 for sh in bash zsh fish; do
@@ -54,8 +58,12 @@ install -Dpm 0644 packaging/io.github.dipaolafederico.kmd.metainfo.xml \
 
 %check
 appstream-util validate-relax --nonet %{buildroot}%{_metainfodir}/*.metainfo.xml
-%gocheck
 %{buildroot}%{_bindir}/kmd --version | grep -q %{version}
+%if %{with check}
+# the tests bound the time hostile inputs take; build machines can be slow
+export KMD_TEST_TIME_SCALE=10
+%gotest ./...
+%endif
 
 %files
 %license LICENSE

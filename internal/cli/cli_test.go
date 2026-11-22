@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -343,7 +344,7 @@ func TestFollow(t *testing.T) {
 			StdoutTTY: true, Interrupt: stop, Poll: 5 * time.Millisecond})
 	}()
 	waitFor := func(s string) {
-		deadline := time.Now().Add(3 * time.Second)
+		deadline := time.Now().Add(testlimit.Scale() * 3 * time.Second)
 		for !strings.Contains(out.String(), s) {
 			if time.Now().After(deadline) {
 				t.Fatalf("timeout waiting for %q in %q", s, out.String())

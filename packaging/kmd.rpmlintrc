@@ -1,0 +1,2 @@
+# "sixel" is the name of the DEC terminal graphics protocol, not a typo.
+addFilter(r"spelling-error .*'sixel'")

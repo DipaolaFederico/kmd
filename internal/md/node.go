@@ -1,0 +1,238 @@
+// Package md is a dependency-free Markdown parser that implements the
+// CommonMark 0.31.2 specification plus GitHub Flavored Markdown (tables,
+// task lists, strikethrough, extended autolinks, tag filter), footnotes,
+// GitHub alerts and math ($…$, $$…$$). It follows the reference
+// two-phase algorithm: a line-oriented block phase that builds the
+// container tree, then an inline phase using delimiter and bracket stacks.
+package md
+
+// NodeType identifies a node in the document tree.
+type NodeType uint8
+
+// Block node types.
+const (
+	Document NodeType = iota
+	BlockQuote
+	List
+	Item
+	Paragraph
+	Heading
+	ThematicBreak
+	CodeBlock
+	HTMLBlock
+	Table
+	TableRow
+	TableCell
+	FootnoteDef
+	MathBlock
+	FrontMatter
+
+	// Inline node types.
+	Text
+	SoftBreak
+	LineBreak
+	Code
+	Emph
+	Strong
+	Strike
+	Link
+	Image
+	HTMLInline
+	Math
+	FootnoteRef
+)
+
+var typeNames = [...]string{"document", "block_quote", "list", "item", "paragraph", "heading",
+	"thematic_break", "code_block", "html_block", "table", "table_row", "table_cell",
+	"footnote_def", "math_block", "front_matter", "text", "softbreak", "linebreak", "code", "emph", "strong",
+	"strike", "link", "image", "html_inline", "math", "footnote_ref"}
+
+func (t NodeType) String() string {
+	if int(t) < len(typeNames) {
+		return typeNames[t]
+	}
+	return "unknown"
+}
+
+// IsBlock reports whether t is a block-level node type.
+func (t NodeType) IsBlock() bool { return t < Text }
+
+// Align is a table column alignment.
+type Align uint8
+
+// Column alignments.
+const (
+	AlignNone Align = iota
+	AlignLeft
+	AlignCenter
+	AlignRight
+)
+
+// Task is the checkbox state of a list item.
+type Task uint8
+
+// Task states.
+const (
+	TaskNone Task = iota
+	TaskOpen
+	TaskDone
+)
+
+// Node is an element of the document tree. Fields are meaningful only for
+// the node types noted in their comments.
+type Node struct {
+	Type                                      NodeType
+	Parent, FirstChild, LastChild, Prev, Next *Node
+
+	Literal string // Text, Code, CodeBlock, HTMLBlock, HTMLInline, Math, MathBlock, FrontMatter
+	Dest    string // Link, Image
+	Title   string // Link, Image
+	Level   int    // Heading level
+	Info    string // CodeBlock info string
+	Fenced  bool   // CodeBlock
+	Display bool   // Math: $$…$$
+
+	// List and Item
+	Ordered    bool
+	Start      int
+	Tight      bool
+	BulletChar byte
+	Delim      byte
+	Task       Task
+
+	Alert  string  // BlockQuote: NOTE, TIP, IMPORTANT, WARNING, CAUTION
+	Aligns []Align // Table
+	Header bool    // TableRow
+	Align  Align   // TableCell
+	Label  string  // FootnoteDef, FootnoteRef: normalized label
+	Index  int     // FootnoteDef, FootnoteRef: 1-based footnote number
+
+	// parser state
+	startLine, endLine int
+	open               bool
+	content            []byte
+	markerOffset       int
+	padding            int
+	fenceChar          byte
+	fenceLen           int
+	fenceOffset        int
+	htmlType           int
+	refCount           int // FootnoteDef: number of references
+}
+
+// AppendChild adds child as the last child of n.
+func (n *Node) AppendChild(child *Node) {
+	child.unlink()
+	child.Parent = n
+	if n.LastChild != nil {
+		n.LastChild.Next = child
+		child.Prev = n.LastChild
+	} else {
+		n.FirstChild = child
+	}
+	n.LastChild = child
+}
+
+// insertAfter inserts sibling right after n.
+func (n *Node) insertAfter(sibling *Node) {
+	sibling.unlink()
+	sibling.Next = n.Next
+	if sibling.Next != nil {
+		sibling.Next.Prev = sibling
+	}
+	sibling.Prev = n
+	n.Next = sibling
+	sibling.Parent = n.Parent
+	if sibling.Next == nil && sibling.Parent != nil {
+		sibling.Parent.LastChild = sibling
+	}
+}
+
+// insertBefore inserts sibling right before n.
+func (n *Node) insertBefore(sibling *Node) {
+	sibling.unlink()
+	sibling.Prev = n.Prev
+	if sibling.Prev != nil {
+		sibling.Prev.Next = sibling
+	}
+	sibling.Next = n
+	n.Prev = sibling
+	sibling.Parent = n.Parent
+	if sibling.Prev == nil && sibling.Parent != nil {
+		sibling.Parent.FirstChild = sibling
+	}
+}
+
+func (n *Node) unlink() {
+	if n.Prev != nil {
+		n.Prev.Next = n.Next
+	} else if n.Parent != nil {
+		n.Parent.FirstChild = n.Next
+	}
+	if n.Next != nil {
+		n.Next.Prev = n.Prev
+	} else if n.Parent != nil {
+		n.Parent.LastChild = n.Prev
+	}
+	n.Parent, n.Next, n.Prev = nil, nil, nil
+}
+
+// Children returns the direct children of n as a slice.
+func (n *Node) Children() []*Node {
+	var out []*Node
+	for c := n.FirstChild; c != nil; c = c.Next {
+		out = append(out, c)
+	}
+	return out
+}
+
+// Walk calls fn for every node in document order; entering is false when
+// leaving a node that has children. Returning false from fn on entering
+// skips the node's children.
+func Walk(n *Node, fn func(n *Node, entering bool) bool) {
+	if !fn(n, true) {
+		return
+	}
+	if n.FirstChild == nil {
+		return
+	}
+	for c := n.FirstChild; c != nil; {
+		next := c.Next
+		Walk(c, fn)
+		c = next
+	}
+	fn(n, false)
+}
+
+// PlainText returns the visible text of n's inline content.
+func PlainText(n *Node) string {
+	var b []byte
+	Walk(n, func(c *Node, entering bool) bool {
+		if !entering {
+			return true
+		}
+		switch c.Type {
+		case Text, Code, Math:
+			b = append(b, c.Literal...)
+		case SoftBreak, LineBreak:
+			b = append(b, ' ')
+		}
+		return true
+	})
+	return string(b)
+}
+
+// Options selects syntax extensions. The zero value is strict CommonMark.
+type Options struct {
+	Tables        bool // GFM tables
+	Strikethrough bool // GFM ~~strike~~
+	Autolinks     bool // GFM www., http(s):// and email autolinks
+	TaskLists     bool // GFM - [ ] / - [x]
+	Footnotes     bool // [^1] references and definitions
+	Alerts        bool // > [!NOTE] … GitHub alerts
+	Math          bool // $inline$, $$display$$ and ```math
+	FrontMatter   bool // leading YAML front matter between --- lines
+}
+
+// GFM enables every GitHub Flavored Markdown extension.
+var GFM = Options{Tables: true, Strikethrough: true, Autolinks: true, TaskLists: true, Footnotes: true, Alerts: true, Math: true, FrontMatter: true}

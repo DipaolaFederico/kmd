@@ -1,0 +1,151 @@
+.TH KMD 1 "2026-11-22" "kmd 0.2.0" "User Commands"
+.SH NAME
+kmd \- beautiful Markdown previews in the terminal
+.SH SYNOPSIS
+.B kmd
+[\fIOPTIONS\fR] [\fIFILE\fR ...]
+.br
+.B cat
+\fIFILE\fR |
+.B kmd
+[\fIOPTIONS\fR]
+.SH DESCRIPTION
+.B kmd
+renders Markdown documents as rich, colorful previews in the terminal.
+It implements CommonMark 0.31.2 and GitHub Flavored Markdown (tables, task
+lists, strikethrough, extended autolinks), footnotes and GitHub alerts, and
+adds syntax highlighting, clickable OSC 8 hyperlinks, inline images,
+Mermaid and Graphviz diagrams and LaTeX math rendered with Unicode.
+.PP
+With no \fIFILE\fR, or when \fIFILE\fR is \fB\-\fR, standard input is read.
+Long documents are shown through a pager when standard output is a terminal.
+.SH OPTIONS
+.SS Display
+.TP
+.BR \-w ", " \-\-width " " \fIN\fR
+Render width in columns. Defaults to the terminal width, capped at 110.
+.TP
+.BR \-t ", " \-\-theme " " \fINAME\fR
+Color theme: a bundled theme, a user theme, or a path to a \fB.theme\fR file.
+The default \fBauto\fR picks a dark or light theme from \fBCOLORFGBG\fR.
+.TP
+.BR \-c ", " \-\-color " " \fIWHEN\fR
+Use colors: \fBauto\fR (default), \fBalways\fR or \fBnever\fR.
+.TP
+.BR \-i ", " \-\-images " " \fIMODE\fR
+How to draw images: \fBauto\fR, \fBblocks\fR (Unicode half blocks),
+\fBkitty\fR, \fBiterm2\fR, \fBsixel\fR or \fBnone\fR. Only local files and
+data: URIs are displayed; remote images are never downloaded.
+.TP
+.BR \-\-hyperlinks " " \fIWHEN\fR
+Emit clickable OSC 8 links: \fBauto\fR, \fBalways\fR or \fBnever\fR.
+.TP
+.B \-\-no\-math
+Show LaTeX source instead of rendered formulas.
+.TP
+.B \-\-no\-diagrams
+Show Mermaid and Graphviz source instead of diagrams.
+.TP
+.B \-\-commonmark
+Strict CommonMark: disable all GitHub extensions.
+.TP
+.BR \-P ", " \-\-no\-pager
+Never page long output.
+.SS Output modes
+.TP
+.B \-\-toc
+Print only the table of contents.
+.TP
+.B \-\-html
+Export a standalone HTML page using the selected theme colors. Documents are
+treated as untrusted: raw HTML is omitted, \fBjavascript:\fR, \fBvbscript:\fR,
+\fBfile:\fR and non-image \fBdata:\fR URLs are dropped, and the page carries a
+restrictive Content-Security-Policy.
+.TP
+.B \-\-unsafe\-html
+With \fB\-\-html\fR: keep raw HTML and every URL. Use only with trusted input.
+.TP
+.BR \-f ", " \-\-follow
+Live preview: re-render the file whenever it changes. Stop with Ctrl+C.
+.SS Themes and configuration
+.TP
+.B \-\-list\-themes
+List bundled and user themes with a color preview.
+.TP
+.B \-\-theme\-template " " \fINAME\fR
+Print a bundled theme as an editable \fB.theme\fR file.
+.TP
+.B \-\-config
+Show the configuration file location, the effective settings and a template.
+.SS Other
+.TP
+.B \-\-completion " " \fISHELL\fR
+Print a completion script for \fBbash\fR, \fBzsh\fR or \fBfish\fR.
+.TP
+.BR \-v ", " \-\-version
+Print the version and exit.
+.TP
+.BR \-h ", " \-\-help
+Show a short help and exit.
+.SH CONFIGURATION
+Settings are read from \fI$XDG_CONFIG_HOME/kmd/config\fR (by default
+\fI~/.config/kmd/config\fR), one \fBkey = value\fR per line; \fB#\fR starts a
+comment. Keys: \fBtheme\fR, \fBdark-theme\fR, \fBlight-theme\fR, \fBwidth\fR,
+\fBmax-width\fR, \fBcolor\fR, \fBimages\fR, \fBimage-rows\fR,
+\fBhyperlinks\fR, \fBpager\fR, \fBmath\fR, \fBdiagrams\fR.
+Command-line options take precedence over environment variables, which take
+precedence over the configuration file.
+.SH THEMES
+A theme file \fI~/.config/kmd/themes/NAME.theme\fR contains \fBkey = #rrggbb\fR
+lines. \fBinherit\fR selects the base theme. The palette keys \fBbg\fR,
+\fBfg\fR, \fBbright\fR, \fBmuted\fR, \fBcomment\fR, \fBborder\fR,
+\fBsurface\fR, \fBon-accent\fR, \fBred\fR, \fBorange\fR, \fByellow\fR,
+\fBgreen\fR, \fBcyan\fR, \fBblue\fR, \fBpurple\fR, \fBteal\fR and
+\fBmagenta\fR re-derive every color; individual roles (for example
+\fBheading2\fR, \fBcode-bg\fR or \fBsyntax-keyword\fR) can be overridden too.
+Run \fBkmd \-\-theme\-template tokyo-night\fR for a complete example.
+.SH ENVIRONMENT
+.TP
+.B KMD_THEME
+Default theme.
+.TP
+.B KMD_PAGER
+Pager command (default: \fBless \-R\fR).
+.TP
+.B KMD_CONFIG
+Path of the configuration file.
+.TP
+.B NO_COLOR
+Disable colors when set (see https://no-color.org).
+.TP
+.B COLORFGBG
+Used by the \fBauto\fR theme to detect light terminals.
+.TP
+.B COLORTERM
+\fBtruecolor\fR or \fB24bit\fR enables 24-bit colors.
+.SH EXIT STATUS
+0 on success, 1 if a file could not be read or written, 2 on usage errors.
+.SH SECURITY
+Documents are treated as untrusted. Control characters, escape sequences and
+bidi overrides contained in documents are removed before output, so a
+document cannot control or visually reorder the terminal. Remote images are
+never downloaded. Inputs are limited to 16 MiB and 250,000 blocks, images to
+20 MiB and 40 megapixels (at most 50 per document), and the number of
+diagrams and display formulas per document is bounded.
+.SH EXAMPLES
+.TP
+.B kmd README.md
+Preview a file.
+.TP
+.B kmd \-f notes.md
+Live preview while editing.
+.TP
+.B kmd \-\-toc \-\-color=never CHANGELOG.md
+Plain outline of a document.
+.TP
+.B kmd \-\-html doc.md > doc.html
+Export to HTML.
+.SH SEE ALSO
+.BR less (1)
+.SH AUTHOR
+Federico Di Paola.

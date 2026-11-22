@@ -1,0 +1,3 @@
+#!/bin/sh
+# Run the full local CI before pushing. Bypass with: git push --no-verify
+exec make ci

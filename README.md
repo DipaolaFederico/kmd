@@ -1,5 +1,8 @@
 # kmd
 
+[![CI](https://github.com/DipaolaFederico/kmd/actions/workflows/ci.yml/badge.svg)](https://github.com/DipaolaFederico/kmd/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A Markdown previewer for the terminal: **fast** (a few milliseconds),
 **beautiful**, and **dependency-free** (Go standard library only).
 
@@ -171,6 +174,11 @@ internal/cli        flags, configuration, commands, pager, follow mode
 packaging/          RPM spec and AppStream metadata
 docs/kmd.1          man page
 ```
+
+## Contributing
+
+Contributions are welcome — please read [CONTRIBUTING.md](CONTRIBUTING.md).
+Security issues: see [SECURITY.md](SECURITY.md).
 
 ## License
 

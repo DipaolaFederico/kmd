@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -21,21 +20,25 @@ import (
 // picker is the state of the list for one root folder; it survives while
 // documents are read, so going back finds it as it was.
 type picker struct {
-	root string // absolute
-	docs []doc  // sorted by name
-	walk *task  // listing in progress
-	note string // limits reached by the walk
+	root  string // absolute
+	label string // root as shown
+	docs  []doc  // sorted by name
+	walk  *task  // listing in progress
+	note  string // limits reached by the walk
 
 	query []rune
 	shown []int // indexes into docs, best match first
-	cur   int   // selected row
-	top   int   // first visible row
+	stale bool  // shown must be filtered again (docs or query changed)
+	ms    []scored
+	cur   int // selected row
+	top   int // first visible row
 
 	text     bool // text search mode
 	tquery   []rune
 	searched string // query of hits
 	hits     []hit
 	search   *task // search in progress
+	partial  bool  // started before the listing was complete
 	done     int   // documents searched so far
 	tnote    string
 }
@@ -72,7 +75,7 @@ func (m *model) openPicker(text bool) {
 func (m *model) showPicker(root string) {
 	if m.pick == nil || m.pick.root != root {
 		m.stopPicker()
-		p := &picker{root: root}
+		p := &picker{root: root, label: rootName(root)}
 		m.pick = p
 		t := newTask()
 		p.walk = t
@@ -108,20 +111,30 @@ func (m *model) busy() bool {
 	return m.pick != nil && (m.pick.walk != nil || m.pick.search != nil)
 }
 
-// add merges a batch of documents found by the walk, keeping them sorted.
+// add merges a batch of documents found by the walk into the sorted list:
+// the batch is sorted and merged in one pass, and the filter runs once
+// before the next draw, not once per batch.
 func (p *picker) add(b []doc) {
-	sel := -1
-	if p.cur < len(p.shown) {
-		sel = p.shown[p.cur]
+	keep := ""
+	if p.refresh(); p.cur < len(p.shown) {
+		keep = p.docs[p.shown[p.cur]].name
 	}
-	var keep string
-	if sel >= 0 {
-		keep = p.docs[sel].name
+	slices.SortFunc(b, func(x, y doc) int { return strings.Compare(x.name, y.name) })
+	merged := make([]doc, 0, len(p.docs)+len(b))
+	i, j := 0, 0
+	for i < len(p.docs) && j < len(b) {
+		if p.docs[i].name <= b[j].name {
+			merged = append(merged, p.docs[i])
+			i++
+		} else {
+			merged = append(merged, b[j])
+			j++
+		}
 	}
-	p.docs = append(p.docs, b...)
-	sortDocs(p.docs)
-	p.filter()
+	p.docs = append(append(merged, p.docs[i:]...), b[j:]...)
+	p.stale = true
 	if keep != "" { // stay on the selected document as the list grows
+		p.refresh()
 		for i, d := range p.shown {
 			if p.docs[d].name == keep {
 				p.cur = i
@@ -131,14 +144,13 @@ func (p *picker) add(b []doc) {
 	}
 }
 
-func sortDocs(ds []doc) {
-	// insertion of a batch into a sorted list: a full sort is simplest and
-	// a 10,000-name sort is ~1 ms, done at most once per batch of 256
-	sort.Slice(ds, func(i, j int) bool { return ds[i].name < ds[j].name })
-}
-
-func (p *picker) filter() {
-	p.shown = filterDocs(p.docs, newQuery(string(p.query)), p.shown)
+// refresh filters the list again if the documents or the query changed.
+func (p *picker) refresh() {
+	if !p.stale && p.shown != nil {
+		return
+	}
+	p.stale = false
+	p.shown, p.ms = filterDocs(p.docs, newQuery(string(p.query)), p.shown, p.ms)
 	p.cur = min(p.cur, max(len(p.shown)-1, 0))
 }
 
@@ -155,6 +167,7 @@ func (m *model) listH() int { return max(m.viewH()-1, 1) }
 
 func (m *model) handlePicker(k key) {
 	p := m.pick
+	p.refresh()
 	name := k.name
 	input := &p.query
 	if p.text {
@@ -218,9 +231,9 @@ func (m *model) handlePicker(k key) {
 		}
 	}
 	if edited && !p.text {
-		p.cur, p.top = 0, 0
-		p.filter()
+		p.cur, p.top, p.stale = 0, 0, true
 	}
+	p.refresh()
 	p.cur = min(max(p.cur, 0), max(p.rows()-1, 0))
 }
 
@@ -249,6 +262,9 @@ func (m *model) startSearch() {
 		})
 		t.send(bg, func(m *model) {
 			if m.pick == p && p.search == t {
+				if note == "" && p.partial {
+					note = "searched the documents listed when it started"
+				}
 				p.search, p.tnote = nil, note
 			}
 		})
@@ -291,6 +307,7 @@ func (m *model) pickOpen(i int) {
 
 func (m *model) drawPicker(b *strings.Builder) {
 	p := m.pick
+	p.refresh()
 	h := m.listH()
 	n := p.rows()
 	if p.cur < p.top {
@@ -332,7 +349,7 @@ func (m *model) drawPicker(b *strings.Builder) {
 	if p.text {
 		where = "search in "
 	}
-	head := " " + strings.Join(append(parts, where+rootName(p.root)), " · ")
+	head := " " + strings.Join(append(parts, where+p.label), " · ")
 	head = clip(head, m.cols)
 	moveTo(b, 0, 0)
 	b.WriteString(m.opt.Bar + head + strings.Repeat(" ", max(m.cols-styled.Width(head), 0)) + reset)
@@ -358,8 +375,9 @@ func (m *model) drawPicker(b *strings.Builder) {
 				b.WriteString(line)
 			}
 		case i < n:
-			name := p.docs[p.shown[i]].name
-			_, pos, _ = fuzzy(name, q, pos[:0])
+			d := &p.docs[p.shown[i]]
+			_, pos, _ = fuzzy(d, q, pos[:0])
+			name := d.name
 			b.WriteString(m.paintName(name, pos, i == p.cur))
 		case i == 0 && r == 0:
 			switch {

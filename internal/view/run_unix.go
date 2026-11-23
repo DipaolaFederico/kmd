@@ -179,7 +179,7 @@ func Run(opt Options) error {
 				}
 				break
 			}
-			redraw = true
+			redraw = m.picking // results of the picker's work: only it shows them
 		case <-tick:
 			redraw = m.poll()
 		case <-settle:

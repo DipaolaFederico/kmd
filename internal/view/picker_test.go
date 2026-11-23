@@ -117,24 +117,27 @@ func TestWalkStopsInBigFolders(t *testing.T) {
 }
 
 func TestFuzzy(t *testing.T) {
-	if _, _, ok := fuzzy("docs/guide.md", newQuery("gd"), nil); !ok {
+	if _, _, ok := fuzzy(ptr(newDoc("", "docs/guide.md", false)), newQuery("gd"), nil); !ok {
 		t.Error("subsequence not matched")
 	}
-	if _, _, ok := fuzzy("docs/guide.md", newQuery("dg"), nil); !ok {
+	if _, _, ok := fuzzy(ptr(newDoc("", "docs/guide.md", false)), newQuery("dg"), nil); !ok {
 		t.Error("d…g")
 	}
-	if _, _, ok := fuzzy("docs/guide.md", newQuery("xz"), nil); ok {
+	if _, _, ok := fuzzy(ptr(newDoc("", "docs/guide.md", false)), newQuery("xz"), nil); ok {
 		t.Error("matched letters that are not there")
 	}
-	if _, pos, ok := fuzzy("Ñandú/ÁRBOL.md", newQuery("ñá"), nil); !ok || !reflect.DeepEqual(pos, []int{0, 8}) {
+	if _, pos, ok := fuzzy(ptr(newDoc("", "Ñandú/ÁRBOL.md", false)), newQuery("ñá"), nil); !ok || !reflect.DeepEqual(pos, []int{0, 8}) {
 		t.Errorf("unicode case folding: %v %v", pos, ok)
 	}
-	docs := []doc{{name: "a/guide-old.md"}, {name: "guide.md"}, {name: "go/unused/ide.md"}, {name: "x/GUIDE.md"}, {name: "zzz.md"}}
-	got := filterDocs(docs, newQuery("guide"), nil)
+	var docs []doc
+	for _, n := range []string{"a/guide-old.md", "guide.md", "go/unused/ide.md", "x/GUIDE.md", "zzz.md"} {
+		docs = append(docs, newDoc("", n, false))
+	}
+	got, _ := filterDocs(docs, newQuery("guide"), nil, nil)
 	if !reflect.DeepEqual(got, []int{1, 3, 0, 2}) {
 		t.Errorf("ranking: %v", got)
 	}
-	if got := filterDocs(docs, query{}, nil); len(got) != len(docs) {
+	if got, _ := filterDocs(docs, query{}, nil, nil); len(got) != len(docs) {
 		t.Errorf("empty query: %v", got)
 	}
 }
@@ -437,16 +440,19 @@ func TestPickerNameFitsAndGrows(t *testing.T) {
 		Select: "<S>", Match: "<M>"}, 20, 10)
 	h.model = m
 	long := "a/very/long/path/to/the/final-document.md"
-	_, pos, _ := fuzzy(long, newQuery("fd"), nil)
+	_, pos, _ := fuzzy(ptr(newDoc("", long, false)), newQuery("fd"), nil)
 	s := m.paintName(long, pos, false)
 	if !strings.Contains(s, "…") || !strings.Contains(stripEscapes(s), "document.md") {
 		t.Errorf("long name: %q", s)
 	}
 	// a growing list keeps the selection on the same document
 	p := &picker{root: "/r"}
-	p.add([]doc{{name: "b.md"}, {name: "c.md"}})
+	p.add([]doc{{name: "c.md"}, {name: "b.md"}})
 	p.cur = 1
-	p.add([]doc{{name: "a.md"}})
+	p.add([]doc{{name: "d.md"}, {name: "a.md"}})
+	if names := []string{p.docs[0].name, p.docs[1].name, p.docs[2].name, p.docs[3].name}; !reflect.DeepEqual(names, []string{"a.md", "b.md", "c.md", "d.md"}) {
+		t.Errorf("merge: %v", names)
+	}
 	if p.docs[p.shown[p.cur]].name != "c.md" {
 		t.Errorf("selection moved: %d", p.cur)
 	}
@@ -467,14 +473,15 @@ func TestPickerNameFitsAndGrows(t *testing.T) {
 func BenchmarkPickerFilter(b *testing.B) {
 	docs := make([]doc, 10000)
 	for i := range docs {
-		docs[i] = doc{name: "project-" + strconv.Itoa(i%37) + "/docs/section-" + strconv.Itoa(i%101) + "/topic-" + strconv.Itoa(i) + ".md"}
+		docs[i] = newDoc("", "project-"+strconv.Itoa(i%37)+"/docs/section-"+strconv.Itoa(i%101)+"/topic-"+strconv.Itoa(i)+".md", false)
 	}
 	for _, q := range []string{"d", "docsec12"} { // everything matches / a few do
 		b.Run(q, func(b *testing.B) {
 			var out []int
+			var ms []scored
 			b.ReportAllocs()
 			for b.Loop() {
-				out = filterDocs(docs, newQuery(q), out)
+				out, ms = filterDocs(docs, newQuery(q), out, ms)
 			}
 		})
 	}
@@ -485,11 +492,11 @@ func BenchmarkPickerFilter(b *testing.B) {
 func TestPickerFilterFast(t *testing.T) {
 	docs := make([]doc, 10000)
 	for i := range docs {
-		docs[i] = doc{name: "project-" + strconv.Itoa(i%37) + "/docs/section-" + strconv.Itoa(i%101) + "/topic-" + strconv.Itoa(i) + ".md"}
+		docs[i] = newDoc("", "project-"+strconv.Itoa(i%37)+"/docs/section-"+strconv.Itoa(i%101)+"/topic-"+strconv.Itoa(i)+".md", false)
 	}
 	start := time.Now()
 	for _, q := range []string{"d", "do", "doc", "docs", "docsec", "docsec12", "zz"} {
-		filterDocs(docs, newQuery(q), nil)
+		filterDocs(docs, newQuery(q), nil, nil)
 	}
 	if d := time.Since(start) / 7; d > testlimit.Scale()*16*time.Millisecond {
 		t.Errorf("filtering 10,000 files took %v per keystroke", d)
@@ -502,23 +509,27 @@ func TestPickerLinear(t *testing.T) {
 	testlimit.Linear(t, "filter", 1<<16, func(n int) func() {
 		docs := make([]doc, n)
 		for i := range docs {
-			docs[i] = doc{name: "dir-" + strconv.Itoa(i%97) + "/sub/file-" + strconv.Itoa(i) + ".md"}
+			docs[i] = newDoc("", "dir-"+strconv.Itoa(i%97)+"/sub/file-"+strconv.Itoa(i)+".md", false)
 		}
 		q := newQuery("ds") // matches every name: the sort is the whole list
 		var out []int
-		return func() { out = filterDocs(docs, q, out) }
+		var ms []scored
+		return func() { out, ms = filterDocs(docs, q, out, ms) }
 	})
-	for name, line := range map[string]string{
-		"lines":    "a needle in a line\n",
-		"headings": "# needle\n",
-		"setext":   "needle\n===\n",
-		"fences":   "```\nneedle\n",
-		"no match": "nothing to see here\n",
+	// heading tracking is timed with a needle that is not there: collecting
+	// a hit per line (only in "lines") makes the heap, not the scan, grow
+	for name, c := range map[string]struct{ line, needle string }{
+		"lines":     {"a needle in a line\n", "needle"},
+		"headings":  {"# heading\n", "needle"},
+		"setext":    {"title\n===\n", "needle"},
+		"fences":    {"```\ncode\n", "needle"},
+		"non-ASCII": {"Ñandú grande\n", "ñandú chico"},
 	} {
 		testlimit.Linear(t, "search "+name, 1<<16, func(n int) func() {
-			data := []byte(strings.Repeat(line, n))
+			data := []byte(strings.Repeat(c.line, n))
 			hay := lowerASCII(nil, data)
-			return func() { scanDoc(doc{}, data, hay, []byte("needle"), false, 1<<30) }
+			fold := c.needle != strings.ToLower(c.needle) || !isASCII(c.needle)
+			return func() { scanDoc(doc{}, data, hay, []byte(c.needle), fold, maxFileHits) }
 		})
 	}
 }
@@ -613,5 +624,23 @@ func TestWalkHostileLinks(t *testing.T) {
 	if f, err := openDir(filepath.Join(root, "out")); err == nil {
 		_ = f.Close()
 		t.Error("opened a symlinked folder")
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] >= 0x80 {
+			return false
+		}
+	}
+	return true
+}
+
+func TestWalkLongNames(t *testing.T) {
+	root := tree(t, map[string]string{"ok.md": "", strings.Repeat("d", 200) + "/" + strings.Repeat("e", 200) + "/" + strings.Repeat("f", 200) + ".md": ""})
+	if names, note := walkNames(t, root); len(names) != 1 || !strings.Contains(note, "longer than 512 bytes") {
+		t.Errorf("long path: %q %q", names, note)
 	}
 }

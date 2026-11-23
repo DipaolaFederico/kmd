@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -23,6 +24,7 @@ var (
 	maxPickFiles   = 10000   // documents listed
 	maxPickEntries = 200_000 // directory entries read in total
 	maxPickLinks   = 1000    // symlinked documents checked
+	maxPickName    = 512     // bytes of a listed path (filtering cost per keystroke)
 
 	maxSearchFile  = 16 << 20  // bytes read from one document
 	maxSearchTotal = 256 << 20 // bytes read by one search
@@ -37,9 +39,16 @@ var skipDirs = map[string]bool{"node_modules": true, "vendor": true}
 
 // doc is a document found by the walk.
 type doc struct {
-	path string // absolute path, to open it
-	name string // path relative to the root, slash-separated and sanitized
-	link bool   // a symlink (checked again before it is read)
+	path  string // absolute path, to open it
+	name  string // path relative to the root, slash-separated and sanitized
+	lower string // name lowercased (ASCII), for the substring bonus
+	link  bool   // a symlink (checked again before it is read)
+}
+
+// newDoc makes the doc of path, relative name rel.
+func newDoc(path, rel string, link bool) doc {
+	name := render.Clean(filepath.ToSlash(rel))
+	return doc{path: path, name: name, lower: string(lowerASCII(nil, []byte(name))), link: link}
 }
 
 // hit is a line of a document that matches a text search.
@@ -116,7 +125,7 @@ func walkTree(root string, stopped func() bool, emit func([]doc) bool) string {
 		batch = nil
 		return ok
 	}
-	deep, full, mounts := false, false, false
+	deep, full, mounts, long := false, false, false, false
 walk:
 	for first := true; len(queue) > 0; first = false {
 		d := queue[0]
@@ -184,7 +193,11 @@ walk:
 			if err != nil {
 				continue
 			}
-			batch = append(batch, doc{path: p, name: render.Clean(filepath.ToSlash(rel)), link: link})
+			if len(rel) > maxPickName {
+				long = true
+				continue
+			}
+			batch = append(batch, newDoc(p, rel, link))
 			if files++; files >= maxPickFiles {
 				notes = append(notes, "only the first "+strconv.Itoa(maxPickFiles)+" documents")
 				break walk
@@ -202,6 +215,9 @@ walk:
 	}
 	if mounts {
 		notes = append(notes, "other file systems skipped")
+	}
+	if long {
+		notes = append(notes, "paths longer than "+strconv.Itoa(maxPickName)+" bytes skipped")
 	}
 	if !flush() {
 		return ""
@@ -269,7 +285,8 @@ func newQuery(s string) query {
 // appear in name in order, ignoring case. Matches at the start of a path
 // segment or word, consecutive matches and matches in the file name score
 // higher. The byte offsets of the matches are appended to pos.
-func fuzzy(name string, fq query, pos []int) (int, []int, bool) {
+func fuzzy(d *doc, fq query, pos []int) (int, []int, bool) {
+	name := d.name
 	q := fq.r
 	if len(q) == 0 {
 		return 0, pos, true
@@ -299,7 +316,7 @@ func fuzzy(name string, fq query, pos []int) (int, []int, bool) {
 			prevMatch = i
 			pos = append(pos, i)
 			if qi++; qi == len(q) {
-				return score + substringBonus(name, base, fq.s), pos, true
+				return score + substringBonus(d.lower, base, fq.s), pos, true
 			}
 		}
 		prev = r
@@ -308,9 +325,10 @@ func fuzzy(name string, fq query, pos []int) (int, []int, bool) {
 }
 
 // substringBonus favours names that contain the query as typed, above all
-// in the file name and at its start ("guide" → guide.md first).
-func substringBonus(name string, base int, q string) int {
-	i := indexFold(name, q)
+// in the file name and at its start ("guide" → guide.md first). lower is
+// the name with ASCII letters lowered (same offsets as the name).
+func substringBonus(lower string, base int, q string) int {
+	i := strings.Index(lower, q)
 	switch {
 	case i < 0:
 		return 0
@@ -322,63 +340,38 @@ func substringBonus(name string, base int, q string) int {
 	return 20
 }
 
-// indexFold is strings.Index ignoring ASCII case, for a lowercase needle
-// (non-ASCII runes must match exactly: this is only a ranking bonus).
-func indexFold(s, needle string) int {
-	n := len(needle)
-	for i := 0; i+n <= len(s); i++ {
-		j := 0
-		for j < n {
-			c := s[i+j]
-			if c >= 'A' && c <= 'Z' {
-				c += 'a' - 'A'
-			}
-			if c != needle[j] {
-				break
-			}
-			j++
-		}
-		if j == n {
-			return i
-		}
-	}
-	return -1
-}
+// scored is a document matching the filter, with its score.
+type scored struct{ i, s int }
 
 // filterDocs returns the indexes of the documents matching q, best first;
-// with an empty query, all of them in order.
-func filterDocs(docs []doc, q query, out []int) []int {
-	out = out[:0]
+// with an empty query, all of them in order. out and ms are reused buffers.
+func filterDocs(docs []doc, q query, out []int, ms []scored) ([]int, []scored) {
+	out, ms = out[:0], ms[:0]
 	if len(q.r) == 0 {
 		for i := range docs {
 			out = append(out, i)
 		}
-		return out
+		return out, ms
 	}
-	type scored struct{ i, s int }
-	var ms []scored
-	var pos []int
-	for i, d := range docs {
-		var s int
-		var ok bool
-		if s, pos, ok = fuzzy(d.name, q, pos[:0]); ok {
+	var buf [64]int
+	for i := range docs {
+		if s, _, ok := fuzzy(&docs[i], q, buf[:0]); ok {
 			ms = append(ms, scored{i, s})
 		}
 	}
-	sort.Slice(ms, func(a, b int) bool {
-		x, y := ms[a], ms[b]
+	slices.SortFunc(ms, func(x, y scored) int {
 		if x.s != y.s {
-			return x.s > y.s
+			return y.s - x.s
 		}
 		if lx, ly := len(docs[x.i].name), len(docs[y.i].name); lx != ly {
-			return lx < ly
+			return lx - ly
 		}
-		return x.i < y.i
+		return x.i - y.i
 	})
 	for _, m := range ms {
 		out = append(out, m.i)
 	}
-	return out
+	return out, ms
 }
 
 // searchDocs finds the lines of docs (found under root) containing q (ignoring case unless q
@@ -435,10 +428,14 @@ func readDoc(d doc, root string, n int) []byte {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+	st, err := f.Stat()
+	if err != nil || !st.Mode().IsRegular() {
 		return nil
 	}
-	data, _ := io.ReadAll(io.LimitReader(f, int64(n)))
+	var buf bytes.Buffer
+	buf.Grow(int(min(int64(n), st.Size()+bytes.MinRead))) // one allocation if it did not grow
+	_, _ = buf.ReadFrom(io.LimitReader(f, int64(n)))
+	data := buf.Bytes()
 	return data
 }
 
@@ -460,6 +457,7 @@ func lowerASCII(dst, src []byte) []byte {
 // setext headings outside fenced code.
 func scanDoc(d doc, data, hay, needle []byte, foldLines bool, max int) []hit {
 	var hits []hit
+	var low []byte // the line lowered, for a non-ASCII query
 	heading, prev := "", []byte(nil)
 	fence := byte(0)
 	for ln, start := 1, 0; start < len(data) && len(hits) < max; ln++ {
@@ -483,17 +481,15 @@ func scanDoc(d doc, data, hay, needle []byte, foldLines bool, max int) []hit {
 			if h, ok := atxHeading(t); ok {
 				heading = h
 			}
-		case len(prev) > 0 && len(bytes.TrimSpace(t)) > 0 && strings.Trim(string(bytes.TrimSpace(t)), "=") == "",
-			len(prev) > 0 && len(bytes.TrimSpace(t)) > 1 && strings.Trim(string(bytes.TrimSpace(t)), "-") == "":
-			heading = clipBytes(bytes.TrimSpace(prev))
+		case len(prev) > 0 && (allSame(bytes.TrimSpace(t), '=', 1) || allSame(bytes.TrimSpace(t), '-', 2)):
+			heading = clipBytes(prev)
 		}
 		h := hay[start:end]
-		found := false
 		if foldLines {
-			found = strings.Contains(strings.ToLower(string(h)), string(needle))
-		} else {
-			found = bytes.Contains(h, needle)
+			low = lowerLine(low[:0], h)
+			h = low
 		}
+		found := bytes.Contains(h, needle)
 		if found {
 			hits = append(hits, hit{doc: d, line: ln, heading: heading, text: clipBytes(bytes.TrimSpace(line))})
 		}
@@ -504,6 +500,30 @@ func scanDoc(d doc, data, hay, needle []byte, foldLines bool, max int) []hit {
 		start = end + 1
 	}
 	return hits
+}
+
+// allSame reports whether b is at least n bytes, all c (a setext underline).
+func allSame(b []byte, c byte, n int) bool {
+	if len(b) < n {
+		return false
+	}
+	for _, x := range b {
+		if x != c {
+			return false
+		}
+	}
+	return true
+}
+
+// lowerLine appends line lowered rune by rune (like strings.ToLower, which
+// the query was lowered with) to dst.
+func lowerLine(dst, line []byte) []byte {
+	for len(line) > 0 {
+		r, n := utf8.DecodeRune(line)
+		dst = utf8.AppendRune(dst, unicode.ToLower(r))
+		line = line[n:]
+	}
+	return dst
 }
 
 // atxHeading returns the text of an ATX heading line ("## Title ##").

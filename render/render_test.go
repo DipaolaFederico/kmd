@@ -157,19 +157,16 @@ func TestLimits(t *testing.T) {
 		}
 	}
 	// n repetitions of each pattern: the time grows linearly with n
-	for name, unit := range map[string]string{
-		"nesting":  "> - ",
-		"brackets": "[[](",
-		"emphasis": "*a _b ",
-		"table":    "|x|y\n",
-		"diagrams": "```mermaid\ngraph LR\nA-->B\nB-->C\nC-->A\n```\n\n",
-		"math":     "$$\n\\frac{1}{x^2}\n$$\n\n",
+	for _, c := range []struct{ name, head, unit string }{
+		{"nesting", "", "> - "},
+		{"brackets", "", "[[]("},
+		{"emphasis", "", "*a _b "},
+		{"table", "|a|b|\n|-|-|\n", "|x|y\n"},
+		{"diagrams", "", "```mermaid\ngraph LR\nA-->B\nB-->C\nC-->A\n```\n\n"},
+		{"math", "", "$$\n\\frac{1}{x^2}\n$$\n\n"},
 	} {
-		testlimit.Linear(t, name, 1<<20/len(unit), func(n int) func() {
-			src := strings.Repeat(unit, n)
-			if name == "table" {
-				src = "|a|b|\n|-|-|\n" + src
-			}
+		testlimit.Linear(t, c.name, 1<<20/len(c.unit), func(n int) func() {
+			src := c.head + strings.Repeat(c.unit, n)
 			return func() { _, _ = render.Render(src, render.Options{Color: true}) }
 		})
 	}

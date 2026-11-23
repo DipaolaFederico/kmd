@@ -8,7 +8,6 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
@@ -40,6 +39,7 @@ type picker struct {
 	search   *task // search in progress
 	partial  bool  // started before the listing was complete
 	done     int   // documents searched so far
+	total    int   // documents to search
 	tnote    string
 }
 
@@ -104,11 +104,6 @@ func (m *model) stopPicker() {
 		m.pick.walk.cancel()
 		m.pick.search.cancel()
 	}
-}
-
-// busy reports whether background work is pending.
-func (m *model) busy() bool {
-	return m.pick != nil && (m.pick.walk != nil || m.pick.search != nil)
 }
 
 // add merges a batch of documents found by the walk into the sorted list:
@@ -248,11 +243,11 @@ func (m *model) startSearch() {
 		return
 	}
 	t := newTask()
-	p.search = t
+	p.search, p.partial, p.total = t, p.walk != nil, len(p.docs)
 	// a copy: the walk may still be adding to (and sorting) p.docs
-	docs, q, bg := slices.Clone(p.docs), p.searched, m.bg
+	docs, root, q, bg := slices.Clone(p.docs), p.root, p.searched, m.bg
 	go func() {
-		note := searchDocs(docs, p.root, q, t.stopped, func(hs []hit, done int) bool {
+		note := searchDocs(docs, root, q, t.stopped, func(hs []hit, done int) bool {
 			return t.send(bg, func(m *model) {
 				if m.pick == p && p.search == t {
 					p.hits = append(p.hits, hs...)
@@ -287,7 +282,6 @@ func (m *model) pickOpen(i int) {
 		path = p.docs[p.shown[i]].path
 	}
 	p.cur = i
-	m.msg = ""
 	m.followFile(path, "")
 	if m.msg != "" { // could not open it: stay in the list
 		return
@@ -296,13 +290,19 @@ func (m *model) pickOpen(i int) {
 	if h == nil {
 		return
 	}
-	if h.heading != "" {
-		if line, ok := m.page.Anchors[render.Slug(h.heading)]; ok {
-			m.top = line
-			m.scroll(0)
+	end := len(m.page.Lines) // where the section ends
+	if hs := m.page.Headings; h.section >= 0 && h.section < len(hs) {
+		m.top = hs[h.section].Line
+		m.scroll(0)
+		if h.section+1 < len(hs) {
+			end = hs[h.section+1].Line
 		}
 	}
 	m.search(p.searched)
+	// the nth match of the section, if the rendered text has that many
+	if j := m.cur + h.nth; h.nth > 0 && m.cur >= 0 && j < len(m.matches) && m.matches[j].line < end {
+		m.gotoMatch(j)
+	}
 }
 
 func (m *model) drawPicker(b *strings.Builder) {
@@ -326,7 +326,7 @@ func (m *model) drawPicker(b *strings.Builder) {
 		default:
 			parts = append(parts, plural(len(p.hits), "match", "matches"))
 			if p.search != nil {
-				parts = append(parts, "searching "+strconv.Itoa(p.done)+"/"+strconv.Itoa(len(p.docs))+"…")
+				parts = append(parts, "searching "+strconv.Itoa(p.done)+"/"+strconv.Itoa(p.total)+"…")
 			}
 		}
 		if p.tnote != "" {

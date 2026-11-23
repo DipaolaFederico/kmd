@@ -73,7 +73,6 @@ func TestStripEscapes(t *testing.T) {
 // fixture writes a small documentation tree and returns its directory.
 func fixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
 	files := map[string]string{
 		"README.md": "# Index\n\n[Ticket one](one.md) · [Two, section](sub/two.md#deep) · " +
 			"[Here](#mapa) · [Web](https://example.com) · [Pic](pic.png) · [Script](run.sh) · " +
@@ -88,15 +87,7 @@ func fixture(t *testing.T) string {
 		"run.sh":        "#!/bin/sh\n",
 		"tool.png":      "",
 	}
-	for name, body := range files {
-		p := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	dir := tree(t, files)
 	if err := os.Chmod(filepath.Join(dir, "tool.png"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -311,15 +302,10 @@ func TestFollowAndBack(t *testing.T) {
 
 // Wiki links are followed like relative links, headings by their text.
 func TestFollowWikiLink(t *testing.T) {
-	dir := t.TempDir()
-	for name, body := range map[string]string{
+	dir := tree(t, map[string]string{
 		"README.md":   "# Index\n\nSee [[My Notes#Deep Dive|the notes]].\n",
 		"My Notes.md": "# Notes\n\n" + strings.Repeat("x\n\n", 40) + "## Deep Dive\n\ndeep text\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	})
 	h := newHarness(t, dir)
 	h.selectLink(t, "/My%20Notes.md#Deep%20Dive")
 	h.keys("enter")

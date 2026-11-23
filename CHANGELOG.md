@@ -14,7 +14,7 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - A file picker for folders: `kmd docs/` without a `README.md` lists every
   Markdown file under the folder, filtered as you type (fuzzy), and Enter
   opens it; Backspace returns to the list. `o` opens the picker from any
-  document, for its folder.
+  document, for the folder kmd was started on.
 - Search across documents: `S` (or `Tab` in the picker) searches the text
   of every document in the folder and lists the matches with their file,
   line and section; Enter opens the document at the match. The search runs
@@ -22,8 +22,9 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ### Changed
 
-- A folder without a `README.md` opens the viewer (with the file picker)
-  even when its listing fits on the screen; piped output is unchanged.
+- A folder without a `README.md` opens the built-in viewer (with the file
+  picker) even when its listing fits on the screen; piped output, and an
+  external pager set with `pager` or `KMD_PAGER`, are unchanged.
 
 ### Security
 

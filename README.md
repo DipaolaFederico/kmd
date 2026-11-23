@@ -215,20 +215,22 @@ is one, so a folder of documents can be browsed like a wiki. A folder
 (`kmd notes/`, or a link to one) opens its `README.md` or `index.md`, or
 else the **file picker**: every Markdown file under the folder, with its
 relative path, filtered as you type (fuzzy, case-insensitive). `o` opens
-the picker from any document (for its folder), and `S` searches the text
-of all those documents and lists the matching lines with their file, line
-and section.
+the picker from any document, for the folder kmd was started on (the
+document's folder, or the current folder for several files or stdin), and
+`S` searches the text of all those documents and lists the matching lines
+with their file, line and section.
 
 | Picker keys | Action |
 |---|---|
-| typing · `Backspace` · `Ctrl-U` | filter (or the text to search) · delete a character · clear |
-| `↑` `↓` `PgUp` `PgDn` `Home` `End`, wheel | choose |
+| typing · `Backspace` · `Ctrl-U` | filter (or the text to search) · delete a character (on an empty filter over a document: close) · clear |
+| `↑` `↓` `Ctrl-P` `Ctrl-N` `PgUp` `PgDn` `Home` `End`, wheel | choose |
 | `Enter`, click | open the document (a text match opens at its section, the text highlighted); in text search, `Enter` first runs the search |
 | `Tab` | switch between finding files and searching their text |
-| `Esc` | cancel a running search · clear the filter · close the picker |
+| `Esc` | cancel a running search · clear the filter · close the picker (`Ctrl-C`, `Ctrl-G`: cancel or close) |
 
 `Backspace` in a document opened from the picker returns to the list as it
-was. The list skips hidden folders, `.git`, `node_modules` and `vendor`.
+was. The list skips hidden files and folders (such as `.git`),
+`node_modules` and `vendor`.
 
 | Keys | Action |
 |---|---|
@@ -237,7 +239,7 @@ was. The list skips hidden folders, `.git`, `node_modules` and `vendor`.
 | `Backspace` `h` `←` · `H` | back one document · back to the first document |
 | `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the mouse wheel also work) |
 | `t` · `[` `]` | table of contents (choose a heading and press Enter) · previous / next section |
-| `o` · `S` | file picker: find a document in this folder · search the text of every document in it |
+| `o` · `S` | file picker: find a document under the starting folder · search the text of every document there |
 | `c` | copy a code block on screen to the clipboard (press again for the next block on screen) |
 | `/` `n` `N` | search, next / previous match |
 | `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |

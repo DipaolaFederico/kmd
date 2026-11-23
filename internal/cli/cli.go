@@ -103,8 +103,9 @@ Usage:
   cat README.md | kmd [options]
 
 A folder shows its README.md (or index.md), or else a list of every
-Markdown file under it, filtered as you type (o in the viewer opens it
-for the document's folder, S searches the text of all its documents).
+Markdown file under it, filtered as you type. In the viewer, o opens that
+list for the folder kmd was started on (the document's folder, or the
+current one) and S searches the text of all its documents.
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
@@ -472,9 +473,9 @@ func Run(env Env) int {
 	}
 	long := !o.html && !o.toc && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
 		strings.Count(res.text, "\n") > env.Rows
-	// a folder without a README opens the file picker
-	picker := len(o.files) == 1 && o.files[0] != "-" && isDir(o.files[0])
-	if viewable && (s.alwaysView || picker || long && s.pager == builtinPager) {
+	// a folder left by resolveDirs has no README: it opens the file picker
+	folder := len(o.files) == 1 && o.files[0] != "-" && isDir(o.files[0])
+	if viewable && (s.alwaysView || folder || long && s.pager == builtinPager) {
 		if err := runViewer(env, o, s, in, false, pageOf(res), env.Cols); err == nil {
 			return res.code
 		}
@@ -606,11 +607,11 @@ func (res *output) addNav(r render.Result, offset int) {
 // its relative links resolve against.
 func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Node, base string, err error) {
 	var src string
-	isDir := false
+	folder := false
 	if name == "-" && in.read {
 		src = in.src
 	} else {
-		src, isDir, err = readSource(name, env.Stdin)
+		src, folder, err = readSource(name, env.Stdin)
 		if name == "-" {
 			in.src, in.read = src, true
 		}
@@ -625,7 +626,7 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 		}
 	}
 	switch {
-	case isDir:
+	case folder:
 		base = name
 	case name != "-":
 		base = filepath.Dir(name)
@@ -791,7 +792,7 @@ func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first
 		return pageOf(res), nil
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
-	root := "." // the picker lists the folder of the document, or the working one
+	root := "." // the picker lists the folder kmd was started on, or the working one
 	if start != "" {
 		root = start
 		if !isDir(start) {

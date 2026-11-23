@@ -270,7 +270,7 @@ func (m *model) load(path string) error {
 	if err != nil {
 		return err
 	}
-	m.hist = append(m.hist, entry{m.path, m.top, m.sel, m.pickedRoot()})
+	m.hist = append(m.hist, entry{path: m.path, top: m.top, sel: m.sel, pick: m.pickedRoot()})
 	m.path = path
 	m.setPage(p)
 	return nil
@@ -407,7 +407,7 @@ func (m *model) internal(href string) bool {
 func (m *model) anchorJump(frag string) {
 	top, sel := m.top, m.sel
 	if m.jump(frag) {
-		m.hist = append(m.hist, entry{m.path, top, sel, ""})
+		m.hist = append(m.hist, entry{path: m.path, top: top, sel: sel})
 	}
 }
 

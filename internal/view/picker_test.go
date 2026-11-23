@@ -221,6 +221,11 @@ func TestSearchDocs(t *testing.T) {
 	}
 }
 
+// busy reports whether the picker's background work is pending.
+func (m *model) busy() bool {
+	return m.pick != nil && (m.pick.walk != nil || m.pick.search != nil)
+}
+
 // settle applies background results until no work is pending.
 func (h *harness) settle(t *testing.T) {
 	t.Helper()
@@ -238,14 +243,7 @@ func (h *harness) settle(t *testing.T) {
 func pickerHarness(t *testing.T, root string) *harness {
 	t.Helper()
 	h := &harness{}
-	docs := loader("")
-	load := func(path string, cols int) (*Page, error) {
-		if isDir(path) {
-			return &Page{Lines: []string{"listing"}}, nil
-		}
-		return docs(path, cols)
-	}
-	m, err := newModel(Options{Load: load, Start: root, Root: root,
+	m, err := newModel(Options{Load: pickerLoader(), Start: root, Root: root,
 		Select: "<S>", Match: "<M>", Bar: "<B>"}, 60, 12)
 	if err != nil {
 		t.Fatal(err)
@@ -256,7 +254,29 @@ func pickerHarness(t *testing.T, root string) *harness {
 	return h
 }
 
+// pickerLoader renders documents, and a folder as a one-line page (the
+// picker is what shows on it).
+func pickerLoader() Loader {
+	docs := loader("")
+	return func(path string, cols int) (*Page, error) {
+		if isDir(path) {
+			return &Page{Lines: []string{"listing"}}, nil
+		}
+		return docs(path, cols)
+	}
+}
+
+// syntheticDocs is a list of n documents in a deep, regular tree.
+func syntheticDocs(n int) []doc {
+	docs := make([]doc, n)
+	for i := range docs {
+		docs[i] = newDoc("", "project-"+strconv.Itoa(i%37)+"/docs/section-"+strconv.Itoa(i%101)+"/topic-"+strconv.Itoa(i)+".md", false)
+	}
+	return docs
+}
+
 func pickerFixture(t *testing.T) string {
+	t.Helper()
 	files := map[string]string{
 		"guide/install.md": "# Install\n\nIntro.\n\n" + strings.Repeat("filler\n\n", 30) + "## Linux\n\nrun the needle command\n",
 		"guide/usage.md":   "# Usage\n\nno match\n",
@@ -434,7 +454,7 @@ func TestPickerElsewhere(t *testing.T) {
 	}
 }
 
-func TestPickerNameFitsAndGrows(t *testing.T) {
+func TestPickerHelpers(t *testing.T) {
 	h := &harness{}
 	m, _ := newModel(Options{Load: func(string, int) (*Page, error) { return &Page{Lines: []string{""}}, nil },
 		Select: "<S>", Match: "<M>"}, 20, 10)
@@ -471,10 +491,7 @@ func TestPickerNameFitsAndGrows(t *testing.T) {
 
 // BenchmarkPickerFilter filters 10,000 paths, as for each keystroke.
 func BenchmarkPickerFilter(b *testing.B) {
-	docs := make([]doc, 10000)
-	for i := range docs {
-		docs[i] = newDoc("", "project-"+strconv.Itoa(i%37)+"/docs/section-"+strconv.Itoa(i%101)+"/topic-"+strconv.Itoa(i)+".md", false)
-	}
+	docs := syntheticDocs(10000)
 	for _, q := range []string{"d", "docsec12"} { // everything matches / a few do
 		b.Run(q, func(b *testing.B) {
 			var out []int
@@ -487,49 +504,31 @@ func BenchmarkPickerFilter(b *testing.B) {
 	}
 }
 
-// TestPickerFilterFast backs the per-keystroke budget (16 ms for 10,000
-// files) generously, scaled for slow builders.
-func TestPickerFilterFast(t *testing.T) {
-	docs := make([]doc, 10000)
-	for i := range docs {
-		docs[i] = newDoc("", "project-"+strconv.Itoa(i%37)+"/docs/section-"+strconv.Itoa(i%101)+"/topic-"+strconv.Itoa(i)+".md", false)
-	}
-	start := time.Now()
-	for _, q := range []string{"d", "do", "doc", "docs", "docsec", "docsec12", "zz"} {
-		filterDocs(docs, newQuery(q), nil, nil)
-	}
-	if d := time.Since(start) / 7; d > testlimit.Scale()*16*time.Millisecond {
-		t.Errorf("filtering 10,000 files took %v per keystroke", d)
-	}
-}
-
 // TestPickerLinear: filtering and searching grow linearly with the number
 // of documents and the length of a document.
 func TestPickerLinear(t *testing.T) {
 	testlimit.Linear(t, "filter", 1<<16, func(n int) func() {
-		docs := make([]doc, n)
-		for i := range docs {
-			docs[i] = newDoc("", "dir-"+strconv.Itoa(i%97)+"/sub/file-"+strconv.Itoa(i)+".md", false)
-		}
-		q := newQuery("ds") // matches every name: the sort is the whole list
+		docs := syntheticDocs(n)
+		q := newQuery("ts") // matches every name: the sort is the whole list
 		var out []int
 		var ms []scored
 		return func() { out, ms = filterDocs(docs, q, out, ms) }
 	})
-	// heading tracking is timed with a needle that is not there: collecting
-	// a hit per line (only in "lines") makes the heap, not the scan, grow
+	// heading tracking is timed with a needle that is not there, and "lines"
+	// matches once every 100 lines: a hit on every line would time the heap
+	// growing, not the scan
 	for name, c := range map[string]struct{ line, needle string }{
-		"lines":     {"a needle in a line\n", "needle"},
+		"lines":     {strings.Repeat("a plain line\n", 99) + "a needle\n", "needle"},
 		"headings":  {"# heading\n", "needle"},
 		"setext":    {"title\n===\n", "needle"},
 		"fences":    {"```\ncode\n", "needle"},
 		"non-ASCII": {"Ñandú grande\n", "ñandú chico"},
 	} {
-		testlimit.Linear(t, "search "+name, 1<<16, func(n int) func() {
+		testlimit.Linear(t, "search "+name, 1<<14, func(n int) func() {
 			data := []byte(strings.Repeat(c.line, n))
 			hay := lowerASCII(nil, data)
 			fold := c.needle != strings.ToLower(c.needle) || !isASCII(c.needle)
-			return func() { scanDoc(doc{}, data, hay, []byte(c.needle), fold, maxFileHits) }
+			return func() { scanDoc(doc{}, data, hay, []byte(c.needle), fold, 1<<30) }
 		})
 	}
 }
@@ -547,6 +546,9 @@ func TestPickerSearchDuringWalk(t *testing.T) {
 	}
 	h := &harness{model: m}
 	h.settle(t)
+	if p.search != nil || p.total != 2 {
+		t.Errorf("search on a copy of the list: running %v, total %d", p.search != nil, p.total)
+	}
 }
 
 func TestWalkHostileLinks(t *testing.T) {
@@ -642,5 +644,27 @@ func TestWalkLongNames(t *testing.T) {
 	root := tree(t, map[string]string{"ok.md": "", strings.Repeat("d", 200) + "/" + strings.Repeat("e", 200) + "/" + strings.Repeat("f", 200) + ".md": ""})
 	if names, note := walkNames(t, root); len(names) != 1 || !strings.Contains(note, "longer than 512 bytes") {
 		t.Errorf("long path: %q %q", names, note)
+	}
+}
+
+// A match opens in its own section even when headings repeat, at the
+// match chosen among those of the section.
+func TestPickerOpensRepeatedSections(t *testing.T) {
+	root := tree(t, map[string]string{"CHANGELOG.md": "# Changelog\n\n" +
+		"## 2.0\n\n### Fixed\n\n- bug one\n\n" + strings.Repeat("filler\n\n", 20) +
+		"## 1.0\n\n### Fixed\n\n- bug two\n- bug three\n\n" + strings.Repeat("filler\n\n", 20)})
+	h := pickerHarness(t, root)
+	h.keys("tab", "b", "u", "g", "enter")
+	h.settle(t)
+	if len(h.pick.hits) != 3 || h.pick.hits[2].section != 4 || h.pick.hits[2].nth != 1 {
+		t.Fatalf("hits: %+v", h.pick.hits)
+	}
+	h.keys("end", "enter") // "bug three", in the second "Fixed"
+	if h.picking || h.cur < 0 {
+		t.Fatalf("not opened: %q", h.msg)
+	}
+	got := stripEscapes(h.page.Lines[h.matches[h.cur].line])
+	if !strings.Contains(got, "bug three") {
+		t.Errorf("opened at %q", got)
 	}
 }

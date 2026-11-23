@@ -170,14 +170,14 @@ func Run(opt Options) error {
 		select {
 		case f := <-m.bg:
 			f(m)
-			for range 64 { // apply what is ready (a few), then draw once
+		drain: // apply what else is ready (a few), then draw once
+			for range 64 {
 				select {
 				case f := <-m.bg:
 					f(m)
-					continue
 				default:
+					break drain
 				}
-				break
 			}
 			redraw = m.picking // results of the picker's work: only it shows them
 		case <-tick:

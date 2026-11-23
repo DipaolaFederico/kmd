@@ -128,35 +128,38 @@ func TestPathological(t *testing.T) {
 		name string
 		n    int
 		gen  func(n int) string
+		// quadratic: the input itself grows with n², so its time cannot
+		// grow linearly (only the absolute limit applies)
+		quadratic bool
 	}{
-		{"nested brackets", 50000, func(n int) string { return strings.Repeat("[", n) + strings.Repeat("]", n) }},
-		{"nested quotes", 50000, func(n int) string { return strings.Repeat("> ", n) + "x" }},
-		{"nested lists", 50000, func(n int) string { return strings.Repeat("- ", n) + "x" }},
-		{"emphasis openers", 50000, rep("*a ")},
-		{"underscores", 50000, func(n int) string { return strings.Repeat("_a ", n) + strings.Repeat("a_ ", n) }},
-		{"backticks", 30000, rep("`a``")},
-		{"links in links", 30000, func(n int) string { return strings.Repeat("[a](b)", n) + strings.Repeat("[", n) }},
-		{"unclosed links", 50000, rep("[a](")},
-		{"many refs", 30000, rep("[x]: /u\n")},
-		{"table rows", 30000, func(n int) string { return "| a | b |\n|---|---|\n" + strings.Repeat("| x | y |\n", n) }},
-		{"math", 50000, rep("$a ")},
-		{"emails", 50000, rep("a@ ")},
-		{"emphasis + links", 20000, rep("*a* **b** `c` [d](e) ")},
-		{"underscore links", 20000, rep("_a [x](y) ")},
-		{"backtick lengths", 1500, backtickLadder},
-		{"colons", 100000, rep(":")},
-		{"shortcode-like", 5000, rep(":" + strings.Repeat("a", 39))},
-		{"long shortcodes", 3000, rep(":" + strings.Repeat("a", 60) + ":")},
-		{"split colons", 30000, rep(":_a_")},
-		{"emoji", 30000, rep(":rocket:")},
-		{"wiki openers", 100000, rep("[[")},
-		{"wiki closers", 100000, rep("]]")},
-		{"wiki unclosed", 50000, rep("[[a")},
-		{"wiki long", 50, rep("[[" + strings.Repeat("a", 2000))},
-		{"wiki long colons", 50, rep("[[" + strings.Repeat("a:", 1000))},
-		{"unclosed + emoji", 30000, rep("[[a :x: ")},
-		{"wiki links", 30000, rep("[[a|:x:]] ")},
-		{"wiki in emphasis", 30000, rep("*[[a_b]]* ")},
+		{"nested brackets", 50000, func(n int) string { return strings.Repeat("[", n) + strings.Repeat("]", n) }, false},
+		{"nested quotes", 50000, func(n int) string { return strings.Repeat("> ", n) + "x" }, false},
+		{"nested lists", 50000, func(n int) string { return strings.Repeat("- ", n) + "x" }, false},
+		{"emphasis openers", 50000, rep("*a "), false},
+		{"underscores", 50000, func(n int) string { return strings.Repeat("_a ", n) + strings.Repeat("a_ ", n) }, false},
+		{"backticks", 30000, rep("`a``"), false},
+		{"links in links", 30000, func(n int) string { return strings.Repeat("[a](b)", n) + strings.Repeat("[", n) }, false},
+		{"unclosed links", 50000, rep("[a]("), false},
+		{"many refs", 30000, rep("[x]: /u\n"), false},
+		{"table rows", 30000, func(n int) string { return "| a | b |\n|---|---|\n" + strings.Repeat("| x | y |\n", n) }, false},
+		{"math", 50000, rep("$a "), false},
+		{"emails", 50000, rep("a@ "), false},
+		{"emphasis + links", 20000, rep("*a* **b** `c` [d](e) "), false},
+		{"underscore links", 20000, rep("_a [x](y) "), false},
+		{"backtick lengths", 1500, backtickLadder, true},
+		{"colons", 100000, rep(":"), false},
+		{"shortcode-like", 5000, rep(":" + strings.Repeat("a", 39)), false},
+		{"long shortcodes", 3000, rep(":" + strings.Repeat("a", 60) + ":"), false},
+		{"split colons", 30000, rep(":_a_"), false},
+		{"emoji", 30000, rep(":rocket:"), false},
+		{"wiki openers", 100000, rep("[["), false},
+		{"wiki closers", 100000, rep("]]"), false},
+		{"wiki unclosed", 50000, rep("[[a"), false},
+		{"wiki long", 50, rep("[[" + strings.Repeat("a", 2000)), false},
+		{"wiki long colons", 50, rep("[[" + strings.Repeat("a:", 1000)), false},
+		{"unclosed + emoji", 30000, rep("[[a :x: "), false},
+		{"wiki links", 30000, rep("[[a|:x:]] "), false},
+		{"wiki in emphasis", 30000, rep("*[[a_b]]* "), false},
 	}
 	for _, c := range cases {
 		in := c.gen(c.n)
@@ -165,8 +168,8 @@ func TestPathological(t *testing.T) {
 		if d := time.Since(start); d > raceFactor()*500*time.Millisecond {
 			t.Errorf("%s took %v", c.name, d)
 		}
-		if c.name == "backtick lengths" {
-			continue // the input grows with n², not n
+		if c.quadratic {
+			continue
 		}
 		testlimit.Linear(t, c.name, 8*c.n, func(n int) func() {
 			in := c.gen(n)

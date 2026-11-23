@@ -167,8 +167,9 @@ started.
 Go to the previous or next section (heading).
 .TP
 .B o
-Open the file picker for the folder of the document (or the folder on
-screen); see \fBFILE PICKER\fR.
+Open the file picker for the folder kmd was started on: the document's
+folder, the current folder for several files or standard input, or the
+folder on screen; see \fBFILE PICKER\fR.
 .TP
 .B S
 Open the file picker in text search mode.
@@ -195,11 +196,12 @@ a command such as \fBless \-R\fR to use an external pager instead.
 .SS FILE PICKER
 The picker lists every Markdown file under a folder by its relative path,
 filtered as you type (fuzzy and case\-insensitive: the typed letters must
-appear in order, best matches first). \fBUp\fR/\fBDown\fR, \fBPgUp\fR/\fBPgDn\fR,
+appear in order, best matches first). \fBUp\fR/\fBDown\fR (\fBCtrl\-P\fR/\fBCtrl\-N\fR), \fBPgUp\fR/\fBPgDn\fR,
 \fBHome\fR/\fBEnd\fR and the wheel choose; \fBEnter\fR or a click opens the
 document, and \fBBackspace\fR in it returns to the list as it was.
-\fBBackspace\fR deletes a character and \fBCtrl\-U\fR clears the filter;
-\fBEsc\fR clears it, or closes the picker.
+\fBBackspace\fR deletes a character (on an empty filter over a document, it
+closes the picker) and \fBCtrl\-U\fR clears the filter; \fBEsc\fR clears it,
+or closes the picker, as do \fBCtrl\-C\fR and \fBCtrl\-G\fR.
 .PP
 \fBTab\fR switches to text search: type the text and press \fBEnter\fR to
 search every listed document (case\-insensitive unless the text has capitals).
@@ -207,7 +209,7 @@ Matches are listed with their file, line and section; \fBEnter\fR opens the
 document at that section with the text highlighted. The search runs in the
 background and \fBEsc\fR cancels it.
 .PP
-The listing skips hidden folders, \fB.git\fR, \fBnode_modules\fR and
+The listing skips hidden files and folders (such as \fB.git\fR), \fBnode_modules\fR and
 \fBvendor\fR, stays on the folder's file system, never enters symlinked
 folders, and lists a symlinked document only when it points directly at a
 regular Markdown file inside the folder (at most 1,000 are checked). It stops

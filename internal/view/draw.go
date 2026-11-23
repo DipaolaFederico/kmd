@@ -19,16 +19,25 @@ func moveTo(b *strings.Builder, row, col int) {
 // terminals that support it from showing half-drawn frames.
 func (m *model) draw(b *strings.Builder) {
 	b.WriteString("\x1b[?2026h")
-	h := m.viewH()
 	if m.picking {
 		m.drawPicker(b)
-		m.status(b)
-		if m.help {
-			m.drawHelp(b)
-		}
-		b.WriteString("\x1b[?2026l")
-		return
+	} else {
+		m.drawPage(b)
 	}
+	m.status(b)
+	if m.outline {
+		m.drawOutline(b)
+	}
+	if m.help {
+		m.drawHelp(b)
+	}
+	b.WriteString("\x1b[?2026l")
+}
+
+// drawPage paints the document: its lines, search matches and the selected
+// link.
+func (m *model) drawPage(b *strings.Builder) {
+	h := m.viewH()
 	for y := range h {
 		moveTo(b, y, 0)
 		if i := m.top + y; i < len(m.page.Lines) {
@@ -53,14 +62,6 @@ func (m *model) draw(b *strings.Builder) {
 			}
 		}
 	}
-	m.status(b)
-	if m.outline {
-		m.drawOutline(b)
-	}
-	if m.help {
-		m.drawHelp(b)
-	}
-	b.WriteString("\x1b[?2026l")
 }
 
 // overlay repaints columns [col, col+w) of a screen row with style st.
@@ -223,7 +224,7 @@ var helpText = []string{
 	"H                back to the first document",
 	"",
 	"t                contents: jump to a heading",
-	"o                find a document in this folder",
+	"o                find a document (starting folder)",
 	"S                search the text of its documents",
 	"[ ]              previous / next section",
 	"/ n N            search, next / previous match",

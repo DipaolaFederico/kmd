@@ -2,8 +2,10 @@ package testlimit
 
 import (
 	"math"
+	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -46,14 +48,28 @@ const (
 //
 // The check is skipped under the race detector: it slows the instrumented
 // Go code ten times, so finding the same quadratics would need runs ten
-// times longer. The absolute limits still apply under -race, and plain and
-// coverage runs (`make cover`) keep the check.
+// times longer. It is also skipped when KMD_TEST_TIME_SCALE is above 1:
+// the machine is declared slow or shared (distribution build farms), and
+// other jobs competing for the CPU distort ratios. The absolute limits
+// still apply in both cases; plain and coverage runs (`make cover`) keep
+// the check.
+//
+// While measuring it sets GOMAXPROCS to 1 and turns the garbage collector
+// off for the whole process: tests that call it must not run in parallel
+// (t.Parallel) with other tests.
 func Linear(t testing.TB, name string, maxN int, setup func(n int) func()) {
 	t.Helper()
-	if raceFactor > 1 {
+	if raceFactor > 1 || slowMachine(os.Getenv("KMD_TEST_TIME_SCALE")) {
 		return
 	}
 	linear(t, name, maxN, setup, minSample)
+}
+
+// slowMachine reports whether KMD_TEST_TIME_SCALE (env) declares a slow
+// or shared machine.
+func slowMachine(env string) bool {
+	n, err := strconv.Atoi(env)
+	return err == nil && n > 1
 }
 
 func linear(t testing.TB, name string, maxN int, setup func(n int) func(), base time.Duration) {

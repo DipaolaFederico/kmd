@@ -80,3 +80,11 @@ func TestLinear(t *testing.T) {
 	// the exported entry point passes linear work (and skips under -race)
 	Linear(t, "exported", 1<<20, linearWork)
 }
+
+func TestSlowMachine(t *testing.T) {
+	for env, want := range map[string]bool{"": false, "x": false, "1": false, "0": false, "2": true, "50": true} {
+		if got := slowMachine(env); got != want {
+			t.Errorf("slowMachine(%q) = %v", env, got)
+		}
+	}
+}

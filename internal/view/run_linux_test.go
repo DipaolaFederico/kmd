@@ -259,15 +259,8 @@ func TestRunPicker(t *testing.T) {
 	t.Cleanup(func() { ttyPath = old })
 	scr := &screen{}
 	go scr.drain(master)
-	docs := loader("")
-	load := func(path string, cols int) (*Page, error) {
-		if isDir(path) {
-			return &Page{Lines: []string{"listing"}}, nil
-		}
-		return docs(path, cols)
-	}
 	done := make(chan error, 1)
-	go func() { done <- Run(Options{Load: load, Start: root, Root: root}) }()
+	go func() { done <- Run(Options{Load: pickerLoader(), Start: root, Root: root}) }()
 	scr.waitFor(t, "23 documents") // listed in the background
 	send := func(s string) { _, _ = master.WriteString(s) }
 	send("\tneedle\r")

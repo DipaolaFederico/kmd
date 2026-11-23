@@ -43,7 +43,7 @@ func resolveDirs(files []string) {
 		if f == "-" {
 			continue
 		}
-		if st, err := os.Stat(f); err == nil && st.IsDir() {
+		if isDir(f) {
 			if p, ok := dirIndex(f); ok {
 				files[i] = p
 			}
@@ -69,16 +69,16 @@ func dirListing(name string, f *os.File) (string, error) {
 		if strings.HasPrefix(n, ".") {
 			continue
 		}
-		isDir := e.IsDir()
+		folder := e.IsDir()
 		if e.Type()&os.ModeSymlink != 0 {
 			st, err := os.Stat(filepath.Join(name, n))
 			if err != nil {
 				continue
 			}
-			isDir = st.IsDir()
+			folder = st.IsDir()
 		}
 		switch {
-		case isDir:
+		case folder:
 			dirs = append(dirs, n)
 		case e.Type().IsRegular() || e.Type()&os.ModeSymlink != 0:
 			if render.MarkdownExt[strings.ToLower(filepath.Ext(n))] {
@@ -117,6 +117,7 @@ func dirListing(name string, f *os.File) (string, error) {
 	return b.String(), nil
 }
 
+// isDir reports whether name is a folder (following symlinks).
 func isDir(name string) bool {
 	st, err := os.Stat(name)
 	return err == nil && st.IsDir()

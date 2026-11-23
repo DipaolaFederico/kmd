@@ -59,8 +59,8 @@ untrusted input.
 
 Every package is updated by the release workflow, with each download pinned
 by SHA-256. The Homebrew, `.deb`, Fedora and Nix packages also install
-the man page and the bash/zsh/fish completions. How each channel is
-published: [docs/PACKAGING.md](docs/PACKAGING.md).
+the man page and the bash/zsh/fish completions. Status of each
+channel: [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ### Prebuilt binaries
 

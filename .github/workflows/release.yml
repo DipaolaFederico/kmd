@@ -23,7 +23,20 @@
 # released commit's scripts and the release's attested SHA256SUMS, so nothing
 # the build job wrote reaches them. Their credentials live in the "packages"
 # environment and only those jobs can read them; a channel whose secret is
-# not set is skipped with a warning. See docs/PACKAGING.md.
+# not set is skipped with a warning. Channel status: docs/PACKAGING.md.
+#
+# One-time setup. Settings → Environments → "packages", deployment branches
+# limited to main (that rule is what protects the secrets: a workflow edited
+# on another branch cannot enter the environment), with these secrets:
+#   PACKAGES_TOKEN  fine-grained token for DipaolaFederico/homebrew-tap and
+#                   DipaolaFederico/scoop-bucket, Contents: read and write.
+#   BOT_TOKEN       classic token (public_repo, workflow) of a bot account
+#                   that is NOT a collaborator here and owns only two forks:
+#                   <bot>/kmd (version-pr) and <bot>/winget-pkgs (winget).
+#                   `workflow`: the version branch pushed to the fork can
+#                   carry commits that change .github/workflows/.
+#   AUR_SSH_KEY     private ed25519 key (no passphrase) of the AUR account.
+# The bot's first pull request here needs "Approve and run" once.
 name: Release
 
 on:
@@ -471,7 +484,7 @@ jobs:
           fork=$bot/${REPO#*/}
           [[ $fork =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "::error::bad fork '$fork'"; exit 1; }
           [ "$(gh api "repos/$fork" --jq '.fork and .parent.full_name == env.REPO')" = true ] ||
-            { echo "::error::$fork must be a fork of $REPO (see docs/PACKAGING.md)"; exit 1; }
+            { echo "::error::$fork must be a fork of $REPO (see the setup at the top of release.yml)"; exit 1; }
           files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml CHANGELOG.md"
           unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml|CHANGELOG\.md)$' || true)
           if [ -n "$unexpected" ]; then

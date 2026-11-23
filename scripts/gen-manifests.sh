@@ -9,7 +9,7 @@
 #   OUTDIR/winget/manifests/d/DipaolaFederico/kmd/VERSION/*.yaml   winget
 #
 # The release workflow runs it in each channel job, from the released commit
-# and the release's attested SHA256SUMS. See docs/PACKAGING.md.
+# and the release's attested SHA256SUMS (see .github/workflows/release.yml).
 set -euo pipefail
 
 ver=$1 date=$2 sums=$3 out=$4

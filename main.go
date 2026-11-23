@@ -4,6 +4,7 @@ package main
 import (
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/DipaolaFederico/kmd/internal/cli"
 	"github.com/DipaolaFederico/kmd/internal/term"
@@ -27,6 +28,9 @@ func main() {
 		StdoutTTY: outTTY,
 		Cols:      cols,
 		Rows:      rows,
+		LightBackground: func(silent time.Duration) (bool, bool) {
+			return term.LightBackground("/dev/tty", silent)
+		},
 	}
 	if pw, ph, ok := term.PixelSize(os.Stdout.Fd()); ok && cols > 0 && rows > 0 {
 		env.CellW, env.CellH = pw/cols, ph/rows

@@ -374,7 +374,24 @@ Adding a language takes a table entry and a golden test; see
 | `dracula`, `nord`, `one-dark` | |
 
 `kmd --list-themes` shows each theme with color swatches. With
-`theme = auto`, kmd chooses the light or dark default based on `COLORFGBG`.
+`theme = auto` (the default), kmd picks the light or dark theme
+(`light-theme` / `dark-theme` in the configuration) from the terminal's
+background:
+
+1. `COLORFGBG`, when the terminal sets it to a color number (Konsole,
+   rxvt);
+2. otherwise kmd asks the terminal for its background color (OSC 11),
+   only when colors are on and both standard input and output are the
+   terminal (never into a pipe, with `--html` or with `TERM=dumb`). kmd
+   gives up on a terminal that stays silent after 0.1 s (1 s over SSH,
+   where the answer takes a round trip);
+3. otherwise the dark theme.
+
+`kmd --config` shows which one decided. Most terminals answer in under a
+millisecond (xterm, foot, Alacritty, Konsole, tmux), but some take longer
+to answer: kitty and WezTerm about 4 ms, GNOME Terminal and other
+VTE-based terminals about 16 ms. Set a theme (`-t`, `KMD_THEME` or `theme`
+in the configuration) to skip the detection and that wait.
 
 Each theme is defined by a 17-color palette from which every element
 (headings, code, syntax, math, diagrams) is derived. To create a theme:
@@ -527,6 +544,14 @@ threat model:
   the browser (their scripts would run). A click on a link that leaves kmd
   (web, mail, desktop apps) first selects it and shows its target; a second
   click or Enter opens it.
+- **Terminal queries**: the only thing kmd ever asks the terminal is its
+  background color, for `theme = auto` (see [Themes](#-themes)), on the
+  controlling terminal and only from the foreground. The answer is read
+  for about a second at most and 256 bytes, must be exactly `rgb:R/G/B` with 1–4 hex
+  digits per channel, and is used only to choose between two themes; keys
+  typed meanwhile are discarded, and the viewer ignores an answer that
+  arrives too late. The terminal mode is restored before kmd continues,
+  and also when a signal ends it meanwhile.
 - **File picker**: listing a folder reads only names, breadth first, at most
   20 levels deep, 10,000 documents and 200,000 entries (a notice is shown
   beyond), in the background, without leaving the folder's file system

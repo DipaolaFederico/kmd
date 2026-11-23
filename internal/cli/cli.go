@@ -62,6 +62,9 @@ type Env struct {
 	StdoutTTY      bool
 	Cols, Rows     int
 	CellW, CellH   int // terminal cell size in pixels (0 = unknown)
+	// LightBackground asks the terminal whether its background is light,
+	// giving up after silent without an answer (ok false); nil never asks.
+	LightBackground func(silent time.Duration) (light, ok bool)
 	// Pager displays content through a pager; nil uses the system pager.
 	Pager func(content, command string) error
 	// View runs the built-in interactive viewer; nil uses the terminal.
@@ -112,7 +115,8 @@ current one) and S searches the text of all its documents.
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
-  -t, --theme NAME         color theme or path to a .theme file (default: auto)
+  -t, --theme NAME         color theme or path to a .theme file (default: auto,
+                           light or dark like the terminal; kmd --config says why)
   -c, --color WHEN         auto | always | never
   -i, --images MODE        auto | blocks | kitty | iterm2 | sixel | none
       --hyperlinks WHEN    clickable OSC 8 links: auto | always | never
@@ -277,10 +281,11 @@ type settings struct {
 	pager      string // "builtin" = the interactive viewer
 	mdOpt      md.Options
 	themeNm    string
-	fixedWidth int  // --width / width (0 = follow the terminal)
-	maxWidth   int  // cap for the automatic width
-	mouse      bool // the viewer reports clicks and the wheel
-	alwaysView bool // --view / view = always: viewer even for short documents
+	themeSrc   string // what chose the theme with theme = auto ("" otherwise)
+	fixedWidth int    // --width / width (0 = follow the terminal)
+	maxWidth   int    // cap for the automatic width
+	mouse      bool   // the viewer reports clicks and the wheel
+	alwaysView bool   // --view / view = always: viewer even for short documents
 }
 
 // builtinPager names the interactive viewer in KMD_PAGER / pager.
@@ -295,14 +300,69 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-// isLightBackground interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light.
-func isLightBackground(getenv func(string) string) bool {
-	fgbg := getenv("COLORFGBG")
-	if fgbg == "" {
-		return false
-	}
+// parseFGBG interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light. ok is
+// false when bg is not a color number (unset, "default").
+func parseFGBG(fgbg string) (light, ok bool) {
 	n, err := strconv.Atoi(fgbg[strings.LastIndexByte(fgbg, ';')+1:])
-	return err == nil && n != 8 && n >= 7 && n <= 15
+	return n != 8 && n >= 7 && n <= 15, err == nil
+}
+
+// Sources of the light/dark choice of theme = auto, for kmd --config.
+const (
+	srcFGBG     = "COLORFGBG"
+	srcOSC11    = "terminal background, OSC 11"
+	srcNoAnswer = "no answer from the terminal"
+	srcNotAsked = "the terminal was not asked"
+)
+
+// How long kmd waits for a terminal that does not answer the background
+// query. A local terminal answers within a few milliseconds; over SSH the
+// answer takes a round trip, and one arriving after kmd gave up would be
+// read by the shell as typed keys. (term caps any wait at one second.)
+const (
+	silentLocal = 100 * time.Millisecond
+	silentSSH   = time.Second
+)
+
+// lightBackground decides between the light and dark default themes and
+// names the source that decided. $COLORFGBG is free to read, so it wins when
+// set; otherwise the terminal is asked when ask allows it, else dark.
+func lightBackground(env Env, ask bool) (light bool, source string) {
+	get := env.Getenv
+	if light, ok := parseFGBG(get("COLORFGBG")); ok {
+		return light, srcFGBG
+	}
+	if !ask || env.LightBackground == nil {
+		return false, srcNotAsked
+	}
+	silent := silentLocal
+	if get("SSH_CONNECTION") != "" || get("SSH_TTY") != "" {
+		silent = silentSSH
+	}
+	if light, ok := env.LightBackground(silent); ok {
+		return light, srcOSC11
+	}
+	return false, srcNoAnswer
+}
+
+// drawsOnTerminal reports whether this run draws in color on the terminal
+// it was started from, interactively, and so may query it: never into a
+// pipe or a file, without colors, or just to print the usage (no document
+// on an interactive standard input). Commands that use the theme without
+// a document (--config, --list-themes) are listed here.
+func drawsOnTerminal(o options, env Env, color bool) bool {
+	return env.StdinTTY && env.StdoutTTY && color && !o.html && env.Getenv("TERM") != "dumb" &&
+		(len(o.files) > 0 || o.showConfig || o.listThemes)
+}
+
+// autoTheme picks the light or dark theme of theme = auto and names the
+// source that decided (see lightBackground); color reports colored output.
+func autoTheme(o options, cfg config, env Env, color bool) (name, source string) {
+	light, source := lightBackground(env, drawsOnTerminal(o, env, color))
+	if light {
+		return firstNonEmpty(cfg.LightTheme, "tokyo-night-day"), source
+	}
+	return firstNonEmpty(cfg.DarkTheme, "tokyo-night"), source
 }
 
 // resolve turns flags, configuration and environment into settings. The
@@ -334,10 +394,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 
 	name := firstNonEmpty(o.theme, get("KMD_THEME"), cfg.Theme, "auto")
 	if name == "auto" {
-		name = firstNonEmpty(cfg.DarkTheme, "tokyo-night")
-		if isLightBackground(get) {
-			name = firstNonEmpty(cfg.LightTheme, "tokyo-night-day")
-		}
+		name, s.themeSrc = autoTheme(o, cfg, env, pub.Color)
 	}
 	th, err := api.LoadTheme(name, render.ThemeDirs(get)...)
 	if errors.Is(err, api.ErrUnknownTheme) {

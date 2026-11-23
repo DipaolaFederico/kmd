@@ -3,7 +3,10 @@
 // Package term queries terminal properties using only the standard library.
 package term
 
-import "errors"
+import (
+	"errors"
+	"time"
+)
 
 // Size reports no terminal on unsupported platforms.
 func Size(fd uintptr) (cols, rows int, ok bool) { return 0, 0, false }
@@ -15,3 +18,6 @@ func PixelSize(fd uintptr) (w, h int, ok bool) { return 0, 0, false }
 func MakeRaw(fd uintptr) (restore func() error, err error) {
 	return nil, errors.ErrUnsupported
 }
+
+// LightBackground cannot ask the terminal on unsupported platforms.
+func LightBackground(path string, silent time.Duration) (light, ok bool) { return false, false }

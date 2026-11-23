@@ -9,6 +9,16 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- `theme = auto` (the default) now asks the terminal for its background
+  color (OSC 11) when `COLORFGBG` does not name one, so light terminals that
+  do not set it get the light theme. The terminal is only asked when colors
+  are on and both standard input and output are the terminal; kmd gives up
+  on one that does not answer after 0.1 s (1 s over SSH). Some terminals
+  take a few milliseconds to answer (GNOME Terminal about 16 ms): set a
+  theme to skip the detection. `kmd --config` shows what chose the theme.
+
 ## [0.13.0] - 2026-11-23
 
 ## [0.12.0] - 2026-11-23

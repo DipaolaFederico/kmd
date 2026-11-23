@@ -81,7 +81,7 @@ func (m *model) showPicker(root string) {
 		p.walk = t
 		bg := m.bg
 		go func() {
-			note := walkTree(root, t.stopped, func(b []doc) bool {
+			note := walkTree(root, defaultPickLimits, t.stopped, func(b []doc) bool {
 				return t.send(bg, func(m *model) {
 					if m.pick == p && p.walk == t {
 						p.add(b)
@@ -247,7 +247,7 @@ func (m *model) startSearch() {
 	// a copy: the walk may still be adding to (and sorting) p.docs
 	docs, root, q, bg := slices.Clone(p.docs), p.root, p.searched, m.bg
 	go func() {
-		note := searchDocs(docs, root, q, t.stopped, func(hs []hit, done int) bool {
+		note := searchDocs(docs, root, q, defaultSearchLimits, t.stopped, func(hs []hit, done int) bool {
 			return t.send(bg, func(m *model) {
 				if m.pick == p && p.search == t {
 					p.hits = append(p.hits, hs...)

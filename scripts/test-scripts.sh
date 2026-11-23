@@ -50,9 +50,41 @@ eq '.TH KMD 1 "2030-01-02" "kmd 9.8.7" "User Commands"' "$(head -1 "$tmp/docs/km
 eq 1 "$(grep -c '<release version="9.8.7" date="2030-01-02"/>' "$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml")" "metainfo"
 if "$tmp/scripts/stamp-version.sh" 1.2 2030-01-02 >/dev/null 2>&1; then eq rejected accepted "stamp bad version"; fi
 
+# stamp-changelog.sh (in its own git repository): the version gets the
+# entries unreleased in the released commit; later ones stay unreleased
+cl=$(mktemp -d)
+trap 'rm -rf "$tmp" "$cl"' EXIT
+mkdir -p "$cl/scripts"
+cp scripts/stamp-changelog.sh "$cl/scripts/"
+changelog() { # unreleased entries..., as a Keep a Changelog file at 9.8.7
+  printf '# Changelog\n\n## [Unreleased]\n\n'
+  for e in "$@"; do printf '%s\n' "$e"; done
+  printf '\n## [9.8.7] - 2030-01-02\n\n### Added\n\n- Old.\n\n'
+  printf '[Unreleased]: https://github.com/o/kmd/compare/v9.8.7...HEAD\n'
+  printf '[9.8.7]: https://github.com/o/kmd/releases/tag/v9.8.7\n'
+}
+(
+  cd "$cl"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  changelog '### Added' '' '- A,' '  wrapped.' '' '### Fixed' '' '- [B].' '' '[B]: https://e.com' '' '- D.' >CHANGELOG.md
+  git init -q && git add -A && git commit -qm released
+  changelog '### Added' '' '- A,' '  wrapped.' '' '### Fixed' '' '- [B].' '' '[B]: https://e.com' '' '- D.' '- C, later.' >CHANGELOG.md
+  scripts/stamp-changelog.sh 9.9.0 2030-01-09 HEAD >/dev/null
+  scripts/stamp-changelog.sh 9.9.0 2030-01-09 HEAD >/dev/null # idempotent
+)
+eq "## [Unreleased]||### Fixed||- C, later.||## [9.9.0] - 2030-01-09||### Added||- A,|  wrapped.||### Fixed||- [B].||[B]: https://e.com||- D.||## [9.8.7] - 2030-01-02" \
+  "$(sed -n '/^## \[Unreleased\]/,/^## \[9.8.7\]/p' "$cl/CHANGELOG.md" | paste -sd'|')" "changelog: sections"
+eq "[Unreleased]: https://github.com/o/kmd/compare/v9.9.0...HEAD|[9.9.0]: https://github.com/o/kmd/compare/v9.8.7...v9.9.0|[9.8.7]: https://github.com/o/kmd/releases/tag/v9.8.7" \
+  "$(grep -E '^\[(Unreleased|9)' "$cl/CHANGELOG.md" | paste -sd'|')" "changelog: links"
+(cd "$cl" && scripts/stamp-changelog.sh 9.9.1 2030-01-10 nosuchref >/dev/null 2>&1) && eq rejected accepted "changelog: bad ref"
+if "$cl/scripts/stamp-changelog.sh" 9.9 2030-01-09 >/dev/null 2>&1; then eq rejected accepted "changelog bad version"; fi
+rm "$cl/CHANGELOG.md"
+"$cl/scripts/stamp-changelog.sh" 9.9.1 2030-01-10 >/dev/null || eq skipped failed "changelog: no CHANGELOG.md"
+
 # sync-version.sh (the copy above, now at 9.8.7, as a git repository with
 # releases the files missed)
-cp scripts/sync-version.sh "$tmp/scripts/"
+cp scripts/sync-version.sh scripts/stamp-changelog.sh "$tmp/scripts/"
+changelog >"$tmp/CHANGELOG.md"
 meta=$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml
 (
   cd "$tmp"
@@ -63,14 +95,29 @@ meta=$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml
     GIT_COMMITTER_DATE=${t#*:}T12:00:00Z git commit -q --allow-empty -m "${t%%:*}"
     git tag "v${t%%:*}"
   done
+  changelog '- New.' >CHANGELOG.md
   scripts/sync-version.sh 9.10.0 2030-02-03 >/dev/null
   scripts/sync-version.sh 9.10.0 2030-02-03 >/dev/null # idempotent
 )
+eq "## [Unreleased]|## [9.10.0] - 2030-02-03|- New.|## [9.9.0] - 2030-01-09|## [9.8.8] - 2030-01-05|## [9.8.7] - 2030-01-02" \
+  "$(grep -E '^(## |- New)' "$tmp/CHANGELOG.md" | paste -sd'|')" "sync: changelog history"
 eq "Version:                9.10.0" "$(grep '^Version:' "$tmp/packaging/kmd.spec")" "sync: spec"
 eq '"kmd 9.10.0"' "$(head -1 "$tmp/docs/kmd.1" | grep -o '"kmd [^"]*"')" "sync: man page"
 eq "9.10.0 2030-02-03,9.9.0 2030-01-09,9.8.8 2030-01-05,9.8.7 2030-01-02," \
   "$(sed -n -E 's/.*<release version="([^"]*)" date="([^"]*)".*/\1 \2/p' "$meta" | head -4 | tr '\n' ,)" "sync: metainfo history"
 if (cd "$tmp" && scripts/sync-version.sh 9.9.1 2030-02-04 >/dev/null 2>&1); then eq rejected accepted "sync older version"; fi
+
+# CHANGELOG.md: Keep a Changelog layout, its links up to the spec's version
+cur=$(sed -n -E 's/^Version:[[:space:]]+//p' packaging/kmd.spec)
+grep -qx '## \[Unreleased\]' CHANGELOG.md || eq present missing "CHANGELOG.md: ## [Unreleased]"
+grep -qx "\[Unreleased\]: https://github.com/DipaolaFederico/kmd/compare/v$cur...HEAD" CHANGELOG.md ||
+  eq present missing "CHANGELOG.md: [Unreleased] link from v$cur"
+grep -q "^## \[$cur\] - " CHANGELOG.md || eq present missing "CHANGELOG.md: ## [$cur] section"
+for v in $(sed -n -E 's/^## \[([0-9]+\.[0-9]+\.[0-9]+)\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$/\1/p' CHANGELOG.md); do
+  grep -q "^\[$v\]: https://github.com/DipaolaFederico/kmd/" CHANGELOG.md || eq present missing "CHANGELOG.md: [$v] link"
+done
+bad=$(grep -E '^## ' CHANGELOG.md | grep -v -x -E -e '## \[Unreleased\]' -e '## \[[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}' || true)
+eq "" "$bad" "CHANGELOG.md: version headings"
 
 # gen-emoji.py: the committed emoji table matches its Unicode-name source
 if command -v python3 >/dev/null && command -v gofmt >/dev/null; then

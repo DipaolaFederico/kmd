@@ -22,8 +22,9 @@ manual steps once the one-time setup below is done:
    `SHA256SUMS`.
 2. The `publish` job attests the archives, the `.deb` files and
    `SHA256SUMS`, tags a commit that adds the version files the build
-   stamped (RPM spec, man page, AppStream metadata) on top of the released
-   commit, and creates the GitHub release.
+   stamped (RPM spec, man page, AppStream metadata, `CHANGELOG.md`) on top
+   of the released commit, and creates the GitHub release, whose notes
+   start with the version's changelog section.
 3. The `tap`, `aur` and `winget` jobs run only after the release exists.
    Each downloads the release's `SHA256SUMS`, checks it is the file the
    `publish` job released (same SHA-256) and that it was attested by this

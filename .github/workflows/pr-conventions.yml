@@ -2,16 +2,19 @@
 # CONTRIBUTING.md): the title is a Conventional Commit — it becomes the
 # squash commit on main, which decides the release — and the branch is named
 # type/short-description. Then it labels the PR with the release that
-# merging it asks for (release:major/minor/patch/skip), for visibility.
+# merging it asks for (release:major/minor/patch/skip), for visibility, and
+# checks that a PR asking for a release adds a CHANGELOG.md entry (unless it
+# is labelled changelog:skip: nothing users would notice).
 #
 # pull_request_target: runs with the base branch's code and a token that can
 # label fork PRs too. Safe because nothing from the PR is checked out or
-# executed; the title and branch name only reach the shell through env.
+# executed; the title, branch name and labels only reach the shell through
+# env, and the changed files are only listed through the API.
 name: PR conventions
 
 on:
   pull_request_target:
-    types: [opened, edited, reopened, synchronize]
+    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -80,3 +83,23 @@ jobs:
           esac
           echo "::notice::$msg"
           echo "### Release: $msg" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Changelog entry
+        if: steps.title.outputs.bump != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if [[ ",$LABELS," == *,changelog:skip,* ]]; then
+            echo "::notice::changelog:skip: no CHANGELOG.md entry needed"
+            exit 0
+          fi
+          # listed first: grep -q exiting early would fail gh under pipefail
+          files=$(gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename')
+          if grep -qx CHANGELOG.md <<<"$files"; then
+            exit 0
+          fi
+          echo "::error::This pull request asks for a release: add an entry under '## [Unreleased]' in CHANGELOG.md, or label it changelog:skip if users would not notice the change (see CONTRIBUTING.md, \"Changelog\")."
+          exit 1

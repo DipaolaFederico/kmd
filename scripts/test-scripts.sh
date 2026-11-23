@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# test-scripts.sh — tests for the release helper scripts (run by `make ci`).
+# test-scripts.sh — tests for the helper scripts (run by `make ci`).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fails=0
@@ -131,8 +131,43 @@ if command -v python3 >/dev/null && command -v gofmt >/dev/null; then
   fi
 fi
 
+# complexity.sh, in a scratch repository with a stub gocognit that prints
+# the scores of the base tree or of the working tree
+cx=$(mktemp -d)
+mkdir -p "$cx/repo/scripts"
+cp scripts/complexity.sh "$cx/repo/scripts/"
+cat >"$cx/gocognit" <<'STUB'
+#!/usr/bin/env bash
+case $PWD in */base) cat "$STUB/before" ;; *) cat "$STUB/after" ;; esac
+STUB
+chmod +x "$cx/gocognit"
+(
+  cd "$cx/repo"
+  git init -q -b main . && git config user.email t@t && git config user.name t
+  printf 'package a\n' >a.go && git add a.go scripts && git commit -qm base
+  git switch -qc work
+)
+export STUB=$cx
+cx_run() { # before after → output and status of complexity.sh
+  printf '%b' "$1" >"$cx/before"
+  printf '%b' "$2" >"$cx/after"
+  "$cx/repo/scripts/complexity.sh" "$cx/gocognit" 30 2>&1 && echo "rc=0" || echo "rc=$?"
+}
+out=$(cx_run '' '45 a (*t) New a.go:3:1\n')
+eq "  a (*t) New a.go: cognitive complexity 45 (new), limit 30|rc=1" "$(echo "$out" | grep -v '^complexity:' | paste -sd'|')" "complexity: new function"
+out=$(cx_run '40 a Old a.go:3:1\n' '41 a Old a.go:9:1\n')
+eq "  a Old a.go: cognitive complexity 41 (was 40), limit 30|rc=1" "$(echo "$out" | grep -v '^complexity:' | paste -sd'|')" "complexity: grew (line moved)"
+eq rc=0 "$(cx_run '40 a Old a.go:3:1\n' '40 a Old a.go:3:1\n12 a Small a.go:20:1\n')" "complexity: unchanged above the limit"
+eq rc=0 "$(cx_run '40 a Old a.go:3:1\n' '25 a Old a.go:3:1\n')" "complexity: now below the limit"
+( cd "$cx/repo" && git branch -qm main old )
+eq "complexity: no main branch to compare with (shallow clone?): not checked|rc=0" \
+  "$(cx_run '' '45 a New a.go:3:1\n' | paste -sd'|')" "complexity: no base"
+eq rc=1 "$(STRICT=1 cx_run '' '45 a New a.go:3:1\n' | tail -1)" "complexity: no base, STRICT"
+unset STUB
+rm -rf "$cx"
+
 if [ "$fails" -gt 0 ]; then
   echo "$fails script test(s) failed"
   exit 1
 fi
-echo "  release scripts: ok"
+echo "  scripts: ok"

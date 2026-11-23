@@ -21,6 +21,10 @@ GOCOGNIT_VERSION    := v1.3.0
 DUPL_VERSION        := v1.1.0
 DEADCODE_VERSION    := v0.53.0
 
+# Lint limits (see CONTRIBUTING.md, "Style").
+COGNIT_LIMIT        := 30
+DUPL_TOKENS         := 100
+
 VERSION_RPM := $(shell sed -n 's/^Version: *//p' packaging/kmd.spec)
 APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
@@ -50,28 +54,29 @@ staticcheck: $(TOOLS)/staticcheck
 	@echo '» staticcheck'
 	@$(TOOLS)/staticcheck ./...
 
-# Cognitive complexity ≤ 30 for functions a change adds or makes more
-# complex (a ratchet: complex code that exists is not flagged until touched).
+# Cognitive complexity within the limit for functions a change adds or makes
+# more complex (a ratchet: complex code that exists is not flagged until
+# touched). STRICT=1 (CI) fails when there is no main branch to compare with.
 complexity: $(TOOLS)/gocognit
 	@echo '» complexity (gocognit)'
-	@./scripts/complexity.sh $(TOOLS)/gocognit 30
+	@STRICT=$(STRICT) ./scripts/complexity.sh $(TOOLS)/gocognit $(COGNIT_LIMIT)
 
-# No copy-pasted blocks of 100 tokens or more, tests included.
+# No copy-pasted blocks of DUPL_TOKENS tokens or more, tests included.
 dupl: $(TOOLS)/dupl
 	@echo '» duplication (dupl)'
-	@out=$$(git ls-files '*.go' | $(TOOLS)/dupl -files -t 100 -plumbing); \
+	@out=$$(git ls-files '*.go' | $(TOOLS)/dupl -files -t $(DUPL_TOKENS) -plumbing 2>&1) || exit 1; \
 	if [ -n "$$out" ]; then echo "$$out"; echo "factor out the duplicated code"; exit 1; fi
 
-# No function unreachable from main or the tests (the public render
-# package's API counts as reachable through its tests).
+# No function unreachable from main or the tests (-test: code used only by
+# tests, such as the public render package's API, counts as reachable).
 deadcode: $(TOOLS)/deadcode
 	@echo '» dead code (deadcode)'
-	@out=$$($(TOOLS)/deadcode -test ./...); \
+	@out=$$($(TOOLS)/deadcode -test ./...) || exit 1; \
 	if [ -n "$$out" ]; then echo "$$out"; echo "remove the unused code"; exit 1; fi
 
 ## Tests --------------------------------------------------------------------
 scripts-test:
-	@echo '» release scripts'
+	@echo '» scripts'
 	@./scripts/test-scripts.sh
 
 test:

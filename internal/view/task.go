@@ -37,7 +37,8 @@ func (t *task) send(bg chan<- func(*model), f func(*model)) bool {
 }
 
 // applyBackground applies f, a result of background work, and what else is
-// ready (a few), so the loop draws once for all of them.
+// ready, so the loop draws once for all of them. At most 64 more: a flood
+// of results must not keep the loop from reading keys and ticks.
 func (m *model) applyBackground(f func(*model)) {
 	f(m)
 	for range 64 {

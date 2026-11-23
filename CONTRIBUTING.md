@@ -40,7 +40,7 @@ request, green CI and the maintainer's approval (see `.github/CODEOWNERS`).
 4. **Run the local CI** — it is the same as GitHub's plus the perf gate:
    ```sh
    make ci        # fmt, vet, staticcheck, complexity, duplication, dead
-                  # code, release scripts, race tests, coverage,
+                  # code, helper scripts, race tests, coverage,
                   # govulncheck, gosec, build, packaging, perf
    make hooks     # optional: run `make ci` automatically before every push
    ```
@@ -84,9 +84,10 @@ workflows) skip lint, tests and build in CI automatically.
   comments, commit messages and documentation are written in English.
   `make lint` also checks that functions a change adds or makes more
   complex stay within a cognitive complexity of 30 (`gocognit`; existing
-  complex functions are only flagged once a change makes them worse), that
-  there are no duplicated blocks of 100 tokens or more (`dupl`, tests
-  included) and no unreachable functions (`deadcode`).
+  complex functions are only flagged once a change makes them worse, and
+  moving or renaming one counts as a change), that there are no duplicated
+  blocks of 100 tokens or more (`dupl`, tests included) and no unreachable
+  functions (`deadcode`; a function used only by tests counts as used).
 
 ## Commit messages
 

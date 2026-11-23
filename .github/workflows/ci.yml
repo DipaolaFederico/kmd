@@ -105,12 +105,12 @@ jobs:
         run: make fmt-check
       - name: go vet
         run: make vet
-      - name: Release scripts
+      - name: Helper scripts
         run: make scripts-test
       - name: staticcheck
         run: make staticcheck
       - name: Complexity, duplication and dead code
-        run: make complexity dupl deadcode
+        run: make complexity dupl deadcode STRICT=1
       - name: No third-party dependencies
         run: |
           if grep -q '^require' go.mod; then

@@ -78,6 +78,14 @@ func TestWalkTree(t *testing.T) {
 		t.Errorf("walk:\n got %q (%q)\nwant %q", names, note, want)
 	}
 
+	// stopping (with the default limits): by the caller, or by emit
+	if n := walkTree(root, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
+		t.Error(n)
+	}
+	if n := walkTree(root, func() bool { return false }, func([]doc) bool { return false }); n != "" {
+		t.Error(n)
+	}
+
 	setVar(t, &maxPickDepth, 1)
 	if names, note := walkNames(t, root); len(names) != 6 || !strings.Contains(note, "deeper than 1") {
 		t.Errorf("depth limit: %q %q", names, note)
@@ -93,13 +101,6 @@ func TestWalkTree(t *testing.T) {
 	}
 	if _, note := walkNames(t, filepath.Join(root, "nope")); note == "" {
 		t.Error("missing root not reported")
-	}
-	// stopping: by the caller, or by emit
-	if n := walkTree(root, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
-		t.Error(n)
-	}
-	if n := walkTree(root, func() bool { return false }, func([]doc) bool { return false }); n != "" {
-		t.Error(n)
 	}
 }
 

@@ -310,15 +310,15 @@ func parseFGBG(fgbg string) (light, ok bool) {
 // Sources of the light/dark choice of theme = auto, for kmd --config.
 const (
 	srcFGBG     = "COLORFGBG"
-	srcOSC11    = "terminal background (OSC 11)"
-	srcNoAnswer = "the terminal did not say its background"
+	srcOSC11    = "terminal background, OSC 11"
+	srcNoAnswer = "no answer from the terminal"
 	srcNotAsked = "the terminal was not asked"
 )
 
 // How long kmd waits for a terminal that does not answer the background
-// query. A local terminal answers in about a millisecond; over SSH the
+// query. A local terminal answers within a few milliseconds; over SSH the
 // answer takes a round trip, and one arriving after kmd gave up would be
-// read by the shell or the viewer as typed keys.
+// read by the shell as typed keys. (term caps any wait at one second.)
 const (
 	silentLocal = 100 * time.Millisecond
 	silentSSH   = time.Second
@@ -345,15 +345,20 @@ func lightBackground(env Env, ask bool) (light bool, source string) {
 	return false, srcNoAnswer
 }
 
+// drawsOnTerminal reports whether this run draws in color on the terminal
+// it was started from, interactively, and so may query it: never into a
+// pipe or a file, without colors, or just to print the usage (no document
+// on an interactive standard input). Commands that use the theme without
+// a document (--config, --list-themes) are listed here.
+func drawsOnTerminal(o options, env Env, color bool) bool {
+	return env.StdinTTY && env.StdoutTTY && color && !o.html && env.Getenv("TERM") != "dumb" &&
+		(len(o.files) > 0 || o.showConfig || o.listThemes)
+}
+
 // autoTheme picks the light or dark theme of theme = auto and names the
 // source that decided (see lightBackground); color reports colored output.
 func autoTheme(o options, cfg config, env Env, color bool) (name, source string) {
-	// the query goes to the terminal kmd is drawing on, interactively:
-	// never into a pipe, a file, or output without colors, nor just to
-	// print the usage (no document on an interactive standard input)
-	ask := env.StdinTTY && env.StdoutTTY && color && !o.html && env.Getenv("TERM") != "dumb" &&
-		(len(o.files) > 0 || o.showConfig || o.listThemes)
-	light, source := lightBackground(env, ask)
+	light, source := lightBackground(env, drawsOnTerminal(o, env, color))
 	if light {
 		return firstNonEmpty(cfg.LightTheme, "tokyo-night-day"), source
 	}

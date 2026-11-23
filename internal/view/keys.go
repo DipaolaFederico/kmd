@@ -21,17 +21,45 @@ var csiKeys = map[string]string{
 	"1~": "home", "4~": "end", "7~": "home", "8~": "end", "5~": "pgup", "6~": "pgdn", "3~": "delete",
 }
 
-// parseKeys decodes a chunk read from the terminal. An ESC not followed by
-// a sequence is the Escape key (terminals send whole sequences at once).
-func parseKeys(b []byte) []key {
+// keyParser decodes the chunks read from the terminal into keys. It
+// remembers an OSC string still open at the end of a chunk: a late answer
+// to kmd's background color query can arrive in pieces, and its tail must
+// not be taken for typed keys ("e" edits, "/" searches).
+type keyParser struct {
+	osc int  // bytes skipped of an OSC string still open; 0: none
+	esc bool // the last chunk ended with an ESC inside that string
+}
+
+// maxOSC bounds how much input an OSC string whose terminator was lost
+// can swallow; real answers are well under 100 bytes.
+const maxOSC = 512
+
+// parse decodes one chunk. An ESC not followed by a sequence is the Escape
+// key (terminals send whole sequences at once).
+func (p *keyParser) parse(b []byte) []key {
+	if p.osc > 0 {
+		n, done, esc := skipOSC(b, p.esc)
+		p.osc += n
+		b = b[n:]
+		if !done && p.osc <= maxOSC {
+			p.esc = esc
+			return nil
+		}
+		p.osc, p.esc = 0, false
+	}
 	var out []key
 	for len(b) > 0 {
 		c := b[0]
 		switch {
-		case c == 0x1b && len(b) > 2 && b[1] == ']':
-			// a terminal's answer to an OSC query (kmd asks for the
-			// background color) that arrived late: not typed keys
-			b = b[oscLen(b):]
+		case c == 0x1b && len(b) > 2 && b[1] == ']' && b[2] >= '0' && b[2] <= '9':
+			// an answer to an OSC query (ESC ] 11 ; …), not typed keys;
+			// Alt+] is followed by a key, not a digit
+			n, done, esc := skipOSC(b[2:], false)
+			if !done {
+				p.osc, p.esc = 2+n, esc
+				return out
+			}
+			b = b[2+n:]
 			continue
 		case c == 0x1b && len(b) > 2 && (b[1] == '[' || b[1] == 'O'):
 			k, n := parseSeq(b)
@@ -61,18 +89,18 @@ func parseKeys(b []byte) []key {
 	return out
 }
 
-// oscLen is the length of the OSC string at the start of b, up to its BEL
-// or ESC \ terminator, or all of b when the terminator is missing.
-func oscLen(b []byte) int {
-	for i := 2; i < len(b); i++ {
-		switch {
-		case b[i] == '\a':
-			return i + 1
-		case b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\':
-			return i + 2
+// skipOSC skips the body of an OSC string at the start of b, up to its BEL
+// or ESC \ terminator; esc reports that the string's previous chunk ended
+// with an ESC. It returns the bytes consumed, whether the terminator was
+// found, and whether b ends with an ESC inside the string.
+func skipOSC(b []byte, esc bool) (n int, done, endESC bool) {
+	for i, c := range b {
+		if c == '\a' || esc && c == '\\' {
+			return i + 1, true, false
 		}
+		esc = c == 0x1b
 	}
-	return len(b)
+	return len(b), false, esc
 }
 
 // parseSeq decodes the CSI or SS3 sequence at the start of b and returns

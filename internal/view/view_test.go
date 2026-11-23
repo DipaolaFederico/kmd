@@ -15,6 +15,12 @@ import (
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
+// parseKeys decodes one chunk with a fresh parser.
+func parseKeys(b []byte) []key {
+	var p keyParser
+	return p.parse(b)
+}
+
 func TestParseKeys(t *testing.T) {
 	names := func(b string) []string {
 		var out []string
@@ -44,6 +50,7 @@ func TestParseKeys(t *testing.T) {
 		"\x1b]11;rgb:eeee/eeee/eeee\x1b\\\x1b[?62;22cj": {"char:j"},
 		"\x1b]11;rgb:1c1c/1c1c/1c1c\aq":                 {"char:q"},
 		"\x1b]11;rgb:ec":                                nil,
+		"\x1b]x":                                        {"esc", "char:]", "char:x"}, // Alt+] x
 		"\x1b[<0;5M\x1b[<99999999999999999999;1;1M":     nil,
 	} {
 		if got := names(in); !reflect.DeepEqual(got, want) {
@@ -53,6 +60,34 @@ func TestParseKeys(t *testing.T) {
 	k := parseKeys([]byte("\x1b[<65;10;3m"))[0]
 	if k.btn != 65 || k.x != 9 || k.y != 2 || k.press {
 		t.Errorf("mouse decode: %+v", k)
+	}
+}
+
+// TestParseKeysSplitAnswer feeds a late answer to the background query in
+// pieces, as a slow link delivers it: none of it becomes keys.
+func TestParseKeysSplitAnswer(t *testing.T) {
+	for _, chunks := range [][]string{
+		{"\x1b]11;rgb:eeee/", "eeee/eeee\x1b\\\x1b[?62;22c", "j"},
+		{"\x1b]11;rgb:eeee/eeee/eeee\x1b", "\\j"}, // split inside ESC \
+		{"\x1b]11;rgb:ec", "ec/ecec/", "ecec\a", "j"},
+	} {
+		var p keyParser
+		var got []key
+		for _, c := range chunks {
+			got = append(got, p.parse([]byte(c))...)
+		}
+		if len(got) != 1 || got[0].r != 'j' {
+			t.Errorf("%q: %+v", chunks, got)
+		}
+	}
+	// a lost terminator swallows at most maxOSC bytes
+	var p keyParser
+	p.parse([]byte("\x1b]11;rgb:"))
+	if got := p.parse([]byte(strings.Repeat("x", maxOSC))); len(got) != 0 {
+		t.Errorf("keys inside the string: %d", len(got))
+	}
+	if got := p.parse([]byte("j")); len(got) != 1 || got[0].r != 'j' {
+		t.Errorf("after the bound: %+v", got)
 	}
 }
 

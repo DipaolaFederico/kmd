@@ -3,6 +3,7 @@
 package term
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"os/signal"
@@ -19,7 +20,7 @@ var errNoReply = errors.New("terminal did not answer")
 // background color. ok is false when the terminal does not say, or could
 // not be asked; light reports whether the color is light (see isLight).
 // A terminal that stays silent is given up on after silent; one that has
-// started to answer is given until MaxQueryWait.
+// started to answer is given until maxQueryWait.
 func LightBackground(path string, silent time.Duration) (light, ok bool) {
 	reply, _ := queryBackground(path, silent) // a partial reply may still hold the color
 	r, g, b, ok := parseBackground(reply)
@@ -56,8 +57,9 @@ func queryBackground(path string, silent time.Duration) ([]byte, error) {
 	}
 	defer restoreOnSignal(undo)()
 	defer undo()
+	vtime := tenths(min(silent, maxQueryWait)) // reads return after this long without input
 	mu.Lock()
-	restore, err = makeRaw(fd, 0, 1) // reads return after 0.1 s of silence
+	restore, err = makeRaw(fd, 0, vtime)
 	mu.Unlock()
 	if err != nil {
 		return nil, err
@@ -65,30 +67,30 @@ func queryBackground(path string, silent time.Duration) ([]byte, error) {
 	if _, err := f.WriteString(backgroundQuery); err != nil {
 		return nil, err
 	}
-	return readReply(fd, 1, silent)
+	return readReply(fd, vtime, silent)
 }
 
-// MaxQueryWait bounds the wait for the terminal's answer once it has
+// maxQueryWait bounds the wait for the terminal's answer once it has
 // begun: stopping halfway would leave the rest of it in the terminal's
 // input, where the shell or the viewer would read it as typed keys.
-const MaxQueryWait = time.Second
+const maxQueryWait = time.Second
 
 // readReply reads from a terminal in raw mode, whose read timeout is vtime
 // tenths of a second, until the DA1 reply ends the answer or maxReply bytes
-// arrived. It gives up when nothing arrived within silent, or the answer
-// is still incomplete after MaxQueryWait (both rounded to a twentieth of
-// a second, the precision of the timeout).
+// arrived. It gives up when no answer began (no ESC arrived) within silent,
+// or the answer is still incomplete after maxQueryWait. The timeout has a
+// precision of 0.1 s, so either may run up to 50 ms over.
 func readReply(fd uintptr, vtime uint8, silent time.Duration) ([]byte, error) {
 	start := time.Now()
 	buf := make([]byte, maxReply)
 	n := 0
 	for n < len(buf) && !da1Done(buf[:n]) {
-		wait := min(silent, MaxQueryWait)
-		if n > 0 {
-			wait = MaxQueryWait
+		wait := min(silent, maxQueryWait)
+		if bytes.IndexByte(buf[:n], 0x1b) >= 0 { // a key typed meanwhile is no answer
+			wait = maxQueryWait
 		}
 		left := wait - time.Since(start)
-		if left <= 0 {
+		if left < 50*time.Millisecond { // a read would end past wait+50ms
 			return buf[:n], errNoReply
 		}
 		if t := tenths(left); t != vtime {
@@ -111,7 +113,8 @@ func readReply(fd uintptr, vtime uint8, silent time.Duration) ([]byte, error) {
 	return buf[:n], nil
 }
 
-// tenths converts d to a termios read timeout: tenths of a second, 1–255.
+// tenths converts d to a termios read timeout: the nearest tenth of a
+// second, 1–255.
 func tenths(d time.Duration) uint8 {
 	return uint8(min(max((d+50*time.Millisecond)/(100*time.Millisecond), 1), 255)) // #nosec G115 -- clamped to 1–255
 }

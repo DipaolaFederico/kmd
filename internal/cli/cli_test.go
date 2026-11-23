@@ -1022,10 +1022,11 @@ func TestAutoThemeBackground(t *testing.T) {
 			}
 		}
 	}
-	notTTY := func(stdin bool) func(*Env) {
+	// redirected: on a light terminal, with standard input or output not on it
+	redirected := func(stdin, stdout bool) func(*Env) {
 		return func(e *Env) {
 			terminal(true, true, nil)(e)
-			e.StdinTTY, e.StdoutTTY = !stdin, stdin
+			e.StdinTTY, e.StdoutTTY = stdin, stdout
 		}
 	}
 	const notAsked = "(auto: the terminal was not asked)"
@@ -1036,9 +1037,9 @@ func TestAutoThemeBackground(t *testing.T) {
 		asked int
 		want  string
 	}{
-		{"light terminal", terminal(true, true, nil), nil, 1, "tokyo-night-day (auto: terminal background (OSC 11))"},
-		{"dark terminal", terminal(false, true, nil), nil, 1, "tokyo-night (auto: terminal background (OSC 11))"},
-		{"no answer", terminal(true, false, nil), nil, 1, "tokyo-night (auto: the terminal did not say its background)"},
+		{"light terminal", terminal(true, true, nil), nil, 1, "tokyo-night-day (auto: terminal background, OSC 11)"},
+		{"dark terminal", terminal(false, true, nil), nil, 1, "tokyo-night (auto: terminal background, OSC 11)"},
+		{"no answer", terminal(true, false, nil), nil, 1, "tokyo-night (auto: no answer from the terminal)"},
 		{"COLORFGBG wins", terminal(false, true, map[string]string{"COLORFGBG": "0;15"}), nil, 0, "tokyo-night-day (auto: COLORFGBG)"},
 		{"COLORFGBG dark", terminal(true, true, map[string]string{"COLORFGBG": "15;0"}), nil, 0, "tokyo-night (auto: COLORFGBG)"},
 		{"COLORFGBG unusable", terminal(true, true, map[string]string{"COLORFGBG": "default;default"}), nil, 1, "tokyo-night-day (auto: terminal background"},
@@ -1047,8 +1048,8 @@ func TestAutoThemeBackground(t *testing.T) {
 		{"color never", terminal(true, true, nil), []string{"-c", "never"}, 0, notAsked},
 		{"NO_COLOR", terminal(true, true, map[string]string{"NO_COLOR": "1"}), nil, 0, notAsked},
 		{"TERM dumb", terminal(true, true, map[string]string{"TERM": "dumb"}), []string{"-c", "always"}, 0, notAsked},
-		{"stdin not a terminal", notTTY(false), nil, 0, notAsked},
-		{"stdout not a terminal", notTTY(true), []string{"-c", "always"}, 0, notAsked},
+		{"stdin not a terminal", redirected(false, true), nil, 0, notAsked},
+		{"stdout not a terminal", redirected(true, false), []string{"-c", "always"}, 0, notAsked},
 	} {
 		asked = 0
 		r := run(t, tc.env, append(tc.args, "--config")...)
@@ -1063,6 +1064,7 @@ func TestAutoThemeBackground(t *testing.T) {
 		t.Errorf("--list-themes: asked %d times, waiting %v", asked, waited)
 	}
 	// over SSH the answer takes a round trip: wait longer for it
+	waited = 0
 	run(t, terminal(true, true, map[string]string{"SSH_CONNECTION": "10.0.0.1 22 10.0.0.2 22"}), "--config")
 	if waited != silentSSH {
 		t.Errorf("over SSH: waited %v", waited)
@@ -1070,7 +1072,7 @@ func TestAutoThemeBackground(t *testing.T) {
 	// never for HTML, into a pipe, or to print the usage
 	asked = 0
 	run(t, terminal(true, true, nil), "--html", "-")
-	run(t, notTTY(true), "-P", "-")
+	run(t, redirected(true, false), "-P", "-")
 	if r := run(t, terminal(true, true, nil)); r.code != 2 || asked != 0 {
 		t.Errorf("asked %d times (exit %d)", asked, r.code)
 	}

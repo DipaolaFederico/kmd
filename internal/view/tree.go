@@ -21,9 +21,9 @@ type pickLimits struct {
 	name    int // bytes of a listed path (filtering cost per keystroke)
 }
 
-// pickLimit are the viewer's limits. Tests pass lower ones to walkTree
+// defaultPickLimits are the viewer's limits. Tests pass lower ones to walkTree
 // rather than change these, which walks still running would read.
-var pickLimit = pickLimits{depth: 20, files: 10000, entries: 200_000, links: 1000, name: 512}
+var defaultPickLimits = pickLimits{depth: 20, files: 10000, entries: 200_000, links: 1000, name: 512}
 
 // skipDirs are never walked, like hidden folders and files (.git…).
 var skipDirs = map[string]bool{"node_modules": true, "vendor": true}

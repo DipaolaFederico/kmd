@@ -126,6 +126,7 @@ func Run(opt Options) error {
 	// One read at a time, requested by the loop: while the editor runs no
 	// read is pending, so kmd never steals its keystrokes.
 	want, input := make(chan struct{}), make(chan []byte)
+	var keys keyParser
 	go func() {
 		buf := make([]byte, 4096)
 		for range want {
@@ -186,7 +187,7 @@ func Run(opt Options) error {
 				return nil
 			}
 			pending, redraw = false, true
-			for _, k := range parseKeys(b) {
+			for _, k := range keys.parse(b) {
 				if k.name == "ctrl-z" {
 					if err := t.suspend(sigs); err != nil {
 						return err

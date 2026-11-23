@@ -20,4 +20,4 @@ func MakeRaw(fd uintptr) (restore func() error, err error) {
 }
 
 // LightBackground cannot ask the terminal on unsupported platforms.
-func LightBackground(path string, timeout time.Duration) (light, ok bool) { return false, false }
+func LightBackground(path string, silent time.Duration) (light, ok bool) { return false, false }

@@ -9,6 +9,9 @@ import "bytes"
 // answer neither.
 const backgroundQuery = "\x1b]11;?\x1b\\\x1b[c"
 
+// The parsing is portable so that its tests and fuzzer run everywhere; only
+// the query itself (query_unix.go) needs a Unix terminal.
+
 // maxReply bounds how much of the terminal's answer is read: a real reply to
 // both queries is well under 100 bytes.
 const maxReply = 256

@@ -1,6 +1,7 @@
 package view
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,7 +32,7 @@ func tree(t *testing.T, files map[string]string) string {
 
 func walkNames(t *testing.T, root string) ([]string, string) {
 	t.Helper()
-	return walkNamesWith(t, root, pickLimit)
+	return walkNamesWith(t, root, defaultPickLimits)
 }
 
 // walkNamesWith walks root with the limits lim.
@@ -68,8 +69,9 @@ func TestWalkTree(t *testing.T) {
 	link(filepath.Join(root, "docs/guide.md"), "g.md") // inside: listed
 	link(filepath.Join(root, "notes.txt"), "notes.md") // extension changes: not listed
 	link(filepath.Join(root, "missing.md"), "dead.md") // dangling
-	if err := syscallMkfifo(filepath.Join(root, "fifo.md")); err != nil {
-		t.Skip("no FIFOs:", err)
+	// a FIFO named like a document is not listed (where FIFOs exist)
+	if err := syscallMkfifo(filepath.Join(root, "fifo.md")); err != nil && !errors.Is(err, errors.ErrUnsupported) {
+		t.Fatal(err)
 	}
 	names, note := walkNames(t, root)
 	want := []string{"README.md", "UP.MD", "a.markdown", "bad[31mname.md", "docs/deep/x.md", "docs/guide.md", "g.md"}
@@ -78,14 +80,14 @@ func TestWalkTree(t *testing.T) {
 	}
 
 	// stopping (with the default limits): by the caller, or by emit
-	if n := walkTree(root, pickLimit, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
+	if n := walkTree(root, defaultPickLimits, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
 		t.Error(n)
 	}
-	if n := walkTree(root, pickLimit, func() bool { return false }, func([]doc) bool { return false }); n != "" {
+	if n := walkTree(root, defaultPickLimits, func() bool { return false }, func([]doc) bool { return false }); n != "" {
 		t.Error(n)
 	}
 
-	lim := pickLimit
+	lim := defaultPickLimits
 	lim.depth = 1
 	if names, note := walkNamesWith(t, root, lim); len(names) != 6 || !strings.Contains(note, "deeper than 1") {
 		t.Errorf("depth limit: %q %q", names, note)
@@ -110,7 +112,7 @@ func TestWalkStopsInBigFolders(t *testing.T) {
 	}
 	root := tree(t, files)
 	batches := 0
-	walkTree(root, pickLimit, func() bool { return false }, func(b []doc) bool { batches++; return false })
+	walkTree(root, defaultPickLimits, func() bool { return false }, func(b []doc) bool { batches++; return false })
 	if batches != 1 {
 		t.Errorf("%d batches after emit refused", batches)
 	}
@@ -154,7 +156,7 @@ func TestSearchDocs(t *testing.T) {
 	for _, n := range names {
 		docs = append(docs, doc{path: filepath.Join(root, n), name: n})
 	}
-	lim := searchLimit
+	lim := defaultSearchLimits
 	search := func(q string) ([]hit, string) {
 		var hs []hit
 		note := searchDocs(docs, root, q, lim, func() bool { return false }, func(h []hit, _ int) bool { hs = append(hs, h...); return true })
@@ -580,7 +582,7 @@ func TestWalkHostileLinks(t *testing.T) {
 	if want := []string{"dots.md", "one.md", "real/a.md"}; !reflect.DeepEqual(names, want) || note != "" {
 		t.Errorf("links: %q %q", names, note)
 	}
-	lim := pickLimit
+	lim := defaultPickLimits
 	lim.links = 2
 	if names, note := walkNamesWith(t, root, lim); !strings.Contains(note, "first 2 symlinked") || len(names) != 2 {
 		t.Errorf("link cap: %q %q", names, note)

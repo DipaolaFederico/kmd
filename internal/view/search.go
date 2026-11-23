@@ -20,9 +20,9 @@ type searchLimits struct {
 	fileHits int // matches listed per document
 }
 
-// searchLimit are the viewer's limits. Tests pass lower ones to searchDocs
+// defaultSearchLimits are the viewer's limits. Tests pass lower ones to searchDocs
 // rather than change these, which searches still running would read.
-var searchLimit = searchLimits{file: 16 << 20, total: 256 << 20, hits: 1000, fileHits: 50}
+var defaultSearchLimits = searchLimits{file: 16 << 20, total: 256 << 20, hits: 1000, fileHits: 50}
 
 const maxHitText = 300 // bytes kept of a matching line
 

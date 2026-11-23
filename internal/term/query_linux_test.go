@@ -21,14 +21,16 @@ import (
 func openPtyPair(t *testing.T) (*os.File, string) {
 	t.Helper()
 	master := openPty(t)
-	var unlock int32
-	var n uint32
-	for req, arg := range map[uintptr]unsafe.Pointer{syscall.TIOCSPTLCK: unsafe.Pointer(&unlock), syscall.TIOCGPTN: unsafe.Pointer(&n)} {
+	ioctl := func(req uintptr, arg unsafe.Pointer) {
 		// #nosec G103 -- the pty ioctls require pointers.
 		if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, master.Fd(), req, uintptr(arg)); e != 0 {
 			t.Skipf("pty ioctl: %v", e)
 		}
 	}
+	var unlock int32
+	var n uint32
+	ioctl(syscall.TIOCSPTLCK, unsafe.Pointer(&unlock))
+	ioctl(syscall.TIOCGPTN, unsafe.Pointer(&n))
 	path := "/dev/pts/" + strconv.Itoa(int(n))
 	// held open so reading the master does not fail with EIO before the
 	// code under test opens the slave
@@ -97,24 +99,28 @@ func termiosOf(t *testing.T, path string) syscall.Termios {
 
 func TestLightBackgroundPty(t *testing.T) {
 	const da1 = "\x1b[?62;22c"
+	// silent only matters when nothing arrives: generous, except for "slow"
+	// whose pauses must exceed it (and fit in maxQueryWait)
+	long := testlimit.Scale() * time.Second
 	for _, tc := range []struct {
 		name      string
-		reply     []string // written with a pause between parts
+		silent    time.Duration
+		reply     []string // written with a 300 ms pause between parts
 		light, ok bool
 	}{
-		{"light", []string{"\x1b]11;rgb:fdfd/f6f6/e3e3\x1b\\" + da1}, true, true},
-		{"dark", []string{"\x1b]11;rgb:1a1a/1b1b/2626\a" + da1}, false, true},
-		{"no OSC 11", []string{da1}, false, false},
-		{"hostile", []string{"\x1b]11;rgb:ffff/ffff/ffff\x1b]0;pwned\a" + da1}, false, false},
+		{"light", long, []string{"\x1b]11;rgb:fdfd/f6f6/e3e3\x1b\\" + da1}, true, true},
+		{"dark", long, []string{"\x1b]11;rgb:1a1a/1b1b/2626\a" + da1}, false, true},
+		{"no OSC 11", long, []string{da1}, false, false},
+		{"hostile", long, []string{"\x1b]11;rgb:ffff/ffff/ffff\x1b]0;pwned\a" + da1}, false, false},
 		// an answer that has begun is read to the end, so none of it is
 		// left for the shell or the viewer
-		{"slow", []string{"\x1b]11;rgb:ffff/", "ffff/ffff\a\x1b[?6", "2c"}, true, true},
+		{"slow", 200 * time.Millisecond, []string{"\x1b]11;rgb:ffff/", "ffff/ffff\a\x1b[?6", "2c"}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			master, slave := openPtyPair(t)
 			before := termiosOf(t, slave)
 			sent := fakeTerminal(t, master, 300*time.Millisecond, tc.reply...)
-			light, ok := LightBackground(slave, 100*time.Millisecond)
+			light, ok := LightBackground(slave, tc.silent)
 			if light != tc.light || ok != tc.ok {
 				t.Fatalf("LightBackground = %v,%v; want %v,%v", light, ok, tc.light, tc.ok)
 			}
@@ -164,13 +170,14 @@ func TestQueryBackgroundBounded(t *testing.T) {
 			t.Fatalf("queryBackground = %d bytes, %v", len(reply), err)
 		}
 	})
-	t.Run("time", func(t *testing.T) {
+	// trickle writes first and then x every 20 ms, never completing an answer
+	trickle := func(t *testing.T, first string) time.Duration {
 		master, slave := openPtyPair(t)
-		go func() { // a trickle that never completes the answer
+		go func() {
 			b := make([]byte, 64)
 			_, _ = master.Read(b)
-			for {
-				if _, err := master.WriteString("x"); err != nil {
+			for s := first; ; s = "x" {
+				if _, err := master.WriteString(s); err != nil {
 					return
 				}
 				time.Sleep(20 * time.Millisecond)
@@ -180,8 +187,16 @@ func TestQueryBackgroundBounded(t *testing.T) {
 		if _, err := queryBackground(slave, 100*time.Millisecond); !errors.Is(err, errNoReply) {
 			t.Fatalf("err = %v", err)
 		}
-		if d := time.Since(start); d < MaxQueryWait || d > MaxQueryWait+testlimit.Scale()*time.Second {
-			t.Errorf("waited %v; want about %v", d, MaxQueryWait)
+		return time.Since(start)
+	}
+	t.Run("answer never ends", func(t *testing.T) {
+		if d := trickle(t, "\x1b]11;"); d < maxQueryWait-50*time.Millisecond || d > maxQueryWait+testlimit.Scale()*time.Second {
+			t.Errorf("waited %v; want about %v", d, maxQueryWait)
+		}
+	})
+	t.Run("typed keys", func(t *testing.T) { // no answer began: silent applies
+		if d := trickle(t, "q"); d >= maxQueryWait-50*time.Millisecond {
+			t.Errorf("waited %v for keys typed meanwhile", d)
 		}
 	})
 }

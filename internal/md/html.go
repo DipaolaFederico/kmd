@@ -1,6 +1,7 @@
 package md
 
 import (
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +15,31 @@ type HTMLOptions struct {
 	// HTML is omitted and javascript:, vbscript:, file: and non-image data:
 	// URLs are dropped, as in cmark's safe mode: documents are untrusted.
 	Unsafe bool
+	// BaseURL, when set, is the absolute URL relative link destinations
+	// resolve against (see ResolveLink). Images are left as written: a
+	// browser would download them.
+	BaseURL *url.URL
+}
+
+// MaxURL is the longest link target kmd resolves or emits as a hyperlink:
+// a hostile document may use one destination thousands of times.
+const MaxURL = 2048
+
+// ResolveLink resolves a relative link destination against base, an
+// absolute URL, as a browser would. In-document anchors ("#x"),
+// destinations with a scheme and ones that do not parse as a URL are
+// returned unchanged, so the result never has a scheme other than base's
+// unless dest already had it; so are ones longer than MaxURL. Nothing is
+// fetched.
+func ResolveLink(base *url.URL, dest string) string {
+	if base == nil || dest == "" || dest[0] == '#' || len(dest) > MaxURL {
+		return dest
+	}
+	u, err := url.Parse(dest)
+	if err != nil || u.Scheme != "" {
+		return dest
+	}
+	return base.ResolveReference(u).String()
 }
 
 // unsafeURL reports URLs that can run code or read local files in a browser.
@@ -284,7 +310,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.children(n)
 		w.tag("</" + t + ">")
 	case Link:
-		a := `<a href="` + w.url(n.Dest) + `"`
+		a := `<a href="` + w.url(ResolveLink(w.opt.BaseURL, n.Dest)) + `"`
 		if n.Title != "" {
 			a += ` title="` + esc(n.Title) + `"`
 		}

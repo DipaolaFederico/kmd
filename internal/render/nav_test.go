@@ -2,6 +2,7 @@ package render
 
 import (
 	"github.com/DipaolaFederico/kmd/internal/testlimit"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -288,5 +289,35 @@ func TestSharedBudget(t *testing.T) {
 	o.Budget = nil
 	if d := diagrams(Render(md.Parse(src, md.GFM), o)); d != diagrams(first) {
 		t.Errorf("without a shared budget each document has its own: %d", d)
+	}
+}
+
+// With a BaseURL (a piped document), relative links become web links in
+// OSC 8 targets, navigation and plain output; anchors, schemes and images
+// are left alone, and file: links are still not made clickable.
+func TestBaseURL(t *testing.T) {
+	base, _ := url.Parse("https://example.com/docs/README.md")
+	src := "[g](guide.md#Setup) [a](#top) [w](https://a.b/) [f](file:///bin/sh) [o](//other.org/x) ![i](i.png)\n"
+	res := Render(md.Parse(src, md.GFM), Options{Width: 120, Color: true, Hyperlinks: true, Navigate: true, BaseURL: base})
+	var hrefs []string
+	for _, l := range res.Links {
+		hrefs = append(hrefs, l.Href)
+	}
+	want := []string{"https://example.com/docs/guide.md#Setup", "#top", "https://a.b/", "file:///bin/sh", "https://other.org/x"}
+	if strings.Join(hrefs, " ") != strings.Join(want, " ") {
+		t.Errorf("links: %q", hrefs)
+	}
+	for _, s := range []string{"\x1b]8;;https://example.com/docs/guide.md#Setup\x1b\\", "\x1b]8;;#top\x1b\\", "\x1b]8;;i.png\x1b\\"} {
+		if !strings.Contains(res.Text, s) {
+			t.Errorf("missing OSC 8 %q in %q", s, res.Text)
+		}
+	}
+	if strings.Contains(res.Text, "]8;;file:") || strings.Contains(res.Text, "example.com/docs/i.png") {
+		t.Errorf("file: link clickable or image resolved: %q", res.Text)
+	}
+	plain := Render(md.Parse(src+"[guide.md](guide.md)", md.GFM), Options{Width: 120, BaseURL: base}).Text
+	if !strings.Contains(plain, "g (https://example.com/docs/guide.md#Setup)") ||
+		!strings.Contains(plain, "guide.md (https://example.com/docs/guide.md)") {
+		t.Errorf("plain output: %q", plain)
 	}
 }

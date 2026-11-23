@@ -1,6 +1,7 @@
 package render
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,11 @@ type Options struct {
 	Cell      termimg.Cell     // terminal cell size in pixels (0 = unknown)
 	ImageRows int              // maximum image height in rows (0 = 20)
 	BaseDir   string           // directory relative image paths resolve against
+
+	// BaseURL, when set, is the absolute http(s) URL relative links
+	// resolve against instead of BaseDir (a document read from a pipe).
+	// Images are not affected: they are never downloaded.
+	BaseURL *url.URL
 
 	// AnyImagePath lets images be read from anywhere: absolute paths, file:
 	// URLs and paths leaving BaseDir. Off, local images are confined to
@@ -264,33 +270,7 @@ func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 			st.Attr |= Strike | Faint
 			out = r.runs(n, st, out)
 		case md.Link:
-			st := base
-			st.Fg, st.URL = th.Link, n.Dest
-			href := n.Dest
-			if r.opt.Hyperlinks || r.links != nil {
-				var local bool
-				href, local = r.href(n.Dest)
-				switch {
-				case local:
-					st.URL = href
-				case strings.HasPrefix(strings.ToLower(n.Dest), "file:") && !openable(n.Dest):
-					// a clicked file:// link is opened by the desktop: never a
-					// script or .desktop file
-					st.URL = ""
-				}
-			}
-			if r.links != nil {
-				if n := len(r.links.links); n < maxLinks {
-					r.links.links = append(r.links.links, Link{Href: href})
-					st.Link = int32(n + 1)
-				}
-			}
-			st.Attr |= Underline
-			out = r.runs(n, st, out)
-			if !r.opt.Hyperlinks && n.Dest != "" && n.Dest != md.PlainText(n) &&
-				"mailto:"+md.PlainText(n) != n.Dest && "http://"+md.PlainText(n) != n.Dest && !strings.HasPrefix(n.Dest, "#") {
-				out = append(out, run{text: " (" + n.Dest + ")", st: Style{Fg: th.Muted, Attr: Faint}})
-			}
+			out = r.link(n, base, out)
 		case md.Image:
 			out = r.imageRef(md.PlainText(n), n.Dest, base, out)
 		case md.HTMLInline:
@@ -300,6 +280,52 @@ func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 		case md.FootnoteRef:
 			out = append(out, run{text: superscript(n.Index), st: Style{Fg: th.Link, Attr: base.Attr | Bold}})
 		}
+	}
+	return out
+}
+
+// link appends the runs of a link: underlined, with its OSC 8 target and,
+// for the viewer, its resolved destination; without hyperlinks the
+// destination follows the text in parentheses.
+func (r *renderer) link(n *md.Node, base Style, out []run) []run {
+	th := r.th
+	st := base
+	st.Fg, st.URL = th.Link, n.Dest
+	href := n.Dest
+	if r.opt.Hyperlinks || r.links != nil || r.opt.BaseURL != nil {
+		var local bool
+		href, local = r.href(n.Dest)
+		switch {
+		// a link resolved against BaseURL is a web link; file: links are
+		// left as written and still checked below
+		case local, r.opt.BaseURL != nil && href != n.Dest:
+			st.URL = href
+		case strings.HasPrefix(strings.ToLower(n.Dest), "file:") && !openable(n.Dest):
+			// a clicked file:// link is opened by the desktop: never a
+			// script or .desktop file
+			st.URL = ""
+		}
+	}
+	if r.links != nil {
+		if k := len(r.links.links); k < maxLinks {
+			r.links.links = append(r.links.links, Link{Href: href})
+			st.Link = int32(k + 1)
+		}
+	}
+	st.Attr |= Underline
+	out = r.runs(n, st, out)
+	if r.opt.Hyperlinks {
+		return out
+	}
+	shown := n.Dest // as written: a local link's file:// form is long and noisy
+	if r.opt.BaseURL != nil {
+		shown = href
+	}
+	if shown == "" || shown[0] == '#' {
+		return out
+	}
+	if text := md.PlainText(n); shown != text && "mailto:"+text != shown && "http://"+text != shown {
+		out = append(out, run{text: " (" + shown + ")", st: Style{Fg: th.Muted, Attr: Faint}})
 	}
 	return out
 }

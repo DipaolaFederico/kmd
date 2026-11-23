@@ -21,6 +21,10 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   of every document in the folder and lists the matches with their file,
   line and section; Enter opens the document at the match. The search runs
   in the background and Esc cancels it.
+- `--base URL` resolves the relative links of a document read from standard
+  input against the URL it was downloaded from
+  (`curl -fsSL URL | kmd --base URL`), in the terminal, the viewer and
+  `--html`. Nothing is downloaded: only inline `data:` images are drawn.
 
 ### Changed
 

@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/DipaolaFederico/kmd/internal/md"
 )
 
 // Color is a 24-bit RGB color. The zero value means "terminal default".
@@ -105,8 +107,7 @@ func (p *painter) sgr(out *strings.Builder, s Style) {
 }
 
 // safeURL drops URLs that could terminate an OSC 8 sequence early.
-// maxURL is the longest link target kmd emits or resolves.
-const maxURL = 2048
+const maxURL = md.MaxURL // the longest link target kmd emits or resolves
 
 func safeURL(u string) string {
 	if len(u) > maxURL {

@@ -205,7 +205,7 @@ jobs:
           cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: Build
         run: make build-ai
-      - name: vet, staticcheck, race tests and coverage
+      - name: vet, staticcheck, dead code, race tests, coverage, govulncheck and gosec
         run: make test-ai
 
   nix:

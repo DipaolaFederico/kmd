@@ -42,11 +42,19 @@ func configPath(getenv func(string) string) string {
 	if p := getenv("KMD_CONFIG"); p != "" {
 		return p
 	}
+	if d := configDir(getenv); d != "" {
+		return filepath.Join(d, "config")
+	}
+	return ""
+}
+
+// configDir returns $XDG_CONFIG_HOME/kmd, or ~/.config/kmd ("" without HOME).
+func configDir(getenv func(string) string) string {
 	if x := getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "kmd", "config")
+		return filepath.Join(x, "kmd")
 	}
 	if h := getenv("HOME"); h != "" {
-		return filepath.Join(h, ".config", "kmd", "config")
+		return filepath.Join(h, ".config", "kmd")
 	}
 	return ""
 }
@@ -172,6 +180,10 @@ func (c *config) set(k, v string) error {
 		c.AIURL = v
 	case "ai-key-file":
 		c.AIKeyFile = v
+		if !filepath.IsAbs(v) {
+			// relative to what? never the folder kmd happens to run in
+			err = fmt.Errorf("ai-key-file %q is not an absolute path", v)
+		}
 	default:
 		return fmt.Errorf("unknown setting %q", k)
 	}

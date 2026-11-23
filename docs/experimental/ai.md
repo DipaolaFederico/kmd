@@ -18,12 +18,13 @@ CI job. kmd does not contact the server yet.
 ## Building
 
 ```sh
-make build-ai    # bin/kmd-ai, built with -tags kmdai
-make test-ai     # vet, staticcheck, race tests and coverage with the tag
+make build-ai    # bin/kmd-ai, built with -tags kmdai; --version ends in +kmdai
+make test-ai     # vet, staticcheck, dead code, race tests, coverage,
+                 # govulncheck and gosec with the tag
 ```
 
-or `go build -tags kmdai .`. A build without the tag contains none of the
-code below and makes no network requests, as the README promises.
+or `go build -tags kmdai .`. A build without the tag contains none of this
+code and makes no network requests, as the README promises.
 
 ## Configuration
 
@@ -34,7 +35,7 @@ build, the effective values):
 |---------------|-----------------------------------------------|-------------------------------|
 | `ai`          | `off`                                         | `on` enables the assistant    |
 | `ai-url`      | `unix://$XDG_RUNTIME_DIR/kmd-llama.sock`, or `http://127.0.0.1:8091` without `XDG_RUNTIME_DIR` | the local server |
-| `ai-key-file` | `~/.config/kmd/ai-key` (honours `XDG_CONFIG_HOME`) | absolute path of the server's API key, if it needs one |
+| `ai-key-file` | `~/.config/kmd/ai-key` (honours `XDG_CONFIG_HOME`) | absolute path of the server's API key, if it needs one; a relative path is a config error |
 
 A build without the tag accepts these keys, so one config file serves both,
 and prints a one-line notice when `ai = on`.
@@ -48,7 +49,8 @@ issue #44.
 
 The document is untrusted, so the model's answer is untrusted too: a hostile
 document can steer the model (prompt injection), and #44 showed that it
-sometimes succeeds. The design follows from that:
+sometimes succeeds. These are the rules the coming pull requests implement
+(#46 to #51):
 
 - **kmd never installs, downloads or starts a model or a server.** The user
   runs the server; kmd is only a client.
@@ -66,8 +68,20 @@ sometimes succeeds. The design follows from that:
   kmd would already read to draw them.
 
 A Unix socket in `$XDG_RUNTIME_DIR` is the default because only its owner
-can connect to it; any local user can connect to a TCP port on loopback,
-which is what the optional key file is for.
+can create it or connect to it. A loopback TCP port is weaker in both
+directions:
+
+- any local user can connect to the server, which is what the optional key
+  file is for;
+- any local user can listen on the port first, when the server is not
+  running, and receive the document and the key. kmd cannot tell from the
+  connection who is listening. Open point for #46: warn when `ai = on` falls
+  back to TCP, send the key only to a socket, or check the listener's owner
+  where the OS allows it.
+
+The key file is read only from an absolute path, and #46 will refuse it
+unless it is a small regular file readable only by its owner, holding a
+single line of printable ASCII (it goes into an HTTP header).
 
 ## Graduation
 

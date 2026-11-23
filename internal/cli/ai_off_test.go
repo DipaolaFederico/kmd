@@ -19,7 +19,7 @@ func TestAIKeysWithoutAI(t *testing.T) {
 		if r.code != 0 || r.errOut != tc.notice {
 			t.Errorf("%q: code %d, stderr %q, want %q", tc.body, r.code, r.errOut, tc.notice)
 		}
-		if strings.Contains(r.out, "  ai") {
+		if strings.Contains(r.out, "\n  ai") {
 			t.Errorf("--config shows AI settings in a build without it:\n%s", r.out)
 		}
 	}

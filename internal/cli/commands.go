@@ -67,8 +67,9 @@ func swatch(bg, fg render.Color, text string) string {
 	return s + text + "\x1b[0m"
 }
 
+var onOff = map[bool]string{true: "on", false: "off"}
+
 func showConfig(env Env, cfg config, s settings) int {
-	onOff := map[bool]string{true: "on", false: "off"}
 	eff := map[string]string{
 		"theme":      s.themeNm,
 		"width":      strconv.Itoa(s.opts.Width),

@@ -290,10 +290,11 @@ promise and the `make perf` budget are unchanged.
   default build needs a stub); never in the public `render` package.
   `TestDefaultBuildHasNoAI` fails if the default build links `internal/ai`
   or `net`.
-- `make build-ai` and `make test-ai` (vet, staticcheck, race tests and
-  coverage with the tag). CI runs them on **every** pull request, so a change
-  elsewhere that breaks the experimental code fails in its own pull request,
-  where the fix is small.
+- `make build-ai` and `make test-ai` (the tag-sensitive gates: vet,
+  staticcheck, dead code, race tests, coverage, govulncheck and gosec, with
+  `GOTAGS=kmdai`). CI runs them on every pull request that touches the code,
+  the 1.0 ones included, so a change elsewhere that breaks the experimental
+  code fails in its own pull request, where the fix is small.
 - **Pull request titles use `chore(ai): …`.** A `feat` that does not change
   the released binary publishes nothing by itself, but it still counts as a
   `feat` since the last release, so the next unrelated `fix` would come out
@@ -305,7 +306,8 @@ promise and the `make perf` budget are unchanged.
   sanitiser…) goes in its own `refactor` or `fix` pull request that stands
   on its own, never inside an AI pull request.
 - The viewer reaches the AI through a minimal interface that is `nil` in the
-  default build, added in its own pull request.
+  default build, added in its own pull request after the presentations work
+  (#20) is merged and before the summary in the viewer (#49).
 - The README, man page, `--help` and completions do not mention the feature
   until it graduates (#53): one `feat` pull request per graduating part,
   which removes the tag and publishes a minor release.

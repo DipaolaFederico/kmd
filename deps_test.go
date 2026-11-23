@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"slices"
@@ -12,15 +13,21 @@ import (
 func deps(t *testing.T, tags string) []string {
 	t.Helper()
 	gobin, err := exec.LookPath("go")
-	if err != nil {
+	if err != nil && os.Getenv("CI") == "" {
 		t.Skip("go command not found")
+	} else if err != nil {
+		t.Fatal(err)
 	}
 	// #nosec G204 -- fixed arguments; only the build tags vary, set by the test.
 	cmd := exec.Command(gobin, "list", "-deps", "-tags="+tags, ".")
-	// GOFLAGS=-tags=kmdai (make test-ai) must not change what is checked
-	cmd.Env = append(os.Environ(), "GOFLAGS=")
+	// as released: no cgo, and no -tags from a GOFLAGS in the environment
+	cmd.Env = append(os.Environ(), "GOFLAGS=", "CGO_ENABLED=0")
 	out, err := cmd.Output()
-	if err != nil {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		// e.g. an untagged file imports internal/ai: "build constraints exclude all Go files"
+		t.Fatalf("go list: %v\n%s", err, ee.Stderr)
+	} else if err != nil {
 		t.Fatalf("go list: %v", err)
 	}
 	return strings.Fields(string(out))

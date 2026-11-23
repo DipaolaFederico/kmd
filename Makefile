@@ -2,9 +2,15 @@
 
 GO          ?= go
 BIN         := bin/kmd
+BIN_AI      := bin/kmd-ai
 PREFIX      ?= $(HOME)/.local
 VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS     := -s -w -X github.com/DipaolaFederico/kmd/internal/cli.Version=$(VERSION)
+
+# Build tags for the tag-sensitive gates (make test-ai sets kmdai). Passed
+# as -tags: GOFLAGS is ignored by deadcode -test and by gosec.
+GOTAGS      ?=
+TAGS        := -tags '$(GOTAGS)'
 
 # Gates
 COVER_MIN   ?= 90
@@ -48,11 +54,11 @@ lint: vet staticcheck complexity dupl deadcode
 
 vet:
 	@echo '» go vet'
-	@$(GO) vet ./...
+	@$(GO) vet $(TAGS) ./...
 
 staticcheck: $(TOOLS)/staticcheck
 	@echo '» staticcheck'
-	@$(TOOLS)/staticcheck ./...
+	@$(TOOLS)/staticcheck $(TAGS) ./...
 
 # Cognitive complexity within the limit for functions a change adds or makes
 # more complex (a ratchet: complex code that exists is not flagged until
@@ -71,7 +77,7 @@ dupl: $(TOOLS)/dupl
 # tests, such as the public render package's API, counts as reachable).
 deadcode: $(TOOLS)/deadcode
 	@echo '» dead code (deadcode)'
-	@out=$$($(TOOLS)/deadcode -test ./...) || exit 1; \
+	@out=$$($(TOOLS)/deadcode $(TAGS) -test ./...) || exit 1; \
 	if [ -n "$$out" ]; then echo "$$out"; echo "remove the unused code"; exit 1; fi
 
 ## Tests --------------------------------------------------------------------
@@ -81,7 +87,7 @@ scripts-test:
 
 test:
 	@echo '» test (race detector)'
-	@$(GO) test -race -count=1 ./...
+	@$(GO) test $(TAGS) -race -count=1 ./...
 
 spec:
 	@echo '» CommonMark 0.31.2 + GFM spec conformance'
@@ -90,7 +96,7 @@ spec:
 cover:
 	@echo '» coverage (min $(COVER_MIN)%)'
 	@# quiet on success; on failure show the failing tests (not the ok lines)
-	@out=$$($(GO) test -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... ./render/... 2>&1) || \
+	@out=$$($(GO) test $(TAGS) -count=1 -covermode=atomic -coverprofile=coverage.out ./internal/... ./render/... 2>&1) || \
 		{ printf '%s\n' "$$out" | grep -vE '^(ok|\?) '; exit 1; }
 	@$(GO) tool cover -func=coverage.out | awk -v min=$(COVER_MIN) '/^total:/ { \
 		sub("%", "", $$3); printf "  total coverage: %s%%\n", $$3; \
@@ -123,11 +129,11 @@ security: vuln gosec
 
 vuln: $(TOOLS)/govulncheck
 	@echo '» govulncheck'
-	@$(TOOLS)/govulncheck ./...
+	@$(TOOLS)/govulncheck $(TAGS) ./...
 
 gosec: $(TOOLS)/gosec
 	@echo '» gosec'
-	@$(TOOLS)/gosec -quiet -fmt=text ./...
+	@$(TOOLS)/gosec $(TAGS) -quiet -fmt=text ./...
 
 ## Build & performance ------------------------------------------------------
 build:
@@ -143,12 +149,14 @@ perf: build
 # Only builds made with -tags kmdai contain it; the released binary does not.
 build-ai:
 	@echo '» build (-tags kmdai)'
-	@CGO_ENABLED=0 $(GO) build -trimpath -tags kmdai -ldflags '$(LDFLAGS)' -o bin/kmd-ai .
+	@# +kmdai in --version: this binary may contact a local server, unlike a release
+	@CGO_ENABLED=0 $(GO) build -trimpath -tags kmdai -ldflags '$(LDFLAGS)+kmdai' -o $(BIN_AI) .
+	@ls -lh $(BIN_AI) | awk '{ print "  binary size: " $$5 }'
 
-# vet, staticcheck, race tests and coverage of the tagged build
+# the gates that depend on build tags, run on the tagged build
 test-ai:
 	@echo '» experimental AI (-tags kmdai)'
-	@GOFLAGS=-tags=kmdai $(MAKE) --no-print-directory vet staticcheck test cover
+	@$(MAKE) --no-print-directory vet staticcheck deadcode test cover security GOTAGS=kmdai
 
 ## Packaging -----------------------------------------------------------------
 # STRICT=1 (CI) fails when a package validator (ruby, dpkg-deb, lintian,

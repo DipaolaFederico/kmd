@@ -13,9 +13,10 @@ func TestAIConfig(t *testing.T) {
 		env  map[string]string
 		want []string
 	}{
-		{"", map[string]string{"XDG_RUNTIME_DIR": "/run/u"}, []string{
-			"ai           off\n", "ai-url       unix:///run/u/kmd-llama.sock\n", "ai-key-file  (none)\n",
+		{"", map[string]string{"XDG_RUNTIME_DIR": "/run/u", "XDG_CONFIG_HOME": "/cfg"}, []string{
+			"ai           off\n", "ai-url       unix:///run/u/kmd-llama.sock\n", "ai-key-file  /cfg/kmd/ai-key\n",
 		}},
+		{"", map[string]string{}, []string{"ai-url       http://127.0.0.1:8091\n", "ai-key-file  (none)\n"}},
 		{"ai = on\nai-url = http://127.0.0.1:9000\nai-key-file = /k\n", map[string]string{}, []string{
 			"ai           on\n", "ai-url       http://127.0.0.1:9000\n", "ai-key-file  /k\n",
 		}},

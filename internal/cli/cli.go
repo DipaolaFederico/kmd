@@ -441,6 +441,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	}
 	s.mouse = cfg.Mouse == nil || *cfg.Mouse
 	s.alwaysView = o.view || cfg.View == "always" && !o.noPager
+	s.ai = resolveAI(cfg, env)
 	return s, nil
 }
 
@@ -537,7 +538,6 @@ func Run(env Env) int {
 		fmt.Fprintf(env.Stderr, "kmd: %v\nTry 'kmd --help'.\n", err)
 		return 2
 	}
-	s.ai = resolveAI(cfg, env)
 	switch {
 	case o.listThemes:
 		return listThemes(env, s)

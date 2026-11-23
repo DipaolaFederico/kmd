@@ -494,9 +494,13 @@ threat model:
   click or Enter opens it.
 - **File picker**: listing a folder reads only names, breadth first, at most
   20 levels deep, 10,000 documents and 200,000 entries (a notice is shown
-  beyond), in the background. Symlinked folders are never entered (no loops,
-  nothing outside the folder); a symlinked document is listed only if it
-  resolves to a regular Markdown file inside the folder. Document contents
+  beyond), in the background, without leaving the folder's file system
+  (no automounted or network shares). Symlinked folders are never entered
+  (no loops, nothing outside the folder); a symlinked document is listed
+  only if it points directly at a regular Markdown file inside the folder
+  (at most 1,000 are checked), and is checked again before a search reads
+  it. Files are opened without blocking, so a FIFO swapped in cannot hang
+  kmd. Document contents
   are read only by a text search the user starts: in the background,
   cancellable with Esc, ≤ 16 MiB per file, ≤ 256 MiB and 1,000 matches per
   search. File names and matching lines are sanitized like document text.

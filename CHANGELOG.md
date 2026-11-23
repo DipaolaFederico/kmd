@@ -25,6 +25,12 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - A folder without a `README.md` opens the viewer (with the file picker)
   even when its listing fits on the screen; piped output is unchanged.
 
+### Security
+
+- File names with invalid UTF-8 in messages (a lone byte such as `0x9b`,
+  an 8-bit control sequence for some terminals) are shown with U+FFFD
+  instead of reaching the terminal as they are.
+
 ## [0.11.0] - 2026-11-23
 
 ### Added

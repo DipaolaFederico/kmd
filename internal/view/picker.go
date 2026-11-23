@@ -3,6 +3,7 @@ package view
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -235,9 +236,10 @@ func (m *model) startSearch() {
 	}
 	t := newTask()
 	p.search = t
-	docs, q, bg := p.docs, p.searched, m.bg
+	// a copy: the walk may still be adding to (and sorting) p.docs
+	docs, q, bg := slices.Clone(p.docs), p.searched, m.bg
 	go func() {
-		note := searchDocs(docs, q, t.stopped, func(hs []hit, done int) bool {
+		note := searchDocs(docs, p.root, q, t.stopped, func(hs []hit, done int) bool {
 			return t.send(bg, func(m *model) {
 				if m.pick == p && p.search == t {
 					p.hits = append(p.hits, hs...)

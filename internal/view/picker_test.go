@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -70,7 +69,7 @@ func TestWalkTree(t *testing.T) {
 	link(filepath.Join(root, "docs/guide.md"), "g.md") // inside: listed
 	link(filepath.Join(root, "notes.txt"), "notes.md") // extension changes: not listed
 	link(filepath.Join(root, "missing.md"), "dead.md") // dangling
-	if err := syscall.Mkfifo(filepath.Join(root, "fifo.md"), 0o600); err != nil {
+	if err := syscallMkfifo(filepath.Join(root, "fifo.md")); err != nil {
 		t.Fatal(err)
 	}
 	names, note := walkNames(t, root)
@@ -154,7 +153,7 @@ func TestSearchDocs(t *testing.T) {
 	}
 	search := func(q string) ([]hit, string) {
 		var hs []hit
-		note := searchDocs(docs, q, func() bool { return false }, func(h []hit, _ int) bool { hs = append(hs, h...); return true })
+		note := searchDocs(docs, root, q, func() bool { return false }, func(h []hit, _ int) bool { hs = append(hs, h...); return true })
 		return hs, note
 	}
 	hs, note := search("make")
@@ -193,10 +192,10 @@ func TestSearchDocs(t *testing.T) {
 		t.Errorf("file read limit: %+v", hs)
 	}
 	setVar(t, &maxSearchFile, 1<<20)
-	if n := searchDocs(docs, "make", func() bool { return true }, nil); n != "" {
+	if n := searchDocs(docs, root, "make", func() bool { return true }, nil); n != "" {
 		t.Error(n)
 	}
-	if n := searchDocs(docs, "make", func() bool { return false }, func([]hit, int) bool { return false }); n != "" {
+	if n := searchDocs(docs, root, "make", func() bool { return false }, func([]hit, int) bool { return false }); n != "" {
 		t.Error(n)
 	}
 	setVar(t, &maxSearchTotal, 10)
@@ -204,7 +203,7 @@ func TestSearchDocs(t *testing.T) {
 		t.Errorf("total limit: %q", note)
 	}
 	// a document replaced by something else since the walk is not read
-	if readDoc(root, 10) != nil || readDoc(filepath.Join(root, "gone.md"), 10) != nil {
+	if readDoc(doc{path: root}, root, 10) != nil || readDoc(doc{path: filepath.Join(root, "gone.md")}, root, 10) != nil {
 		t.Error("read a folder or a missing file")
 	}
 	long := strings.Repeat("é", maxHitText)
@@ -521,5 +520,98 @@ func TestPickerLinear(t *testing.T) {
 			hay := lowerASCII(nil, data)
 			return func() { scanDoc(doc{}, data, hay, []byte("needle"), false, 1<<30) }
 		})
+	}
+}
+
+// A search started while the walk is still adding documents must not share
+// the list the walk keeps sorting (go test -race).
+func TestPickerSearchDuringWalk(t *testing.T) {
+	p := &picker{root: "/r", docs: make([]doc, 0, 100)} // room to grow in place
+	p.add([]doc{{name: "b.md", path: "/nonexistent/b.md"}, {name: "d.md", path: "/nonexistent/d.md"}})
+	m := &model{pick: p, picking: true, bg: make(chan func(*model), 16)}
+	p.text, p.tquery = true, []rune("x")
+	m.startSearch()
+	for i := range 50 {
+		p.add([]doc{{name: strconv.Itoa(i) + ".md", path: "/nonexistent/" + strconv.Itoa(i) + ".md"}})
+	}
+	h := &harness{model: m}
+	h.settle(t)
+}
+
+func TestWalkHostileLinks(t *testing.T) {
+	outside := tree(t, map[string]string{"x.md": "outside"})
+	root := tree(t, map[string]string{"real/a.md": "# A\nneedle\n", "d/keep": ""})
+	link := func(target, name string) {
+		t.Helper()
+		if err := os.Symlink(target, filepath.Join(root, name)); err != nil {
+			t.Skip("no symlinks:", err)
+		}
+	}
+	link(outside, "out")
+	link("out/x.md", "via.md")                                // through a symlinked folder
+	link("real/a.md", "one.md")                               // one hop to a real file: listed
+	link("one.md", "two.md")                                  // a chain: not listed
+	link(strings.Repeat("d/../", 300)+"real/a.md", "long.md") // too long to check
+	link("real/../real/a.md", "dots.md")                      // cleaned inside the root: listed
+	// a farm of links whose targets are as long as allowed: cheap to check
+	long := strings.Repeat("d/../", maxLinkTarget/5-3) + "zz.md"
+	for i := range 300 {
+		link(long, "f"+strconv.Itoa(i)+".md")
+	}
+	start := time.Now()
+	names, note := walkNames(t, root)
+	if d := time.Since(start); d > testlimit.Scale()*2*time.Second {
+		t.Errorf("hostile links took %v", d)
+	}
+	if want := []string{"dots.md", "one.md", "real/a.md"}; !reflect.DeepEqual(names, want) || note != "" {
+		t.Errorf("links: %q %q", names, note)
+	}
+	setVar(t, &maxPickLinks, 2)
+	if names, note := walkNames(t, root); !strings.Contains(note, "first 2 symlinked") || len(names) != 2 {
+		t.Errorf("link cap: %q %q", names, note)
+	}
+
+	// replaced after the walk: a retargeted link and a file become unreadable
+	one := doc{path: filepath.Join(root, "one.md"), link: true}
+	if readDoc(one, root, 100) == nil {
+		t.Fatal("link not read")
+	}
+	if err := os.Remove(one.path); err != nil {
+		t.Fatal(err)
+	}
+	link(filepath.Join(outside, "x.md"), "one.md")
+	if readDoc(one, root, 100) != nil {
+		t.Error("read a retargeted link outside the root")
+	}
+	a := doc{path: filepath.Join(root, "real/a.md")}
+	if err := os.Rename(a.path, a.path+".bak"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "x.md"), a.path); err != nil {
+		t.Fatal(err)
+	}
+	if readDoc(a, root, 100) != nil {
+		t.Error("followed a symlink swapped for a document")
+	}
+	if err := os.Remove(a.path); err != nil {
+		t.Fatal(err)
+	}
+	if err := syscallMkfifo(a.path); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan []byte, 1)
+	go func() { done <- readDoc(a, root, 100) }()
+	select {
+	case b := <-done:
+		if b != nil {
+			t.Error("read a FIFO")
+		}
+	case <-time.After(testlimit.Scale() * 2 * time.Second):
+		t.Fatal("blocked on a FIFO swapped for a document")
+	}
+	// a folder swapped for a symlink is not opened
+	if f, err := openDir(filepath.Join(root, "out")); err == nil {
+		_ = f.Close()
+		t.Error("opened a symlinked folder")
 	}
 }

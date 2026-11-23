@@ -22,6 +22,7 @@ var (
 	maxPickDepth   = 20      // folder levels below the root
 	maxPickFiles   = 10000   // documents listed
 	maxPickEntries = 200_000 // directory entries read in total
+	maxPickLinks   = 1000    // symlinked documents checked
 
 	maxSearchFile  = 16 << 20  // bytes read from one document
 	maxSearchTotal = 256 << 20 // bytes read by one search
@@ -38,6 +39,7 @@ var skipDirs = map[string]bool{"node_modules": true, "vendor": true}
 type doc struct {
 	path string // absolute path, to open it
 	name string // path relative to the root, slash-separated and sanitized
+	link bool   // a symlink (checked again before it is read)
 }
 
 // hit is a line of a document that matches a text search.
@@ -86,47 +88,58 @@ func (t *task) send(bg chan<- func(*model), f func(*model)) bool {
 // walkTree lists the Markdown documents under root, breadth first (so a
 // truncated list keeps the shallow documents), calling emit with batches
 // of them; emit returns false to stop. It skips hidden folders and
-// skipDirs, never enters a symlinked folder (no loops, no escaping the
-// root), and lists a symlinked document only if it resolves to a regular
-// Markdown file inside the root — the checks the viewer makes when it
-// follows a link. The result explains any limit that was reached.
+// skipDirs, stays on the root's file system (no automounted or network
+// shares), never enters a symlinked folder (no loops, no escaping the
+// root), and lists a symlinked document only if it points directly at a
+// regular Markdown file inside the root (see linkInside). The result
+// explains any limit that was reached.
 func walkTree(root string, stopped func() bool, emit func([]doc) bool) string {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return errText(err)
 	}
-	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	st, err := os.Stat(rootAbs)
 	if err != nil {
 		return errText(err)
 	}
+	dev, hasDev := device(st)
 	type dir struct {
 		path  string
 		depth int
 	}
 	queue := []dir{{rootAbs, 0}}
 	var batch []doc
-	files, entries := 0, 0
+	files, entries, links := 0, 0, 0
 	var notes []string
 	flush := func() bool {
 		ok := len(batch) == 0 || emit(batch)
 		batch = nil
 		return ok
 	}
-	deep, full := false, false
+	deep, full, mounts := false, false, false
 walk:
-	for len(queue) > 0 {
-		if stopped() {
-			return ""
-		}
+	for first := true; len(queue) > 0; first = false {
 		d := queue[0]
 		queue = queue[1:]
 		budget := maxPickEntries - entries
 		if budget <= 0 {
 			break
 		}
-		f, err := os.Open(d.path)
+		open := openDir
+		if first {
+			open = os.Open // the root itself may be a symlink
+		}
+		f, err := open(d.path)
 		if err != nil {
-			continue // unreadable folder: skip it, like ls -R
+			continue // unreadable, or swapped for a symlink: skip it
+		}
+		if fi, err := f.Stat(); err != nil || !fi.IsDir() {
+			_ = f.Close()
+			continue
+		} else if d2, ok := device(fi); hasDev && ok && d2 != dev {
+			_ = f.Close()
+			mounts = true
+			continue
 		}
 		ents, _ := f.ReadDir(budget)
 		_ = f.Close()
@@ -136,12 +149,16 @@ walk:
 		}
 		sort.Slice(ents, func(i, j int) bool { return ents[i].Name() < ents[j].Name() })
 		for _, e := range ents {
+			if stopped() {
+				return ""
+			}
 			n := e.Name()
 			if strings.HasPrefix(n, ".") {
 				continue
 			}
 			p := filepath.Join(d.path, n)
 			t := e.Type()
+			link := false
 			switch {
 			case t.IsDir():
 				if skipDirs[n] {
@@ -156,9 +173,10 @@ walk:
 			case !render.MarkdownExt[strings.ToLower(filepath.Ext(n))]:
 				continue
 			case t&os.ModeSymlink != 0:
-				if !linkInside(p, rootReal) {
+				if links++; links > maxPickLinks || !linkInside(p, rootAbs) {
 					continue
 				}
+				link = true
 			case !t.IsRegular():
 				continue
 			}
@@ -166,7 +184,7 @@ walk:
 			if err != nil {
 				continue
 			}
-			batch = append(batch, doc{path: p, name: render.Clean(filepath.ToSlash(rel))})
+			batch = append(batch, doc{path: p, name: render.Clean(filepath.ToSlash(rel)), link: link})
 			if files++; files >= maxPickFiles {
 				notes = append(notes, "only the first "+strconv.Itoa(maxPickFiles)+" documents")
 				break walk
@@ -179,26 +197,60 @@ walk:
 	if deep {
 		notes = append(notes, "folders deeper than "+strconv.Itoa(maxPickDepth)+" levels skipped")
 	}
+	if links > maxPickLinks {
+		notes = append(notes, "only the first "+strconv.Itoa(maxPickLinks)+" symlinked documents checked")
+	}
+	if mounts {
+		notes = append(notes, "other file systems skipped")
+	}
 	if !flush() {
 		return ""
 	}
 	return strings.Join(notes, " · ")
 }
 
-// linkInside reports whether the symlink p resolves to a regular file
-// inside root (already resolved) with the same Markdown extension.
+// maxLinkTarget bounds the target of a symlinked document: checking it
+// costs one lstat per path component.
+const maxLinkTarget = 1024
+
+// linkInside reports whether the symlink p (under root, reached without
+// following symlinked folders) points directly at a regular file inside
+// root with the same extension: one hop (no symlink chains), through real
+// folders only. It resolves the target itself, with one lstat per
+// component of a short target, rather than with filepath.EvalSymlinks,
+// whose cost a hostile link chain can multiply (255 hops of 4 KiB paths).
 func linkInside(p, root string) bool {
-	real, err := filepath.EvalSymlinks(p)
-	if err != nil {
+	target, err := os.Readlink(p)
+	if err != nil || len(target) > maxLinkTarget {
 		return false
 	}
-	st, err := os.Stat(real)
-	if err != nil || !st.Mode().IsRegular() ||
-		!strings.EqualFold(filepath.Ext(real), filepath.Ext(p)) {
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(filepath.Dir(p), target)
+	}
+	target = filepath.Clean(target)
+	if !strings.EqualFold(filepath.Ext(target), filepath.Ext(p)) {
 		return false
 	}
-	rel, err := filepath.Rel(root, real)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return false
+	}
+	cur := root
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, c := range parts {
+		cur = filepath.Join(cur, c)
+		st, err := os.Lstat(cur)
+		if err != nil {
+			return false
+		}
+		if i == len(parts)-1 {
+			return st.Mode().IsRegular()
+		}
+		if !st.IsDir() { // a symlinked folder on the way could lead anywhere
+			return false
+		}
+	}
+	return false
 }
 
 // query is a lowercased filter, as runes (fuzzy matching) and as a string
@@ -329,12 +381,12 @@ func filterDocs(docs []doc, q query, out []int) []int {
 	return out
 }
 
-// searchDocs finds the lines of docs containing q (ignoring case unless q
+// searchDocs finds the lines of docs (found under root) containing q (ignoring case unless q
 // has an uppercase letter, like / in the viewer), calling emit with each
 // document's hits and progress (documents searched); emit returns false to
 // stop. Reads are bounded per document and in total; the result explains
 // any limit that was reached.
-func searchDocs(docs []doc, q string, stopped func() bool, emit func(hits []hit, done int) bool) string {
+func searchDocs(docs []doc, root, q string, stopped func() bool, emit func(hits []hit, done int) bool) string {
 	fold := strings.ToLower(q) == q
 	ascii := true
 	for i := 0; i < len(q); i++ {
@@ -350,7 +402,7 @@ func searchDocs(docs []doc, q string, stopped func() bool, emit func(hits []hit,
 		if total >= maxSearchTotal {
 			return "stopped after reading " + strconv.Itoa(maxSearchTotal>>20) + " MiB"
 		}
-		data := readDoc(d.path, min(maxSearchFile, maxSearchTotal-total))
+		data := readDoc(d, root, min(maxSearchFile, maxSearchTotal-total))
 		total += len(data)
 		hay := data
 		if fold && ascii {
@@ -370,14 +422,15 @@ func searchDocs(docs []doc, q string, stopped func() bool, emit func(hits []hit,
 	return ""
 }
 
-// readDoc reads at most n bytes of a document found by the walk, which
-// must still be a regular file (it may have been replaced since).
-func readDoc(path string, n int) []byte {
-	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+// readDoc reads at most n bytes of a document found by the walk. It may
+// have been replaced since: a symlink is checked again, anything else is
+// opened without following one, and the open file must be regular (opened
+// non-blocking, so a FIFO swapped in cannot hang the search).
+func readDoc(d doc, root string, n int) []byte {
+	if d.link && !linkInside(d.path, root) {
 		return nil
 	}
-	// #nosec G304 -- a document listed by walkTree, which checked it.
-	f, err := os.Open(path)
+	f, err := openDoc(d.path, d.link)
 	if err != nil {
 		return nil
 	}

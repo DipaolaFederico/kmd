@@ -208,8 +208,9 @@ document at that section with the text highlighted. The search runs in the
 background and \fBEsc\fR cancels it.
 .PP
 The listing skips hidden folders, \fB.git\fR, \fBnode_modules\fR and
-\fBvendor\fR, never enters symlinked folders, and lists a symlinked document
-only when it resolves to a regular Markdown file inside the folder. It stops
+\fBvendor\fR, stays on the folder's file system, never enters symlinked
+folders, and lists a symlinked document only when it points directly at a
+regular Markdown file inside the folder (at most 1,000 are checked). It stops
 at 20 levels, 10,000 documents or 200,000 directory entries, and a search at
 16 MiB per file, 256 MiB in total or 1,000 matches; the picker says when a
 limit was reached.

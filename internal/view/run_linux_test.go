@@ -238,7 +238,12 @@ func TestRunClipboard(t *testing.T) {
 	if err := runClipboard([]string{"/bin/sh", "-c", "cat >/dev/null"}, "text"); err != nil {
 		t.Errorf("clipboard program: %v", err)
 	}
-	if err := runClipboard([]string{"/bin/false"}, "x"); err == nil || err.Error() != "false failed" {
+	// a failing program of our own: /bin/false is missing in some sandboxes (Nix)
+	fail := filepath.Join(t.TempDir(), "false")
+	if err := os.WriteFile(fail, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := runClipboard([]string{fail}, "x"); err == nil || err.Error() != "false failed" {
 		t.Errorf("failing program: %v", err)
 	}
 	if err := runClipboard([]string{"/nonexistent/wl-copy"}, "x"); err == nil {

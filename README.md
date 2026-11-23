@@ -47,13 +47,28 @@ untrusted input.
 
 ## 📦 Installation
 
+| Platform | Command |
+|----------|---------|
+| 🍺 macOS, Linux ([Homebrew](https://brew.sh)) | `brew install DipaolaFederico/tap/kmd` |
+| 🐧 Debian, Ubuntu | `sudo apt install ./kmd_*.deb` with the [`.deb` from a release](#-debian-and-ubuntu) |
+| 🐧 Fedora | `sudo dnf copr enable fdipa/kmd && sudo dnf install kmd` ([more](#-fedora)) |
+| 🪟 Windows ([Scoop](https://scoop.sh)) | `scoop bucket add dipaolafederico https://github.com/DipaolaFederico/scoop-bucket`<br>`scoop install kmd` |
+| 🪟 Windows (winget) | `winget install DipaolaFederico.kmd` |
+| ❄️ Nix | `nix run github:DipaolaFederico/kmd` · `nix profile install github:DipaolaFederico/kmd` |
+| 🐹 Go | `go install github.com/DipaolaFederico/kmd@latest` (binary only) |
+
+Every package is updated by the release workflow, with each download pinned
+by SHA-256. The Homebrew, `.deb`, Fedora and Nix packages also install
+the man page and the bash/zsh/fish completions. How each channel is
+published: [docs/PACKAGING.md](docs/PACKAGING.md).
+
 ### Prebuilt binaries
 
 Every [release](https://github.com/DipaolaFederico/kmd/releases/latest)
 includes binaries for Linux (amd64, arm64), macOS (amd64, arm64), FreeBSD
-(amd64) and Windows (amd64), a `SHA256SUMS` file and a signed build
-provenance attestation. Each archive contains `kmd`, the man page `kmd.1`,
-`README.md` and `LICENSE`.
+(amd64) and Windows (amd64), `.deb` packages (amd64, arm64), a `SHA256SUMS`
+file and a signed build provenance attestation. Each archive contains `kmd`,
+the man page `kmd.1`, `README.md` and `LICENSE`.
 
 ```sh
 # Linux amd64; for other platforms change "linux-amd64" (see the release page)
@@ -90,6 +105,22 @@ sudo make install PREFIX=/usr/local # system-wide
 With Go only: `go install github.com/DipaolaFederico/kmd@latest` (installs
 the binary, without the man page or completions).
 
+### 🐧 Debian and Ubuntu
+
+```sh
+VERSION=$(curl -fsSL https://api.github.com/repos/DipaolaFederico/kmd/releases/latest \
+  | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
+DEB=kmd_${VERSION#v}_$(dpkg --print-architecture).deb   # amd64 or arm64
+[ -n "$VERSION" ] &&
+  curl -fsSLO "https://github.com/DipaolaFederico/kmd/releases/download/$VERSION/$DEB" \
+       -O "https://github.com/DipaolaFederico/kmd/releases/download/$VERSION/SHA256SUMS" &&
+  sha256sum --check --ignore-missing SHA256SUMS &&
+  sudo apt install "./$DEB"
+```
+
+The `.deb` is covered by `SHA256SUMS` and the build provenance attestation
+like the archives (`gh attestation verify "$DEB" --repo DipaolaFederico/kmd`).
+
 ### 🐧 Fedora
 
 ```sh
@@ -103,7 +134,8 @@ repositories is in progress; see [docs/PACKAGING.md](docs/PACKAGING.md).
 
 ### Shell completions
 
-`make install` and the RPM install them. Otherwise:
+`make install`, Homebrew, `.deb`, RPM and Nix packages install
+them. Otherwise:
 
 ```sh
 kmd --completion bash > ~/.local/share/bash-completion/completions/kmd

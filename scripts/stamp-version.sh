@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # stamp-version.sh VERSION DATE — write a release version (X.Y.Z) and date
 # (YYYY-MM-DD) into the files that carry it: the RPM spec, the man page and
-# the AppStream metainfo (a <release> entry is added if missing). Used by the
-# release workflow on the published artifacts; `make packaging` checks that
+# the AppStream metainfo (a <release> entry is added if missing). Called by
+# scripts/sync-version.sh, once per release; `make packaging` checks that
 # the three files agree.
 set -euo pipefail
 

@@ -12,6 +12,17 @@
 # merges land close together and GitHub drops queued runs. The owner can
 # also release by hand (Actions → Release → Run workflow), which skips both
 # conditions. See CONTRIBUTING.md, "Releases".
+#
+# The tag vX.Y.Z points to a child of the released commit that adds the
+# version files (RPM spec, man page, AppStream metainfo) stamped with X.Y.Z;
+# the version-pr job opens a pull request bringing them to main.
+#
+# After publishing, the package channels are updated (Homebrew tap, Scoop
+# bucket, AUR, winget). Each channel job regenerates its manifests from the
+# released commit's scripts and the release's attested SHA256SUMS, so nothing
+# the build job wrote reaches them. Their credentials live in the "packages"
+# environment and only those jobs can read them; a channel whose secret is
+# not set is skipped with a warning. See docs/PACKAGING.md.
 name: Release
 
 on:
@@ -60,6 +71,7 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      date: ${{ steps.version.outputs.date }}
       sha: ${{ steps.sha.outputs.sha }}
     steps:
       - name: Only the owner may release by hand
@@ -154,6 +166,7 @@ jobs:
             exit 1
           fi
           echo "version=$next" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
           echo "### Release v$next ($LAST + $BUMP)" >> "$GITHUB_STEP_SUMMARY"
 
   build:
@@ -166,10 +179,12 @@ jobs:
       contents: read # building never holds a token that can write
     env:
       VERSION: ${{ needs.plan.outputs.version }}
+      DATE: ${{ needs.plan.outputs.date }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          fetch-depth: 0 # the tags, for scripts/sync-version.sh
           persist-credentials: false
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
@@ -178,13 +193,25 @@ jobs:
           # another workflow could have written
           cache: false
       - name: Install packaging validators
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends groff appstream
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends groff appstream ruby lintian python3-yaml
 
+      # the same files go into the tagged commit (publish job): the tag, its
+      # git archive and the source tarball carry the released version
       - name: Stamp the version into spec, man page and AppStream metadata
-        run: scripts/stamp-version.sh "$VERSION" "$(date -u +%F)"
+        run: scripts/sync-version.sh "$VERSION" "$DATE"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: version-files
+          path: |
+            packaging/kmd.spec
+            docs/kmd.1
+            packaging/io.github.dipaolafederico.kmd.metainfo.xml
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Validate packaging
-        run: make packaging VERSION="v$VERSION"
+        run: make packaging VERSION="v$VERSION" STRICT=1
 
       - name: Build binaries
         run: |
@@ -215,6 +242,18 @@ jobs:
             rm -rf "dist/$name"
           done
 
+      - name: Debian packages
+        run: |
+          # the binaries of the linux archives; bin/kmd (built by make
+          # packaging for this runner) prints the completions
+          SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
+          export SOURCE_DATE_EPOCH
+          for arch in amd64 arm64; do
+            tar -xzf "dist/kmd-v$VERSION-linux-$arch.tar.gz" -C "$RUNNER_TEMP"
+            scripts/package-deb.sh "$VERSION" "$arch" "$RUNNER_TEMP/kmd-v$VERSION-linux-$arch/kmd" bin/kmd dist
+            rm -rf "$RUNNER_TEMP/kmd-v$VERSION-linux-$arch"
+          done
+
       - name: Source tarball
         run: |
           # only the stamped files may differ from the commit: make dist packs
@@ -226,6 +265,13 @@ jobs:
           fi
           make dist
 
+      - name: Checksums
+        # taken before anything runs the artifacts or installs more tools
+        run: |
+          cd dist
+          sha256sum kmd-* kmd_*.deb > SHA256SUMS
+          { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Smoke test the release binary
         run: |
           tar -xzf "dist/kmd-v$VERSION-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
@@ -233,12 +279,16 @@ jobs:
           got=$("$bin" --version)
           [ "$got" = "kmd v$VERSION" ] || { echo "::error::version is '$got'"; exit 1; }
           echo "# ok" | "$bin" -c never
-
-      - name: Checksums
-        run: |
-          cd dist
-          sha256sum kmd-* > SHA256SUMS
-          { echo '```'; cat SHA256SUMS; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          # the .deb installs a working kmd, its man page and completions
+          lintian --fail-on error,warning --suppress-tags statically-linked-binary dist/kmd_*.deb
+          sudo apt-get install -y -qq "./dist/kmd_${VERSION}_amd64.deb"
+          got=$(/usr/bin/kmd --version)
+          [ "$got" = "kmd v$VERSION" ] || { echo "::error::.deb version is '$got'"; exit 1; }
+          test -f /usr/share/man/man1/kmd.1.gz
+          test -f /usr/share/bash-completion/completions/kmd
+          sudo apt-get remove -y -qq kmd
+          # the tests changed nothing that is published
+          (cd dist && sha256sum --strict --quiet -c SHA256SUMS)
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -257,6 +307,8 @@ jobs:
       contents: write # tag + GitHub release
       id-token: write # provenance attestation
       attestations: write
+    outputs:
+      sums: ${{ steps.sums.outputs.sha256 }}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
     steps:
@@ -266,22 +318,372 @@ jobs:
           path: dist
 
       - name: Verify checksums
-        run: cd dist && sha256sum --strict -c SHA256SUMS
+        id: sums
+        run: |
+          cd dist && sha256sum --strict -c SHA256SUMS
+          echo "sha256=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
-          subject-path: dist/kmd-*
+          subject-path: |
+            dist/kmd-*
+            dist/kmd_*.deb
+            dist/SHA256SUMS
 
-      - name: Create tag and GitHub release
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: version-files
+          path: version-files
+
+      # The tag points to a child of the released commit that only adds the
+      # version files the build stamped: checking out the tag (Packit's git
+      # archive, nix, a clone) gives the same files as the source tarball.
+      # Made with the API, so this job still checks nothing out.
+      - name: Tag a commit with the version files
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
+          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml"
+          # exactly these three regular files, stamped with this version
+          got=$(cd version-files && find . -mindepth 1 ! -type d | sed 's,^\./,,' | sort)
+          [ "$got" = "$(printf '%s\n' $files | sort)" ] || { echo "::error::unexpected version files: $got"; exit 1; }
+          if [ -n "$(find version-files -mindepth 1 ! -type d ! -type f)" ]; then echo "::error::version files must be regular files"; exit 1; fi
+          grep -Eq "^Version:[[:space:]]+$VERSION\$" version-files/packaging/kmd.spec &&
+            grep -q "\"kmd $VERSION\"" version-files/docs/kmd.1 &&
+            grep -q "<release version=\"$VERSION\"" version-files/packaging/io.github.dipaolafederico.kmd.metainfo.xml ||
+            { echo "::error::the version files are not stamped with $VERSION"; exit 1; }
+
+          # and they differ from the released commit only in version lines:
+          # the build job's output becomes the tag's content
+          for f in $files; do
+            gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$f?ref=$SHA" >"$RUNNER_TEMP/base"
+            bad=$(diff --unchanged-line-format= --old-line-format='-%L' --new-line-format='+%L' "$RUNNER_TEMP/base" "version-files/$f" |
+              grep -v -x -E \
+                -e '[-+]Version:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' \
+                -e '[-+]\.TH KMD 1 "[0-9]{4}-[0-9]{2}-[0-9]{2}" "kmd [0-9]+\.[0-9]+\.[0-9]+" "User Commands"' \
+                -e '\+    <release version="[0-9]+\.[0-9]+\.[0-9]+" date="[0-9]{4}-[0-9]{2}-[0-9]{2}"/>' || true)
+            [ -z "$bad" ] || { echo "::error::$f has changes other than the version:"; echo "$bad"; exit 1; }
+          done
+
+          # the tree the tag must have: the released commit's plus these files
+          entries='[]'
+          for f in $files; do
+            blob=$(jq -n --arg c "$(base64 -w0 "version-files/$f")" '{content: $c, encoding: "base64"}' |
+              gh api -X POST "repos/$REPO/git/blobs" --input - --jq .sha)
+            entries=$(jq --arg p "$f" --arg s "$blob" '. + [{path: $p, mode: "100644", type: "blob", sha: $s}]' <<<"$entries")
+          done
+          base=$(gh api "repos/$REPO/git/commits/$SHA" --jq .tree.sha)
+          tree=$(jq -n --arg b "$base" --argjson t "$entries" '{base_tree: $b, tree: $t}' |
+            gh api -X POST "repos/$REPO/git/trees" --input - --jq .sha)
+
+          if commit=$(gh api "repos/$REPO/git/ref/tags/v$VERSION" --jq .object.sha 2>/dev/null); then
+            # a re-run after the tag was made: only if it is exactly that
+            # commit (single parent SHA, the expected tree)
+            got=$(gh api "repos/$REPO/git/commits/$commit" --jq '"\(.parents | map(.sha) | join(" ")) \(.tree.sha)"')
+            [ "$got" = "$SHA $tree" ] || { echo "::error::tag v$VERSION exists and is not the expected commit"; exit 1; }
+          else
+            commit=$(jq -n --arg m "chore(release): v$VERSION" --arg t "$tree" --arg p "$SHA" \
+              '{message: $m, tree: $t, parents: [$p]}' |
+              gh api -X POST "repos/$REPO/git/commits" --input - --jq .sha)
+            gh api -X POST "repos/$REPO/git/refs" -f ref="refs/tags/v$VERSION" -f sha="$commit" >/dev/null
+          fi
+          echo "Tagged v$VERSION at $commit (version files on top of $SHA)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
           gh release create "v$VERSION" \
             --repo "$REPO" \
-            --target "$SHA" \
+            --verify-tag \
             --title "kmd v$VERSION" \
             --generate-notes \
-            dist/kmd-* dist/SHA256SUMS
+            dist/kmd-* dist/kmd_*.deb dist/SHA256SUMS
+
+  # The version files on main: main only takes reviewed pull requests, so
+  # this job opens one (chore: merging it publishes nothing) with the same
+  # stamping applied to main's current files. It uses BOT_TOKEN, a classic
+  # public_repo token of a bot account that is NOT a collaborator: it pushes
+  # to the bot's own fork (<bot>/kmd) and opens the pull request from there,
+  # so the token cannot push tags, branches or releases here. (A pull request
+  # opened with GITHUB_TOKEN would not run CI, and one opened by the owner
+  # could not be approved by the owner.)
+  version-pr:
+    name: Version pull request for main
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: packages
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DATE: ${{ needs.plan.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0 # the tags, for scripts/sync-version.sh
+          persist-credentials: false
+
+      # main's own (reviewed) script, before the token step; the token step
+      # trusts what it leaves (same boundary: main's reviewed code), and
+      # still runs git without hooks
+      - name: Stamp main's version files
+        run: scripts/sync-version.sh "$VERSION" "$DATE"
+
+      - name: Pull request
+        env:
+          TOKEN: ${{ secrets.BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::BOT_TOKEN is not set: no pull request brings v$VERSION's version files to main."
+            exit 0
+          fi
+          export GH_TOKEN=$TOKEN
+          bot=$(gh api user --jq .login)
+          fork=$bot/${REPO#*/}
+          [[ $fork =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "::error::bad fork '$fork'"; exit 1; }
+          [ "$(gh api "repos/$fork" --jq '.fork and .parent.full_name == env.REPO')" = true ] ||
+            { echo "::error::$fork must be a fork of $REPO (see docs/PACKAGING.md)"; exit 1; }
+          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml"
+          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml)$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected changes:"; echo "$unexpected"
+            exit 1
+          fi
+          if git diff --quiet; then
+            echo "main already has v$VERSION's version files."
+            exit 0
+          fi
+          branch=chore/release-v$VERSION
+          title="chore(release): v$VERSION"
+          git switch -q -c "$branch"
+          # shellcheck disable=SC2086
+          git add -- $files
+          git -c core.hooksPath=/dev/null -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "$title"
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          # the token goes through the environment, never the command line;
+          # --force: a re-run replaces this release's own branch (in the fork)
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" git -c core.hooksPath=/dev/null \
+            push -q --force "https://github.com/$fork.git" "HEAD:refs/heads/$branch"
+
+          # only the bot's own pull request
+          url=$(gh pr list --repo "$REPO" --head "$branch" --author "@me" --state open --json url --jq '.[0].url // empty')
+          if [ -z "$url" ]; then
+            url=$(gh pr create --repo "$REPO" --base main --head "$bot:$branch" --title "$title" --body \
+              "Brings the version files of [v$VERSION](https://github.com/$REPO/releases/tag/v$VERSION) (RPM spec, man page, AppStream release history) to main. Opened by the release workflow; \`chore\`, so merging it publishes no release.")
+          fi
+          # an older version pull request still open is superseded: this one
+          # carries its versions too (scripts/sync-version.sh)
+          gh pr list --repo "$REPO" --state open --author "@me" --search "head:chore/release-v" --json number,headRefName \
+            --jq ".[] | select(.headRefName != \"$branch\" and (.headRefName | test(\"^chore/release-v[0-9]+\\\\.[0-9]+\\\\.[0-9]+$\"))) | .number" |
+            while read -r n; do
+              gh pr close "$n" --repo "$REPO" --comment "Superseded by $url." >/dev/null
+            done
+          echo "Version pull request: $url" >> "$GITHUB_STEP_SUMMARY"
+
+  # Homebrew tap and Scoop bucket: git repositories of this account, written
+  # with a fine-grained token limited to them (contents: write).
+  tap:
+    name: Update ${{ matrix.repo }}
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: packages
+    permissions:
+      contents: read # the release's SHA256SUMS
+      attestations: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - repo: homebrew-tap
+            file: homebrew/Formula/kmd.rb
+          - repo: scoop-bucket
+            file: scoop/bucket/kmd.json
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DATE: ${{ needs.plan.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+          path: kmd
+      - name: Manifests from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SUMS: ${{ needs.publish.outputs.sums }}
+        run: |
+          gh release download "v$VERSION" --repo "$REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
+          # the very file this run published, attested by this workflow
+          echo "$SUMS  $RUNNER_TEMP/release/SHA256SUMS" | sha256sum --strict --quiet -c
+          gh attestation verify "$RUNNER_TEMP/release/SHA256SUMS" --repo "$REPO" \
+            --signer-workflow "$REPO/.github/workflows/release.yml"
+          kmd/scripts/gen-manifests.sh "$VERSION" "$DATE" "$RUNNER_TEMP/release/SHA256SUMS" manifests
+
+      - name: Commit the new version
+        env:
+          TOKEN: ${{ secrets.PACKAGES_TOKEN }}
+          REPO: DipaolaFederico/${{ matrix.repo }}
+          FILE: ${{ matrix.file }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::warning::PACKAGES_TOKEN is not set: $REPO not updated."
+            exit 0
+          fi
+          git clone -q --depth 1 "https://github.com/$REPO.git" repo
+          # only the one generated file, at its fixed path
+          dest=${FILE#*/}
+          install -Dm644 "manifests/$FILE" "repo/$dest"
+          cd repo
+          git add -- "$dest"
+          if git diff --cached --quiet; then
+            echo "$REPO already has kmd $VERSION."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "kmd $VERSION"
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0)
+          echo "::add-mask::$auth"
+          # the token goes through the environment, never the command line
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth" git push -q origin HEAD
+          echo "$REPO: kmd $VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+  aur:
+    name: Update the AUR (kmd-bin)
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: packages
+    permissions:
+      contents: read # the release's SHA256SUMS
+      attestations: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DATE: ${{ needs.plan.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+          path: kmd
+      - name: Manifests from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SUMS: ${{ needs.publish.outputs.sums }}
+        run: |
+          gh release download "v$VERSION" --repo "$REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
+          # the very file this run published, attested by this workflow
+          echo "$SUMS  $RUNNER_TEMP/release/SHA256SUMS" | sha256sum --strict --quiet -c
+          gh attestation verify "$RUNNER_TEMP/release/SHA256SUMS" --repo "$REPO" \
+            --signer-workflow "$REPO/.github/workflows/release.yml"
+          kmd/scripts/gen-manifests.sh "$VERSION" "$DATE" "$RUNNER_TEMP/release/SHA256SUMS" manifests
+
+      - name: Push PKGBUILD and .SRCINFO
+        env:
+          AUR_SSH_KEY: ${{ secrets.AUR_SSH_KEY }}
+        run: |
+          if [ -z "$AUR_SSH_KEY" ]; then
+            echo "::warning::AUR_SSH_KEY is not set: the AUR package was not updated."
+            exit 0
+          fi
+          install -d -m 700 ~/.ssh
+          ( umask 077 && printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur )
+          # pinned host key (fingerprint SHA256:RFzBCUItH9LZS0cKB5UE6ceAYhBD5C8GeOBip8Z11+4,
+          # published on https://aur.archlinux.org)
+          echo 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > ~/.ssh/known_hosts_aur
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$HOME/.ssh/known_hosts_aur"
+          git clone -q ssh://aur@aur.archlinux.org/kmd-bin.git aur
+          cp manifests/aur/PKGBUILD manifests/aur/.SRCINFO aur/
+          cd aur
+          git add PKGBUILD .SRCINFO
+          if git diff --cached --quiet; then
+            echo "The AUR already has kmd-bin $VERSION."
+            exit 0
+          fi
+          git -c user.name="Federico Di Paola" -c user.email="65874112+DipaolaFederico@users.noreply.github.com" \
+            commit -q -m "kmd-bin $VERSION"
+          git push -q origin HEAD:master
+          echo "AUR: kmd-bin $VERSION" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove the key
+        if: always()
+        run: rm -f ~/.ssh/aur
+
+  # winget: a pull request to microsoft/winget-pkgs from the bot's fork
+  # (<bot>/winget-pkgs), with BOT_TOKEN (classic public_repo: fine-grained
+  # tokens cannot open pull requests in other owners' repositories).
+  winget:
+    name: Open a winget-pkgs pull request
+    needs: [plan, publish]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: packages
+    permissions:
+      contents: read # the release's SHA256SUMS
+      attestations: read
+    env:
+      VERSION: ${{ needs.plan.outputs.version }}
+      DATE: ${{ needs.plan.outputs.date }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
+          path: kmd
+      - name: Manifests from the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SUMS: ${{ needs.publish.outputs.sums }}
+        run: |
+          gh release download "v$VERSION" --repo "$REPO" --pattern SHA256SUMS --dir "$RUNNER_TEMP/release"
+          # the very file this run published, attested by this workflow
+          echo "$SUMS  $RUNNER_TEMP/release/SHA256SUMS" | sha256sum --strict --quiet -c
+          gh attestation verify "$RUNNER_TEMP/release/SHA256SUMS" --repo "$REPO" \
+            --signer-workflow "$REPO/.github/workflows/release.yml"
+          kmd/scripts/gen-manifests.sh "$VERSION" "$DATE" "$RUNNER_TEMP/release/SHA256SUMS" manifests
+
+      - name: Pull request
+        env:
+          GH_TOKEN: ${{ secrets.BOT_TOKEN }}
+          UPSTREAM: microsoft/winget-pkgs
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::BOT_TOKEN is not set: no winget-pkgs pull request."
+            exit 0
+          fi
+          bot=$(gh api user --jq .login)
+          [[ $bot =~ ^[A-Za-z0-9-]+$ ]] || { echo "::error::bad bot login '$bot'"; exit 1; }
+          FORK=$bot/winget-pkgs
+          dir=manifests/d/DipaolaFederico/kmd/$VERSION
+          kind="New version"
+          gh api "repos/$UPSTREAM/contents/manifests/d/DipaolaFederico/kmd" >/dev/null 2>&1 || kind="New package"
+          title="$kind: DipaolaFederico.kmd version $VERSION"
+          branch=DipaolaFederico.kmd-$VERSION
+          # a branch of the fork at upstream's head (forks share objects)
+          base=$(gh api "repos/$UPSTREAM/git/ref/heads/master" --jq .object.sha)
+          # (a re-run resets this release's branch)
+          gh api -X POST "repos/$FORK/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null 2>&1 ||
+            gh api -X PATCH "repos/$FORK/git/refs/heads/$branch" -f sha="$base" -F force=true >/dev/null
+          for f in "manifests/winget/$dir"/*.yaml; do
+            gh api -X PUT "repos/$FORK/contents/$dir/${f##*/}" -f message="$title" -f branch="$branch" \
+              -f content="$(base64 -w0 "$f")" >/dev/null
+          done
+          url=$(gh pr list --repo "$UPSTREAM" --head "$branch" --author "@me" --state open --json url --jq '.[0].url // empty')
+          [ -n "$url" ] || url=$(gh pr create --repo "$UPSTREAM" --base master --head "$bot:$branch" --title "$title" \
+            --body "Automated by the [kmd release workflow](https://github.com/DipaolaFederico/kmd/blob/main/.github/workflows/release.yml) for [v$VERSION](https://github.com/DipaolaFederico/kmd/releases/tag/v$VERSION).")
+          echo "winget: $url" >> "$GITHUB_STEP_SUMMARY"

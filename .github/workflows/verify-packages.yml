@@ -1,0 +1,171 @@
+# Verify packages: install the latest release from every distribution channel
+# on a clean runner and check that it runs and reports that version. Run by
+# hand (Actions → Verify packages → Run workflow), e.g. a few minutes after a
+# release, once the channel jobs have finished, and on pull requests that
+# change it. See docs/PACKAGING.md.
+#
+# A job fails only for a cause in kmd or in what this project publishes (our
+# tap, bucket, release assets, the installed binary). Causes outside it are
+# warnings: the winget package not yet merged by its moderators, or Scoop's
+# own installer or winget being unavailable on the runner.
+name: Verify packages
+
+on:
+  workflow_dispatch:
+  # a change to this workflow is tried before it reaches main
+  pull_request:
+    paths: [.github/workflows/verify-packages.yml]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: verify-packages
+  cancel-in-progress: true
+
+jobs:
+  latest:
+    name: Latest release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag=$(gh release view --repo "$REPO" --json tagName --jq .tagName)
+          [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::unexpected latest tag '$tag'"; exit 1; }
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "### Verifying kmd $tag" >> "$GITHUB_STEP_SUMMARY"
+
+  deb:
+    name: Debian/Ubuntu (.deb)
+    needs: latest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      VERSION: ${{ needs.latest.outputs.version }}
+    steps:
+      - name: Download, verify and install
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          cd "$RUNNER_TEMP"
+          deb=kmd_${VERSION}_amd64.deb
+          gh release download "v$VERSION" --repo "$REPO" --pattern "$deb" --pattern SHA256SUMS
+          sha256sum --check --ignore-missing --strict SHA256SUMS
+          gh attestation verify "$deb" --repo "$REPO" --signer-workflow "$REPO/.github/workflows/release.yml"
+          sudo apt-get install -y -qq "./$deb"
+      - name: Check
+        run: |
+          got=$(kmd --version)
+          [ "$got" = "kmd v$VERSION" ] || { echo "::error::kmd --version is '$got'"; exit 1; }
+          echo "# ok" | kmd -c never | grep -q OK
+          man -w kmd
+          test -f /usr/share/bash-completion/completions/kmd
+          echo "- .deb: kmd v$VERSION ✅" >> "$GITHUB_STEP_SUMMARY"
+
+  homebrew:
+    name: Homebrew (macOS)
+    needs: latest
+    runs-on: macos-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.latest.outputs.version }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+      HOMEBREW_NO_INSTALL_CLEANUP: "1"
+      HOMEBREW_NO_ANALYTICS: "1"
+    steps:
+      - name: Install from the tap
+        run: brew install DipaolaFederico/tap/kmd
+      - name: Check
+        run: |
+          got=$(kmd --version)
+          [ "$got" = "kmd v$VERSION" ] || { echo "::error::kmd --version is '$got' (is the tap up to date?)"; exit 1; }
+          echo "# ok" | kmd -c never | grep -q OK
+          brew test DipaolaFederico/tap/kmd
+          man -w kmd
+          test -f "$(brew --prefix)/share/zsh/site-functions/_kmd"
+          echo "- Homebrew (macOS): kmd v$VERSION ✅" >> "$GITHUB_STEP_SUMMARY"
+
+  scoop:
+    name: Scoop (Windows)
+    needs: latest
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.latest.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install Scoop
+        id: scoop
+        run: |
+          # Scoop's own installer: if it is unavailable, that is not kmd's fault
+          try {
+            Invoke-Expression "& {$(Invoke-RestMethod https://get.scoop.sh)} -RunAsAdmin"
+            "ok=true" >> $env:GITHUB_OUTPUT
+          } catch {
+            "::warning::Scoop could not be installed ($_): Scoop not verified."
+            "- Scoop: ⚠️ not verified (Scoop's installer failed)" >> $env:GITHUB_STEP_SUMMARY
+          }
+      - name: Install kmd from the bucket
+        if: steps.scoop.outputs.ok == 'true'
+        run: |
+          $env:PATH = "$env:USERPROFILE\scoop\shims;$env:PATH"
+          scoop bucket add dipaolafederico https://github.com/DipaolaFederico/scoop-bucket
+          if ($LASTEXITCODE) { throw "scoop bucket add failed" }
+          scoop install dipaolafederico/kmd
+          if ($LASTEXITCODE) { throw "scoop install failed" }
+          $got = & "$env:USERPROFILE\scoop\shims\kmd.exe" --version
+          if ($got -ne "kmd v$env:VERSION") { throw "kmd --version is '$got' (is the bucket up to date?)" }
+          $out = "# ok" | & "$env:USERPROFILE\scoop\shims\kmd.exe" -c never -w 40 | Out-String
+          if ($out -notmatch "OK") { throw "kmd did not render: $out" }
+          "- Scoop (Windows): kmd v$env:VERSION ✅" >> $env:GITHUB_STEP_SUMMARY
+
+  winget:
+    name: winget (Windows)
+    needs: latest
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      VERSION: ${{ needs.latest.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Install from winget
+        run: |
+          $skip = {
+            param($why)
+            "::warning::$why"
+            "- winget: ⚠️ not verified ($why)" >> $env:GITHUB_STEP_SUMMARY
+            exit 0
+          }
+          if (-not (Get-Command winget -ErrorAction SilentlyContinue)) { & $skip "winget is not available on this runner" }
+          winget source update --disable-interactivity | Out-Null
+          # not yet published (the winget-pkgs pull request is reviewed by its
+          # moderators, which can take days): a warning, not a failure
+          $versions = winget show --id DipaolaFederico.kmd --exact --versions --accept-source-agreements --disable-interactivity | Out-String
+          if ($LASTEXITCODE) { & $skip "DipaolaFederico.kmd is not in the winget catalog yet" }
+          if ($versions -notmatch "(?m)^\s*$([regex]::Escape($env:VERSION))\s*$") { & $skip "winget does not have $env:VERSION yet" }
+
+          # from here on a failure is ours: the published package must work
+          winget install --id DipaolaFederico.kmd --exact --version $env:VERSION `
+            --accept-source-agreements --accept-package-agreements --disable-interactivity
+          if ($LASTEXITCODE) { throw "winget install failed ($LASTEXITCODE)" }
+          $kmd = "$env:LOCALAPPDATA\Microsoft\WinGet\Links\kmd.exe"
+          $got = & $kmd --version
+          if ($got -ne "kmd v$env:VERSION") { throw "kmd --version is '$got'" }
+          $out = "# ok" | & $kmd -c never -w 40 | Out-String
+          if ($out -notmatch "OK") { throw "kmd did not render: $out" }
+          "- winget (Windows): kmd v$env:VERSION ✅" >> $env:GITHUB_STEP_SUMMARY

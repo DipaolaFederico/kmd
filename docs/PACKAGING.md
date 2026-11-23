@@ -110,6 +110,25 @@ The flake builds whatever commit it is pointed at, so `kmd --version` from
 the flake prints `0-unstable-DATE-COMMIT`. `nix run
 github:DipaolaFederico/kmd/vX.Y.Z` builds exactly the released source.
 
+## Verifying the published packages
+
+After a release, run *Actions → Verify packages → Run workflow*
+([`verify-packages.yml`](../.github/workflows/verify-packages.yml)). On
+clean runners it installs the latest release:
+
+- the `.deb` on Ubuntu, after verifying its checksum and attestation;
+- Homebrew on macOS;
+- Scoop and winget on Windows.
+
+Each job checks that `kmd --version` matches the release and that kmd
+renders; where the channel installs them, it also checks the man page and
+completions.
+
+A job fails only for causes in kmd or in what this project publishes. It
+only warns when the cause is elsewhere: the winget package is still
+waiting for its moderators, or Scoop's installer or winget is unavailable on
+the runner. The job summary lists what was verified and what was not.
+
 ## Testing a channel without a release
 
 `scripts/gen-manifests.sh` and `scripts/package-deb.sh` run anywhere. With

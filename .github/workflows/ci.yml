@@ -78,7 +78,7 @@ jobs:
               exit 0
             fi
           done
-          outside='^((README|CONTRIBUTING|SECURITY)\.md|LICENSE|\.gitignore|docs/PACKAGING\.md|\.github/(ISSUE_TEMPLATE/.*|pull_request_template\.md|CODEOWNERS|dependabot\.yml|workflows/(release|pr-conventions)\.yml))$'
+          outside='^((README|CONTRIBUTING|SECURITY)\.md|LICENSE|\.gitignore|docs/PACKAGING\.md|\.github/(ISSUE_TEMPLATE/.*|pull_request_template\.md|CODEOWNERS|dependabot\.yml|workflows/(release|pr-conventions|verify-packages)\.yml))$'
           if grep -qvE "$outside" <<<"$files"; then
             echo "project=true" >> "$GITHUB_OUTPUT"
           else

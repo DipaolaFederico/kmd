@@ -110,15 +110,17 @@ perf: build
 	@echo '» perf (end-to-end, < $(PERF_MAX_MS) ms)'
 	@./scripts/perf.sh $(BIN) testdata/sample.md $(PERF_MAX_MS) $(PERF_RUNS)
 
-## Packaging (Fedora) -------------------------------------------------------
+## Packaging -----------------------------------------------------------------
+# STRICT=1 (CI) fails when a package validator (ruby, dpkg-deb, lintian,
+# python3-yaml) is missing instead of skipping it.
 packaging: build
-	@echo '» packaging metadata (man page, AppStream, completions, spec version)'
+	@echo '» packaging metadata (man page, AppStream, completions, spec version, packages)'
 	@groff -man -Tutf8 -ww -z docs/kmd.1
 	@appstreamcli validate --no-net --pedantic packaging/$(APPID).metainfo.xml >/dev/null
 	@for sh in bash zsh fish; do $(BIN) --completion $$sh >/dev/null || exit 1; done
 	@grep -q '"kmd $(VERSION_RPM)"' docs/kmd.1 || { echo "  docs/kmd.1 version != spec $(VERSION_RPM)"; exit 1; }
 	@grep -q 'version="$(VERSION_RPM)"' packaging/$(APPID).metainfo.xml || { echo "  metainfo lacks release $(VERSION_RPM)"; exit 1; }
-	@echo '  ok'
+	@STRICT=$(STRICT) ./scripts/check-packages.sh $(BIN)
 
 # Source tarball with the layout of a GitHub release archive (kmd-X.Y.Z/).
 # Uses the files git tracks or would track (works before the first commit).

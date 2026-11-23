@@ -50,6 +50,28 @@ eq '.TH KMD 1 "2030-01-02" "kmd 9.8.7" "User Commands"' "$(head -1 "$tmp/docs/km
 eq 1 "$(grep -c '<release version="9.8.7" date="2030-01-02"/>' "$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml")" "metainfo"
 if "$tmp/scripts/stamp-version.sh" 1.2 2030-01-02 >/dev/null 2>&1; then eq rejected accepted "stamp bad version"; fi
 
+# sync-version.sh (the copy above, now at 9.8.7, as a git repository with
+# releases the files missed)
+cp scripts/sync-version.sh "$tmp/scripts/"
+meta=$tmp/packaging/io.github.dipaolafederico.kmd.metainfo.xml
+(
+  cd "$tmp"
+  export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
+  git init -q && git add -A && GIT_COMMITTER_DATE=2030-01-02T12:00:00Z git commit -qm a
+  git tag v9.8.7
+  for t in 9.8.8:2030-01-05 9.9.0:2030-01-09 10.0.0-rc1:2030-01-10; do
+    GIT_COMMITTER_DATE=${t#*:}T12:00:00Z git commit -q --allow-empty -m "${t%%:*}"
+    git tag "v${t%%:*}"
+  done
+  scripts/sync-version.sh 9.10.0 2030-02-03 >/dev/null
+  scripts/sync-version.sh 9.10.0 2030-02-03 >/dev/null # idempotent
+)
+eq "Version:                9.10.0" "$(grep '^Version:' "$tmp/packaging/kmd.spec")" "sync: spec"
+eq '"kmd 9.10.0"' "$(head -1 "$tmp/docs/kmd.1" | grep -o '"kmd [^"]*"')" "sync: man page"
+eq "9.10.0 2030-02-03,9.9.0 2030-01-09,9.8.8 2030-01-05,9.8.7 2030-01-02," \
+  "$(sed -n -E 's/.*<release version="([^"]*)" date="([^"]*)".*/\1 \2/p' "$meta" | head -4 | tr '\n' ,)" "sync: metainfo history"
+if (cd "$tmp" && scripts/sync-version.sh 9.9.1 2030-02-04 >/dev/null 2>&1); then eq rejected accepted "sync older version"; fi
+
 # gen-emoji.py: the committed emoji table matches its Unicode-name source
 if command -v python3 >/dev/null && command -v gofmt >/dev/null; then
   # a Python whose Unicode database is too old exits 3: skip the check

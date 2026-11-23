@@ -161,10 +161,14 @@ build-provenance attestation; its notes list the merged pull requests.
   other user. Manual releases skip both conditions above.
 - Verify a download with `sha256sum -c SHA256SUMS --ignore-missing` and its
   origin with `gh attestation verify <file> --repo DipaolaFederico/kmd`.
-- The version is stamped into the RPM spec, the man page and the AppStream
-  metadata of the published artifacts by `scripts/stamp-version.sh`; the
-  copies in the repository are not rewritten (`main` only accepts reviewed
-  pull requests, the release workflow cannot push to it).
+- The version files (RPM spec, man page and AppStream metadata, one
+  `<release>` per version) are stamped by `scripts/sync-version.sh`. The tag
+  points to a commit that adds them on top of the released commit, so the
+  tag and the source tarball carry the released version. `main` only accepts
+  reviewed pull requests, so the workflow then opens one,
+  `chore(release): vX.Y.Z`, with the same files: review and merge it
+  (merging it publishes nothing). If one is still open at the next release,
+  the new one replaces it and includes its versions.
 
 ### The public Go package
 
@@ -203,7 +207,7 @@ make hooks   # run `make ci` before every git push
 | coverage    | `go test -coverprofile`                              | ≥ 90 % (`COVER_MIN`)            |
 | security    | `govulncheck` + `gosec`                              | no issues                       |
 | build       | `go build -trimpath`, `CGO_ENABLED=0`                | static binary                   |
-| packaging   | `groff`, `appstreamcli --pedantic`, completions      | valid Fedora metadata           |
+| packaging   | `groff`, `appstreamcli --pedantic`, completions, `scripts/check-packages.sh` | valid Fedora metadata; formula, PKGBUILD, Scoop/winget manifests and `.deb` (`STRICT=1` in CI) |
 | performance | `scripts/perf.sh` (whole process, 200 runs)          | p50 and exec-adjusted p95 < 10 ms (`PERF_MAX_MS`) |
 
 Extras: `make spec` (conformance), `make fuzz` (5 fuzzers), `make bench`,
@@ -229,8 +233,9 @@ first run needs network access). They are never linked into the binary.
 | `internal/bridge`  | public options → internal ones, shared with the CLI  |
 | `main.go`          | entry point: terminal and cell size, GC tuning       |
 | `docs/`            | man page, packaging guide, README screenshot         |
-| `scripts/`         | perf gate, release helpers and their tests           |
+| `scripts/`         | perf gate, release and packaging helpers, their tests |
 | `packaging/`       | Fedora RPM spec and AppStream metadata               |
+| `flake.nix`        | Nix flake (`nix run github:DipaolaFederico/kmd`)     |
 
 ## Reporting security issues
 

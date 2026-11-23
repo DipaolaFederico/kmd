@@ -4,6 +4,7 @@ package main
 import (
 	"os"
 	"runtime/debug"
+	"time"
 
 	"github.com/DipaolaFederico/kmd/internal/cli"
 	"github.com/DipaolaFederico/kmd/internal/term"
@@ -27,6 +28,9 @@ func main() {
 		StdoutTTY: outTTY,
 		Cols:      cols,
 		Rows:      rows,
+		// bounded wait for terminals that answer neither query; local
+		// ones answer in well under a millisecond
+		LightBackground: func() (bool, bool) { return term.LightBackground("/dev/tty", 100*time.Millisecond) },
 	}
 	if pw, ph, ok := term.PixelSize(os.Stdout.Fd()); ok && cols > 0 && rows > 0 {
 		env.CellW, env.CellH = pw/cols, ph/rows

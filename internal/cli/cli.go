@@ -62,6 +62,9 @@ type Env struct {
 	StdoutTTY      bool
 	Cols, Rows     int
 	CellW, CellH   int // terminal cell size in pixels (0 = unknown)
+	// LightBackground asks the terminal whether its background is light
+	// (ok false: no answer); nil never asks.
+	LightBackground func() (light, ok bool)
 	// Pager displays content through a pager; nil uses the system pager.
 	Pager func(content, command string) error
 	// View runs the built-in interactive viewer; nil uses the terminal.
@@ -112,7 +115,8 @@ current one) and S searches the text of all its documents.
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
-  -t, --theme NAME         color theme or path to a .theme file (default: auto)
+  -t, --theme NAME         color theme or path to a .theme file (default: auto,
+                           light or dark like the terminal; kmd --config says why)
   -c, --color WHEN         auto | always | never
   -i, --images MODE        auto | blocks | kitty | iterm2 | sixel | none
       --hyperlinks WHEN    clickable OSC 8 links: auto | always | never
@@ -277,10 +281,11 @@ type settings struct {
 	pager      string // "builtin" = the interactive viewer
 	mdOpt      md.Options
 	themeNm    string
-	fixedWidth int  // --width / width (0 = follow the terminal)
-	maxWidth   int  // cap for the automatic width
-	mouse      bool // the viewer reports clicks and the wheel
-	alwaysView bool // --view / view = always: viewer even for short documents
+	themeSrc   string // what chose the theme with theme = auto ("" otherwise)
+	fixedWidth int    // --width / width (0 = follow the terminal)
+	maxWidth   int    // cap for the automatic width
+	mouse      bool   // the viewer reports clicks and the wheel
+	alwaysView bool   // --view / view = always: viewer even for short documents
 }
 
 // builtinPager names the interactive viewer in KMD_PAGER / pager.
@@ -295,14 +300,32 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-// isLightBackground interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light.
-func isLightBackground(getenv func(string) string) bool {
-	fgbg := getenv("COLORFGBG")
-	if fgbg == "" {
-		return false
-	}
+// isLightFGBG interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light.
+func isLightFGBG(fgbg string) bool {
 	n, err := strconv.Atoi(fgbg[strings.LastIndexByte(fgbg, ';')+1:])
 	return err == nil && n != 8 && n >= 7 && n <= 15
+}
+
+// Sources of the light/dark choice of theme = auto, for kmd --config.
+const (
+	srcFGBG    = "COLORFGBG"
+	srcOSC11   = "OSC 11 terminal background"
+	srcDefault = "no background information, dark"
+)
+
+// lightBackground decides between the light and dark default themes and
+// names the source that decided. $COLORFGBG is free to read, so it wins when
+// set; otherwise the terminal is asked when ask allows it, else dark.
+func lightBackground(env Env, ask bool) (light bool, source string) {
+	if fgbg := env.Getenv("COLORFGBG"); fgbg != "" {
+		return isLightFGBG(fgbg), srcFGBG
+	}
+	if ask && env.LightBackground != nil {
+		if light, ok := env.LightBackground(); ok {
+			return light, srcOSC11
+		}
+	}
+	return false, srcDefault
 }
 
 // resolve turns flags, configuration and environment into settings. The
@@ -334,8 +357,13 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 
 	name := firstNonEmpty(o.theme, get("KMD_THEME"), cfg.Theme, "auto")
 	if name == "auto" {
+		// the query goes to the terminal kmd is drawing on, interactively:
+		// never into a pipe, a file, or output without colours
+		ask := env.StdinTTY && env.StdoutTTY && pub.Color && !o.html && get("TERM") != "dumb"
+		var light bool
+		light, s.themeSrc = lightBackground(env, ask)
 		name = firstNonEmpty(cfg.DarkTheme, "tokyo-night")
-		if isLightBackground(get) {
+		if light {
 			name = firstNonEmpty(cfg.LightTheme, "tokyo-night-day")
 		}
 	}

@@ -9,6 +9,16 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- `theme = auto` (the default) now asks the terminal for its background
+  color (OSC 11) when `COLORFGBG` is not set, so light terminals such as
+  GNOME Terminal, kitty, WezTerm, Alacritty, foot, Konsole, iTerm2 and
+  Windows Terminal get the light theme. The terminal is only asked when
+  colors are on and both standard input and output are the terminal, and
+  kmd waits at most 0.2 s for terminals that do not answer. `kmd --config`
+  shows what chose the theme.
+
 ## [0.13.0] - 2026-11-23
 
 ## [0.12.0] - 2026-11-23

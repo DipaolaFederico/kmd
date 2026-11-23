@@ -1007,3 +1007,55 @@ func TestBase(t *testing.T) {
 		t.Errorf("slide links: %v", err)
 	}
 }
+
+func TestAutoThemeBackground(t *testing.T) {
+	asked := 0
+	terminal := func(light, ok bool, vars map[string]string) func(*Env) {
+		return func(e *Env) {
+			e.StdinTTY, e.StdoutTTY, e.Cols, e.Rows = true, true, 80, 24
+			e.Getenv = envMap(vars)
+			e.LightBackground = func() (bool, bool) { asked++; return light, ok }
+		}
+	}
+	for _, tc := range []struct {
+		name  string
+		env   func(*Env)
+		args  []string
+		asked int
+		want  string
+	}{
+		{"light terminal", terminal(true, true, nil), nil, 1, "tokyo-night-day (auto: OSC 11 terminal background)"},
+		{"dark terminal", terminal(false, true, nil), nil, 1, "tokyo-night (auto: OSC 11 terminal background)"},
+		{"no answer", terminal(true, false, nil), nil, 1, "tokyo-night (auto: no background information, dark)"},
+		{"COLORFGBG wins", terminal(false, true, map[string]string{"COLORFGBG": "0;15"}), nil, 0, "tokyo-night-day (auto: COLORFGBG)"},
+		{"theme chosen", terminal(true, true, nil), []string{"-t", "nord"}, 0, "theme        nord\n"},
+		{"KMD_THEME", terminal(true, true, map[string]string{"KMD_THEME": "dracula"}), nil, 0, "theme        dracula\n"},
+		{"color never", terminal(true, true, nil), []string{"-c", "never"}, 0, "(auto: no background"},
+		{"NO_COLOR", terminal(true, true, map[string]string{"NO_COLOR": "1"}), nil, 0, "(auto: no background"},
+		{"TERM dumb", terminal(true, true, map[string]string{"TERM": "dumb"}), []string{"-c", "always"}, 0, "(auto: no background"},
+		{"stdin not a terminal", func(e *Env) { terminal(true, true, nil)(e); e.StdinTTY = false }, nil, 0, "(auto: no background"},
+		{"stdout not a terminal", func(e *Env) { terminal(true, true, nil)(e); e.StdoutTTY = false }, []string{"-c", "always"}, 0, "(auto: no background"},
+	} {
+		asked = 0
+		r := run(t, tc.env, append(tc.args, "--config")...)
+		if asked != tc.asked || !strings.Contains(r.out, tc.want) {
+			t.Errorf("%s: asked %d times; output:\n%s", tc.name, asked, r.out)
+		}
+	}
+	// the terminal is never asked for HTML, nor into a pipe
+	asked = 0
+	run(t, terminal(true, true, nil), "--html")
+	run(t, func(e *Env) { terminal(true, true, nil)(e); e.StdoutTTY = false }, "-P")
+	if asked != 0 {
+		t.Errorf("asked %d times", asked)
+	}
+	// a document on a light terminal is drawn with the light theme, once
+	light := run(t, terminal(true, true, nil), "-P", "-")
+	if asked != 1 {
+		t.Errorf("asked %d times for one document", asked)
+	}
+	dark := run(t, terminal(false, true, nil), "-P", "-")
+	if light.out == dark.out || light.code != 0 {
+		t.Error("the background did not change the colours")
+	}
+}

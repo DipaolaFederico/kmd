@@ -113,6 +113,7 @@ fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzMermaid -fuzztime=$(FUZZ_TIME) ./internal/diagram/
 	$(GO) test -run='^$$' -fuzz=FuzzDisplay -fuzztime=$(FUZZ_TIME) ./internal/tex/
 	$(GO) test -run='^$$' -fuzz=FuzzDataURI -fuzztime=$(FUZZ_TIME) ./internal/termimg/
+	$(GO) test -run='^$$' -fuzz=FuzzBackground -fuzztime=$(FUZZ_TIME) ./internal/term/
 
 bench:
 	$(GO) test -run='^$$' -bench=. -benchmem ./internal/render/

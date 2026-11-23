@@ -723,6 +723,10 @@ func TestClipLongAndExternalClicks(t *testing.T) {
 	if d := time.Since(start); d > testlimit.Scale()*time.Second {
 		t.Errorf("clip of 1 MiB took %v", d)
 	}
+	testlimit.Linear(t, "clip", 1<<20, func(n int) func() {
+		s := strings.Repeat("日a", n)
+		return func() { _ = clip(s, n) }
+	})
 	if clip("12345", 5) != "12345" || clip("123456", 5) != "1234…" || clip("日本語", 6) != "日本語" || clip("日本語x", 6) != "日本…" {
 		t.Errorf("clip edges: %q %q", clip("123456", 5), clip("日本語x", 6))
 	}

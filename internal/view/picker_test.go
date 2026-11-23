@@ -496,3 +496,30 @@ func TestPickerFilterFast(t *testing.T) {
 		t.Errorf("filtering 10,000 files took %v per keystroke", d)
 	}
 }
+
+// TestPickerLinear: filtering and searching grow linearly with the number
+// of documents and the length of a document.
+func TestPickerLinear(t *testing.T) {
+	testlimit.Linear(t, "filter", 1<<16, func(n int) func() {
+		docs := make([]doc, n)
+		for i := range docs {
+			docs[i] = doc{name: "dir-" + strconv.Itoa(i%97) + "/sub/file-" + strconv.Itoa(i) + ".md"}
+		}
+		q := newQuery("ds") // matches every name: the sort is the whole list
+		var out []int
+		return func() { out = filterDocs(docs, q, out) }
+	})
+	for name, line := range map[string]string{
+		"lines":    "a needle in a line\n",
+		"headings": "# needle\n",
+		"setext":   "needle\n===\n",
+		"fences":   "```\nneedle\n",
+		"no match": "nothing to see here\n",
+	} {
+		testlimit.Linear(t, "search "+name, 1<<16, func(n int) func() {
+			data := []byte(strings.Repeat(line, n))
+			hay := lowerASCII(nil, data)
+			return func() { scanDoc(doc{}, data, hay, []byte("needle"), false, 1<<30) }
+		})
+	}
+}

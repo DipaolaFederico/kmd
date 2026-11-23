@@ -227,6 +227,29 @@ func TestHighlightPathological(t *testing.T) {
 			t.Errorf("%s: %v for %d languages", name, d, len(langDefs)+1)
 		}
 	}
+	// the same patterns n times, all languages at once (one check per
+	// language would cost seconds)
+	for name, unit := range map[string]string{
+		"unterminated quotes": `"'` + "`",
+		"escapes":             `"\`,
+		"comment openers":     "/*(*{-#|#[#=/+<#<!--",
+		"comment closers":     "*/*)-}|#]#=#+/#>-->",
+		"long strings":        `"""'''''`,
+		"identifiers":         "a1_b-c ",
+		"sigils and prefixes": `$@%\.$` + "`",
+		"numbers":             "1.",
+		"spaces":              " ",
+		"many lines":          "x /* y\n",
+	} {
+		testlimit.Linear(t, name, n, func(n int) func() {
+			in := strings.Repeat(unit, n)
+			return func() {
+				for i := range langDefs {
+					_ = highlight(in, strings.Fields(langDefs[i].aliases)[0], &Dark)
+				}
+			}
+		})
+	}
 }
 
 func FuzzHighlight(f *testing.F) {

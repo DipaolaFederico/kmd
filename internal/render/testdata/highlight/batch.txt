@@ -1,0 +1,17 @@
+@echo off
+rem configure
+set NAME=world
+:: label comment
+if exist "%NAME%.txt" (echo found 42) else echo missing
+for %%f in (*.md) do call :show %%f
+goto :eof
+echo "unterminated
+-- golden --
+@«k|echo» «k|off»
+«c|rem configure»
+«k|set» NAME=world
+«c|:: label comment»
+«k|if» «k|exist» «s|"%NAME%.txt"» («k|echo» found «n|42») «k|else» «k|echo» missing
+«k|for» %«t|%f» «k|in» (*.md) «k|do» «k|call» :show %«t|%f»
+«k|goto» :eof
+«k|echo» «s|"unterminated»

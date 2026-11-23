@@ -1,0 +1,23 @@
+defmodule Greeter do # module
+  @default "world"
+  def hello(name \\ @default) do
+    IO.puts("Hello, #{name}" <> 'x')
+    {:ok, 42, 1.5}
+  end
+end
+doc = """
+multi-line
+"""
+s = "unterminated
+-- golden --
+«k|defmodule» «t|Greeter» «k|do» «c|# module»
+  «t|@default» «s|"world"»
+  «k|def» «f|hello»(name \\ «t|@default») «k|do»
+    «f|IO».«f|puts»(«s|"Hello, #{name}"» <> «s|'x'»)
+    {:ok, «n|42», «n|1.5»}
+  «k|end»
+«k|end»
+doc = «s|"""»
+«s|multi-line»
+«s|"""»
+s = «s|"unterminated»

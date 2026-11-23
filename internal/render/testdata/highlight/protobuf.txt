@@ -1,0 +1,19 @@
+syntax = "proto3"; // version
+package app;
+message User {
+  string name = 1;
+  repeated int32 ids = 2; /* list */
+  optional double score = 3;
+}
+option go_package = "unterminated
+/* open
+-- golden --
+«k|syntax» = «s|"proto3"»; «c|// version»
+«k|package» app;
+«k|message» «t|User» {
+  «t|string» name = «n|1»;
+  «k|repeated» «t|int32» ids = «n|2»; «c|/* list */»
+  «k|optional» «t|double» score = «n|3»;
+}
+«k|option» go_package = «s|"unterminated»
+«c|/* open»

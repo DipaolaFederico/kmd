@@ -1,0 +1,19 @@
+// build script
+plugins { id 'java' }
+def greet(String name) { return "Hello, ${name}" }
+def n = 42 + 1.5 /* math */
+println greet('x') + n
+def doc = """multi
+line"""
+def s = "unterminated
+/* open
+-- golden --
+«c|// build script»
+«f|plugins» { id «s|'java'» }
+«k|def» «f|greet»(«t|String» name) { «k|return» «s|"Hello, ${name}"» }
+«k|def» n = «n|42» + «n|1.5» «c|/* math */»
+«f|println» «f|greet»(«s|'x'») + n
+«k|def» doc = «s|"""multi»
+«s|line"""»
+«k|def» s = «s|"unterminated»
+«c|/* open»

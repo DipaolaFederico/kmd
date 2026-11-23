@@ -1,0 +1,13 @@
+;;; utilities
+(defun square (x) (* x x)) #| block #| nested |# |#
+(defvar *count* 42)
+(format t "~a~%" (square 1.5))
+(let ((s "unterminated
+#| open
+-- golden --
+«c|;;; utilities»
+(«k|defun» square («f|x») (* x x)) «c|#| block #| nested |# |#»
+(«k|defvar» *count* «n|42»)
+(«f|format» «k|t» «s|"~a~%"» («f|square» «n|1.5»))
+(«k|let» ((«f|s» «s|"unterminated»
+«c|#| open»

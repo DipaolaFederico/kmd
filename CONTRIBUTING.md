@@ -192,6 +192,32 @@ change at any time. From v1.0.0 on, `render` follows semantic versioning:
 - The safe defaults are part of the contract: the zero `Options` must never
   read files, and images stay confined to `BaseDir`.
 
+## Adding a language
+
+Syntax highlighting is table driven: a language is data, not code.
+
+1. Add an entry to `langDefs` in `internal/render/langs.go`: its name (as
+   the README shows it), its fence names and file extensions (lowercase,
+   not used by another language), its keywords, built-in types and
+   functions, and its lexical rules — line and block comments (and whether
+   they nest), string quotes, multi-line strings, variable sigils such as
+   `$`, directive prefixes such as `@` or `\`. The fields are documented on
+   `langDef`; copy a similar language as a start. If a language really
+   needs a rule the tokenizer lacks, add it to `highlight.go` as a new
+   `langDef` field, keeping it linear (every step consumes input; only
+   comments and strings carry state to the next line).
+2. Write `internal/render/testdata/highlight/<first fence name>.txt`: a
+   short sample with keywords, strings, comments and numbers, ending with an
+   unterminated string and, if the language has them, an unterminated block
+   comment.
+3. Run `go test ./internal/render -run Golden -update`, then **read** the
+   golden section it wrote under the sample (`«k|…»` keyword, `«t|…»` type
+   or variable, `«f|…»` function, `«s|…»` string, `«n|…»` number, `«c|…»`
+   comment) and fix the entry until it looks right.
+4. Add the language to the lists in `README.md` ("Syntax highlighting") and
+   `docs/kmd.1` (SYNTAX HIGHLIGHTING); `go test ./internal/render` checks
+   them, the fence names, and that tokenizing stays linear on hostile input.
+
 ## Local CI
 
 ```sh
@@ -210,7 +236,7 @@ make hooks   # run `make ci` before every git push
 | packaging   | `groff`, `appstreamcli --pedantic`, completions, `scripts/check-packages.sh` | valid Fedora metadata; formula, PKGBUILD, Scoop/winget manifests and `.deb` (`STRICT=1` in CI) |
 | performance | `scripts/perf.sh` (whole process, 200 runs)          | p50 and exec-adjusted p95 < 10 ms (`PERF_MAX_MS`) |
 
-Extras: `make spec` (conformance), `make fuzz` (5 fuzzers), `make bench`,
+Extras: `make spec` (conformance), `make fuzz` (6 fuzzers), `make bench`,
 `make rpm`.
 
 Lint and security tools are installed at pinned versions into `.tools/` (the

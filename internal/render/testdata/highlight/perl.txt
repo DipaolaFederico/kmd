@@ -1,0 +1,15 @@
+use strict; # pragmas
+my @items = (1, 2.5, 42);
+my %ages = (ann => 30);
+foreach my $i (@items) {
+    print "item: $i\n", 'raw';
+}
+my $s = "unterminated
+-- golden --
+«k|use» strict; «c|# pragmas»
+«k|my» «t|@items» = («n|1», «n|2.5», «n|42»);
+«k|my» «t|%ages» = (ann => «n|30»);
+«k|foreach» «k|my» «t|$i» («t|@items») {
+    «f|print» «s|"item: $i\n"», «s|'raw'»;
+}
+«k|my» «t|$s» = «s|"unterminated»

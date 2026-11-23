@@ -1,0 +1,15 @@
+/* theme */
+body { color: #333; margin: 0 auto; }
+a:hover { color: red !important; width: 50%; }
+.box { content: "x"; z-index: 10; }
+// scss line comment
+p { font: 'unterminated
+/* open
+-- golden --
+«c|/* theme */»
+body { color: #«n|333»; margin: «n|0» «k|auto»; }
+a:hover { color: red !«k|important»; width: «n|50»%; }
+.box { content: «s|"x"»; z-index: «n|10»; }
+«c|// scss line comment»
+p { font: «s|'unterminated»
+«c|/* open»

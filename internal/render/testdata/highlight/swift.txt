@@ -1,0 +1,15 @@
+import Foundation // module
+struct Point { var x = 0; var y = 1.5 }
+func greet(name: String) -> String {
+    return "Hello, " + name /* greet */
+}
+let s = "unterminated
+/* open
+-- golden --
+«k|import» «t|Foundation» «c|// module»
+«k|struct» «t|Point» { «k|var» x = «n|0»; «k|var» y = «n|1.5» }
+«k|func» «f|greet»(name: «t|String») -> «t|String» {
+    «k|return» «s|"Hello, "» + name «c|/* greet */»
+}
+«k|let» s = «s|"unterminated»
+«c|/* open»

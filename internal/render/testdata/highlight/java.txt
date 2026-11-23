@@ -1,0 +1,19 @@
+package app; // package
+public class Main {
+    public static void main(String[] args) {
+        int n = 42;
+        System.out.println("n = " + n * 1.5); /* print */
+    }
+}
+String s = "unterminated
+/* open
+-- golden --
+«k|package» app; «c|// package»
+«k|public» «k|class» «t|Main» {
+    «k|public» «k|static» «k|void» «f|main»(«t|String»[] args) {
+        «k|int» n = «n|42»;
+        «t|System».out.«f|println»(«s|"n = "» + n * «n|1.5»); «c|/* print */»
+    }
+}
+«t|String» s = «s|"unterminated»
+«c|/* open»

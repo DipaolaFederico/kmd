@@ -1,0 +1,15 @@
+# script
+param([string]$Name = "world")
+function Get-Greeting { return "Hello, $Name" + 'x' }
+$items = 1, 2.5, 42 <# block #>
+foreach ($i in $items) { Write-Host $i }
+$s = "unterminated
+<# open
+-- golden --
+«c|# script»
+«k|param»([string]«t|$Name» = «s|"world"»)
+«k|function» Get-Greeting { «k|return» «s|"Hello, $Name"» + «s|'x'» }
+«t|$items» = «n|1», «n|2.5», «n|42» «c|<# block #>»
+«k|foreach» («t|$i» «k|in» «t|$items») { «f|Write-Host» «t|$i» }
+«t|$s» = «s|"unterminated»
+«c|<# open»

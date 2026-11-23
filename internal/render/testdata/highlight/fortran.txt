@@ -1,0 +1,15 @@
+program hello ! main
+  implicit none
+  integer :: n = 42
+  real :: x = 1.5
+  print *, "n = ", n, 'x'
+end program hello
+s = "unterminated
+-- golden --
+«k|program» hello «c|! main»
+  «k|implicit» «k|none»
+  «k|integer» :: n = «n|42»
+  «k|real» :: x = «n|1.5»
+  «k|print» *, «s|"n = "», n, «s|'x'»
+«k|end» «k|program» hello
+s = «s|"unterminated»

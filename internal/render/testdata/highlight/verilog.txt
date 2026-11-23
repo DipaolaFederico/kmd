@@ -1,0 +1,19 @@
+`timescale 1ns/1ps
+module counter(input clk, output reg [7:0] q); // counter
+  always @(posedge clk) begin
+    q <= q + 8'd1; /* increment */
+    $display("q = %d", 42);
+  end
+endmodule
+s = "unterminated
+/* open
+-- golden --
+«k|`timescale» «n|1ns»/«n|1ps»
+«k|module» «f|counter»(«k|input» clk, «k|output» «k|reg» [«n|7»:«n|0»] q); «c|// counter»
+  «k|always» @(«k|posedge» clk) «k|begin»
+    q <= q + «n|8»'d1; «c|/* increment */»
+    «k|$display»(«s|"q = %d"», «n|42»);
+  «k|end»
+«k|endmodule»
+s = «s|"unterminated»
+«c|/* open»

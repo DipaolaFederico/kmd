@@ -1,0 +1,15 @@
+require "http" # library
+class Greeter
+  def initialize(@name : String = "world")
+  end
+  def greet = puts "Hi #{@name}" + 42.to_s + 1.5.to_s
+end
+s = "unterminated
+-- golden --
+«k|require» «s|"http"» «c|# library»
+«k|class» «t|Greeter»
+  «k|def» «f|initialize»(«t|@name» : «t|String» = «s|"world"»)
+  «k|end»
+  «k|def» greet = «f|puts» «s|"Hi #{@name}"» + «n|42.to_s» + «n|1.5.to_s»
+«k|end»
+s = «s|"unterminated»

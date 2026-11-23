@@ -1,0 +1,17 @@
+# build
+.PHONY: all
+all: bin/kmd
+bin/kmd: main.go
+	go build -o $@ "$(PKG)" ${FLAGS} 2
+ifeq ($(OS),Windows)
+endif
+X = "unterminated
+-- golden --
+«c|# build»
+.PHONY: all
+all: bin/kmd
+bin/kmd: main.go
+	go build -o $@ «s|"$(PKG)"» «t|${FLAGS}» «n|2»
+«k|ifeq» ($(OS),Windows)
+«k|endif»
+X = «s|"unterminated»

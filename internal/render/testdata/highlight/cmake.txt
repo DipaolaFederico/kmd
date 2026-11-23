@@ -1,0 +1,15 @@
+# project
+cmake_minimum_required(VERSION 3.20)
+project(kmd LANGUAGES C)
+set(SOURCES main.c util.c)
+add_executable(kmd ${SOURCES})
+if(WIN32) message(STATUS "windows" 42) endif()
+set(S "unterminated
+-- golden --
+«c|# project»
+«k|cmake_minimum_required»(VERSION «n|3.20»)
+«k|project»(kmd LANGUAGES C)
+«k|set»(SOURCES main.c util.c)
+«k|add_executable»(kmd «t|${SOURCES}»)
+«k|if»(WIN32) «k|message»(STATUS «s|"windows"» «n|42») «k|endif»()
+«k|set»(S «s|"unterminated»

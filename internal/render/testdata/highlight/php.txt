@@ -1,0 +1,17 @@
+<?php // script
+class User {
+    public function name() { return "Ann" . 'Lee'; }
+}
+$n = 42 + 1.5; /* math */
+echo $n;
+$s = "unterminated
+/* open
+-- golden --
+<?php «c|// script»
+«k|class» «t|User» {
+    «k|public» function «f|name»() { «k|return» «s|"Ann"» . «s|'Lee'»; }
+}
+$n = «n|42» + «n|1.5»; «c|/* math */»
+echo $n;
+$s = «s|"unterminated»
+«c|/* open»

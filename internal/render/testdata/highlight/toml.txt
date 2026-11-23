@@ -1,0 +1,15 @@
+# config
+title = "kmd"
+[server]
+port = 8080
+ratio = 0.75
+debug = false
+name = 'unterminated
+-- golden --
+«c|# config»
+«f|title» = «s|"kmd"»
+[server]
+«f|port» = «n|8080»
+«f|ratio» = «n|0.75»
+«f|debug» = «k|false»
+«f|name» = «s|'unterminated»

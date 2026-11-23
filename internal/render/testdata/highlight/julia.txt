@@ -1,0 +1,19 @@
+module Stats # module
+function mean(xs::Vector{Float64})::Float64
+    return sum(xs) / length(xs) #= block #= nested =# =#
+end
+println("mean: ", mean([1.0, 2.5, 42.0]))
+doc = """multi
+line"""
+s = "unterminated
+#= open
+-- golden --
+«k|module» «t|Stats» «c|# module»
+«k|function» «f|mean»(xs::«t|Vector»{«t|Float64»})::«t|Float64»
+    «k|return» «f|sum»(xs) / «f|length»(xs) «c|#= block #= nested =# =#»
+«k|end»
+«f|println»(«s|"mean: "», «f|mean»([«n|1.0», «n|2.5», «n|42.0»]))
+doc = «s|"""multi»
+«s|line"""»
+s = «s|"unterminated»
+«c|#= open»

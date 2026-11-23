@@ -82,6 +82,7 @@ api-update:
 fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzParse -fuzztime=$(FUZZ_TIME) ./internal/md/
 	$(GO) test -run='^$$' -fuzz=FuzzRender -fuzztime=$(FUZZ_TIME) ./internal/render/
+	$(GO) test -run='^$$' -fuzz=FuzzHighlight -fuzztime=$(FUZZ_TIME) ./internal/render/
 	$(GO) test -run='^$$' -fuzz=FuzzMermaid -fuzztime=$(FUZZ_TIME) ./internal/diagram/
 	$(GO) test -run='^$$' -fuzz=FuzzDisplay -fuzztime=$(FUZZ_TIME) ./internal/tex/
 	$(GO) test -run='^$$' -fuzz=FuzzDataURI -fuzztime=$(FUZZ_TIME) ./internal/termimg/

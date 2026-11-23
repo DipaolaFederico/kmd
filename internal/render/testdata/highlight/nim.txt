@@ -1,0 +1,19 @@
+import strutils # module
+proc square(x: int): int = x * x
+let n = 42 #[ block #[ nested ]# ]#
+var f: float = 1.5
+echo "square: ", square(n), 'c'
+let doc = """multi
+line"""
+let s = "unterminated
+#[ open
+-- golden --
+«k|import» strutils «c|# module»
+«k|proc» «f|square»(x: «t|int»): «t|int» = x * x
+«k|let» n = «n|42» «c|#[ block #[ nested ]# ]#»
+«k|var» f: «t|float» = «n|1.5»
+«f|echo» «s|"square: "», «f|square»(n), «s|'c'»
+«k|let» doc = «s|"""multi»
+«s|line"""»
+«k|let» s = «s|"unterminated»
+«c|#[ open»

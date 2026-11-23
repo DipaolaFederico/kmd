@@ -1,0 +1,19 @@
+# infrastructure
+resource "aws_instance" "web" {
+  ami           = "ami-123"
+  instance_type = "t3.micro"
+  count         = 2 // two
+  tags = { Name = "web" } /* tags */
+}
+name = "unterminated
+/* open
+-- golden --
+«c|# infrastructure»
+«k|resource» «s|"aws_instance"» «s|"web"» {
+  «f|ami»           = «s|"ami-123"»
+  «f|instance_type» = «s|"t3.micro"»
+  «f|count»         = «n|2» «c|// two»
+  «f|tags» = { «f|Name» = «s|"web"» } «c|/* tags */»
+}
+«f|name» = «s|"unterminated»
+«c|/* open»

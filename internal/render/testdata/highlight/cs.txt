@@ -1,0 +1,17 @@
+using System; // import
+namespace App {
+    public class Program {
+        static void Main() { var n = 42; Console.WriteLine("hi" + n); }
+    } /* end */
+}
+var s = "unterminated
+/* open
+-- golden --
+«k|using» «t|System»; «c|// import»
+«k|namespace» «t|App» {
+    «k|public» «k|class» «t|Program» {
+        «k|static» «k|void» «f|Main»() { «k|var» n = «n|42»; «t|Console».«f|WriteLine»(«s|"hi"» + n); }
+    } «c|/* end */»
+}
+«k|var» s = «s|"unterminated»
+«c|/* open»

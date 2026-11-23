@@ -1,0 +1,17 @@
+require 'json' # library
+class Greeter
+  def initialize(name = "world")
+    @name = name
+  end
+  def greet = puts("Hi #{@name}" + 42.to_s)
+end
+s = "unterminated
+-- golden --
+«k|require» «s|'json'» «c|# library»
+«k|class» «t|Greeter»
+  «k|def» «f|initialize»(name = «s|"world"»)
+    @name = name
+  «k|end»
+  «k|def» greet = «k|puts»(«s|"Hi #{@name}"» + «n|42.to_s»)
+«k|end»
+s = «s|"unterminated»

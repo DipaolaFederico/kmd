@@ -1,0 +1,17 @@
+module Main exposing (main) -- app
+import Html exposing (text)
+type alias Model = { count : Int }
+main = text ("count " ++ String.fromInt 42) {- {- nested -} -}
+doc = """multi
+line"""
+s = "unterminated
+{- open
+-- golden --
+«k|module» «t|Main» «k|exposing» (main) «c|-- app»
+«k|import» «t|Html» «k|exposing» (text)
+«k|type» «k|alias» «t|Model» = { count : «t|Int» }
+main = text («s|"count "» ++ «t|String».fromInt «n|42») «c|{- {- nested -} -}»
+doc = «s|"""multi»
+«s|line"""»
+s = «s|"unterminated»
+«c|{- open»

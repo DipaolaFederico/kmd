@@ -1,0 +1,15 @@
+; settings
+[core]
+editor = vim
+timeout = 30
+verbose = true
+# comment
+path = "unterminated
+-- golden --
+«c|; settings»
+[core]
+«f|editor» = vim
+«f|timeout» = «n|30»
+«f|verbose» = «k|true»
+«c|# comment»
+«f|path» = «s|"unterminated»

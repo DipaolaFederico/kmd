@@ -1,0 +1,19 @@
+package app // package
+object Main {
+  def main(args: Array[String]): Unit = {
+    val n = 42
+    println("n = " + n * 2.5) /* print */
+  }
+}
+val s = "unterminated
+/* open
+-- golden --
+«k|package» app «c|// package»
+«k|object» «t|Main» {
+  def «f|main»(args: «t|Array»[«t|String»]): «t|Unit» = {
+    «k|val» n = «n|42»
+    «f|println»(«s|"n = "» + n * «n|2.5») «c|/* print */»
+  }
+}
+«k|val» s = «s|"unterminated»
+«c|/* open»

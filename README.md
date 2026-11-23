@@ -34,7 +34,7 @@ untrusted input.
 | 📝 | **CommonMark** | 652/652 examples of the 0.31.2 specification, checked in CI |
 | 🐙 | **GitHub Flavored Markdown** | tables, task lists, strikethrough, autolinks, footnotes, `> [!NOTE]` alerts, YAML front matter (24/24 GFM examples), `:rocket:` emoji shortcodes (about 800 GitHub names) |
 | 🔗 | **Wiki links** | `[[Page]]`, `[[Page\|label]]`, `[[Page#Heading]]` link to `Page.md` next to the document, as in Obsidian |
-| 🎨 | **Syntax highlighting** | about 25 languages plus `diff`, in labeled boxes |
+| 🎨 | **Syntax highlighting** | 63 languages, from Go and Rust to Terraform, Nix and LaTeX ([list](#-syntax-highlighting)), in labeled boxes |
 | 🧭 | **Viewer** | long documents open in a built-in viewer; links between Markdown files can be followed and navigated back |
 | 🔗 | **Hyperlinks** | clickable OSC 8 links; relative links resolved to absolute `file://` URLs |
 | 🖼️ | **Images** | kitty, iTerm2, sixel or Unicode blocks; local files and `data:` URIs only |
@@ -261,6 +261,87 @@ Highlights of the quarter
 - Section jumps in the viewer
 - Presentations
 ```
+
+## 🔤 Syntax highlighting
+
+Fenced code blocks are highlighted for the 63 languages below, named by any of
+their fence names (```` ```rust ````, ```` ```tf ````, ```` ```ps1 ````…; case does not
+matter). Other names get a generic highlighter for C- and shell-like code,
+and a block with no name is shown as plain text.
+
+<details>
+<summary>Languages and fence names</summary>
+
+| Language | Fence names |
+|---|---|
+| Assembly | `asm`, `assembly`, `nasm`, `masm`, `gas`, `s`, `x86asm`, `armasm` |
+| Awk | `awk`, `gawk`, `mawk`, `nawk` |
+| Batch | `batch`, `bat`, `cmd`, `dosbatch` |
+| C | `c`, `h` |
+| C# | `cs`, `csharp` |
+| C++ | `cpp`, `c++`, `cc`, `hpp` |
+| Clojure | `clojure`, `clj`, `cljs`, `cljc`, `edn` |
+| CMake | `cmake` |
+| Common Lisp | `lisp`, `common-lisp`, `cl`, `elisp`, `emacs-lisp`, `el` |
+| Crystal | `crystal`, `cr` |
+| CSS | `css`, `scss`, `less`, `sass` |
+| D | `d`, `dlang` |
+| Dart | `dart` |
+| Diff | `diff`, `patch` |
+| Dockerfile | `dockerfile`, `docker`, `containerfile` |
+| Elixir | `elixir`, `ex`, `exs` |
+| Elm | `elm` |
+| Erlang | `erlang`, `erl`, `hrl` |
+| F# | `fsharp`, `f#`, `fs`, `fsx`, `fsi` |
+| Fortran | `fortran`, `f90`, `f95`, `f03`, `f08`, `for`, `f` |
+| Go | `go`, `golang` |
+| GraphQL | `graphql`, `gql` |
+| Groovy | `groovy`, `gradle`, `gvy` |
+| Haskell | `haskell`, `hs`, `lhs` |
+| HCL | `hcl`, `tf`, `tfvars`, `terraform` |
+| HTML | `html`, `vue`, `svelte` |
+| INI | `ini`, `conf`, `cfg`, `properties`, `env`, `dotenv` |
+| Java | `java` |
+| JavaScript | `js`, `javascript`, `jsx`, `mjs` |
+| JSON | `json`, `jsonc`, `json5` |
+| Julia | `julia`, `jl` |
+| Kotlin | `kotlin`, `kt` |
+| LaTeX | `latex`, `tex` |
+| Lua | `lua` |
+| Makefile | `make`, `makefile`, `mk` |
+| Nginx | `nginx`, `nginxconf` |
+| Nim | `nim`, `nims`, `nimble` |
+| Nix | `nix` |
+| Objective-C | `objc`, `objective-c`, `objectivec`, `m`, `mm` |
+| OCaml | `ocaml`, `ml`, `mli` |
+| Pascal | `pascal`, `pas`, `delphi`, `objectpascal`, `lpr`, `dpr` |
+| Perl | `perl`, `pl`, `pm` |
+| PHP | `php` |
+| PowerShell | `powershell`, `ps1`, `psm1`, `psd1`, `pwsh`, `posh` |
+| Protocol Buffers | `protobuf`, `proto`, `proto3` |
+| Python | `python`, `py` |
+| R | `r`, `rscript` |
+| Ruby | `ruby`, `rb` |
+| Rust | `rust`, `rs` |
+| Scala | `scala` |
+| Scheme | `scheme`, `scm`, `ss`, `racket`, `rkt` |
+| Shell | `sh`, `bash`, `zsh`, `shell`, `console`, `fish`, `ksh` |
+| Solidity | `solidity`, `sol` |
+| SQL | `sql`, `mysql`, `postgresql`, `psql`, `sqlite` |
+| Swift | `swift` |
+| Tcl | `tcl`, `tk` |
+| TOML | `toml` |
+| TypeScript | `ts`, `typescript`, `tsx` |
+| Verilog | `verilog`, `v`, `sv`, `systemverilog`, `vh`, `svh` |
+| Vim script | `vim`, `vimscript`, `viml` |
+| XML | `xml`, `svg` |
+| YAML | `yaml`, `yml` |
+| Zig | `zig` |
+
+</details>
+
+Adding a language takes a table entry and a golden test; see
+[CONTRIBUTING.md](CONTRIBUTING.md#adding-a-language).
 
 ## 🎨 Themes
 

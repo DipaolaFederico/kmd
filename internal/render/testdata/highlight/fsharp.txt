@@ -1,0 +1,19 @@
+module App // module
+let square x = x * x (* block (* nested *) *)
+type Shape = Circle of float | Square of int
+[<EntryPoint>]
+let main argv = printfn "%d" (square 42); 0
+let doc = """multi
+line"""
+let s = "unterminated
+(* open
+-- golden --
+«k|module» «t|App» «c|// module»
+«k|let» square x = x * x «c|(* block (* nested *) *)»
+«k|type» «t|Shape» = «t|Circle» «k|of» «t|float» | «t|Square» «k|of» «t|int»
+[<«t|EntryPoint»>]
+«k|let» main argv = «f|printfn» «s|"%d"» (square «n|42»); «n|0»
+«k|let» doc = «s|"""multi»
+«s|line"""»
+«k|let» s = «s|"unterminated»
+«c|(* open»

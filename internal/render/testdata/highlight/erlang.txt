@@ -1,0 +1,13 @@
+-module(math). % module
+-export([add/2]).
+add(A, B) when is_integer(A) ->
+    io:format("sum ~p~n", [A + B + 42]),
+    case A of 0 -> ok; _ -> 1.5 end.
+S = "unterminated
+-- golden --
+-«f|module»(math). «c|% module»
+-«f|export»([add/«n|2»]).
+«f|add»(«t|A», «t|B») «k|when» «f|is_integer»(«t|A») ->
+    «f|io»:«f|format»(«s|"sum ~p~n"», [«t|A» + «t|B» + «n|42»]),
+    «k|case» «t|A» «k|of» «n|0» -> «f|ok»; _ -> «n|1.5» «k|end».
+«t|S» = «s|"unterminated»

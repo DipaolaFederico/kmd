@@ -1,0 +1,13 @@
+<!-- page -->
+<div class="box" id='main'>
+  <p>Hello 42</p>
+</div>
+<a href="unterminated
+<!-- open
+-- golden --
+«c|<!-- page -->»
+<div class=«s|"box"» id=«s|'main'»>
+  <p>Hello «n|42»</p>
+</div>
+<a href=«s|"unterminated»
+«c|<!-- open»

@@ -1,0 +1,17 @@
+# greeting
+proc greet {name} {
+    puts "Hello, $name"
+    return 42
+}
+set x 1.5
+greet world
+set s "unterminated
+-- golden --
+«c|# greeting»
+«k|proc» greet {name} {
+    «k|puts» «s|"Hello, $name"»
+    «k|return» «n|42»
+}
+«k|set» x «n|1.5»
+greet world
+«k|set» s «s|"unterminated»

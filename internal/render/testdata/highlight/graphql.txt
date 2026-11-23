@@ -1,0 +1,19 @@
+# query
+query GetUser($id: ID!) @cached {
+  user(id: $id) { name age }
+}
+type User { name: String! score: Float age: Int }
+"""Docs
+block"""
+fragment f on User { name(lang: "en", limit: 42) }
+x = "unterminated
+-- golden --
+«c|# query»
+«k|query» «f|GetUser»(«t|$id»: «t|ID»!) «k|@cached» {
+  «f|user»(id: «t|$id») { name age }
+}
+«k|type» «t|User» { name: «t|String»! score: «t|Float» age: «t|Int» }
+«s|"""Docs»
+«s|block"""»
+«k|fragment» f «k|on» «t|User» { «f|name»(lang: «s|"en"», limit: «n|42») }
+x = «s|"unterminated»

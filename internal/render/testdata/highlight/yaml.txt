@@ -1,0 +1,15 @@
+# deployment
+name: kmd
+version: 1.2
+enabled: true
+tags: ["cli", 'go']
+nothing: null
+desc: "unterminated
+-- golden --
+«c|# deployment»
+«f|name»: kmd
+«f|version»: «n|1.2»
+«f|enabled»: «k|true»
+«f|tags»: [«s|"cli"», «s|'go'»]
+«f|nothing»: «k|null»
+«f|desc»: «s|"unterminated»

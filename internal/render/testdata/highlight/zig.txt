@@ -1,0 +1,15 @@
+const std = @import("std"); // std
+pub fn main() !void {
+    const n: u32 = 42;
+    var x: f64 = 1.5;
+    std.debug.print("{d} {d}\n", .{ n, x });
+}
+const s = "unterminated
+-- golden --
+«k|const» std = «f|@import»(«s|"std"»); «c|// std»
+«k|pub» «k|fn» «f|main»() !«t|void» {
+    «k|const» n: «t|u32» = «n|42»;
+    «k|var» x: «t|f64» = «n|1.5»;
+    std.debug.«f|print»(«s|"{d} {d}\n"», .{ n, x });
+}
+«k|const» s = «s|"unterminated»

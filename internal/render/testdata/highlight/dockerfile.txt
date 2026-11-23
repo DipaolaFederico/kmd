@@ -1,0 +1,15 @@
+# build stage
+FROM golang:1.25 AS build
+WORKDIR /src
+ENV CGO_ENABLED=0 PORT=8080
+RUN go build -o /out/kmd . && echo "built" $PORT
+CMD ["kmd", 'x']
+LABEL desc="unterminated
+-- golden --
+«c|# build stage»
+«k|FROM» golang:«n|1.25» «k|AS» build
+«k|WORKDIR» /src
+«k|ENV» CGO_ENABLED=«n|0» PORT=«n|8080»
+«k|RUN» go build -o /out/kmd . && echo «s|"built"» «t|$PORT»
+«k|CMD» [«s|"kmd"», «s|'x'»]
+«k|LABEL» desc=«s|"unterminated»

@@ -1,0 +1,13 @@
+\documentclass{article} % class
+\usepackage{amsmath}
+\begin{document}
+\section{Intro} Price: 42\% of 1.5 units.
+\end{document}
+% trailing comment
+-- golden --
+«k|\documentclass»{article} «c|% class»
+«k|\usepackage»{amsmath}
+«k|\begin»{document}
+«k|\section»{Intro} Price: «n|42»\% of «n|1.5» units.
+«k|\end»{document}
+«c|% trailing comment»

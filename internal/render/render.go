@@ -92,7 +92,6 @@ type renderer struct {
 	base     Style // inherited inline style (e.g. inside quotes)
 	depth    int   // list nesting
 	graphics bool
-	langs    map[string]*lang // lexers built for this document
 
 	*Budget
 

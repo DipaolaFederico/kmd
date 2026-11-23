@@ -1,0 +1,17 @@
+" settings
+set number
+let g:count = 42
+function! Greet(name) abort
+  echo "Hello, " . a:name . 'x'
+endfunction
+nnoremap <leader>g :call Greet('me')<CR>
+let s = "unterminated
+-- golden --
+«c|" settings»
+«k|set» number
+«k|let» g:count = «n|42»
+«k|function»! «f|Greet»(name) «k|abort»
+  «f|echo» «s|"Hello, "» . a:name . «s|'x'»
+«k|endfunction»
+«k|nnoremap» <leader>g :«k|call» «f|Greet»(«s|'me'»)<CR>
+«k|let» s = «s|"unterminated»

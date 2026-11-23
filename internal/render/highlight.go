@@ -1,97 +1,177 @@
 package render
 
-import "strings"
-
-// lang is a tiny lexical description of a programming language: enough
-// for pleasant highlighting without shipping real grammars.
-type lang struct {
-	kw         map[string]bool
-	lineCmt    []string
-	blockCmt   [2]string
-	quotes     string
-	types      bool // Capitalized identifiers are types
-	ci         bool // case-insensitive keywords
-	keyColon   bool // `key:` is highlighted (YAML/TOML-like)
-	dollarVars bool // $VAR highlighted (shells)
-}
-
-func words(s string) map[string]bool {
-	m := map[string]bool{}
-	for _, w := range strings.Fields(s) {
-		m[w] = true
-	}
-	return m
-}
-
-const (
-	cKw    = "auto break case char class const continue default do double else enum extern float for goto if int long register return short signed sizeof static struct switch typedef union unsigned void volatile while bool true false nullptr NULL namespace using template typename public private protected virtual override new delete this throw try catch final import package extends implements boolean byte super null var val fun let func in is as when object interface"
-	jsKw   = "async await break case catch class const continue debugger default delete do else export extends false finally for from function if import in instanceof let new null of return static super switch this throw true try typeof undefined var void while yield interface type enum implements readonly as declare keyof"
-	baseKw = "if else elif for while return function func fn def class import from const let var true false null nil none None True False and or not in end do then"
+import (
+	"strings"
+	"sync"
 )
 
-var cStyle = [2]string{"/*", "*/"}
+// Syntax highlighting is table driven: every language is a langDef in
+// langs.go (plain data: word lists and lexical rules) read by one generic
+// tokenizer. It is a lexer, not a parser: enough for pleasant colours
+// without shipping grammars, and linear in the input — every step consumes
+// at least one byte, nothing looks back more than one byte, and only
+// multi-line comments and strings carry state (two integers) to the next
+// line.
 
-// langFor returns the lexer for a fenced-code info string, or nil.
-func langFor(name string) *lang {
-	switch name {
-	case "":
-		return nil
-	case "go", "golang":
-		return &lang{kw: words("break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var nil true false iota"), lineCmt: []string{"//"}, blockCmt: cStyle, quotes: "\"'`", types: true}
-	case "rust", "rs":
-		return &lang{kw: words("as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while"), lineCmt: []string{"//"}, blockCmt: cStyle, quotes: "\"", types: true}
-	case "python", "py":
-		return &lang{kw: words("and as assert async await break class continue def del elif else except False finally for from global if import in is lambda None nonlocal not or pass raise return True try while with yield self match case"), lineCmt: []string{"#"}, quotes: "\"'", types: true}
-	case "js", "javascript", "ts", "typescript", "jsx", "tsx", "mjs":
-		return &lang{kw: words(jsKw), lineCmt: []string{"//"}, blockCmt: cStyle, quotes: "\"'`", types: true}
-	case "c", "h", "cpp", "c++", "cc", "hpp", "java", "cs", "csharp", "kotlin", "kt", "swift", "scala", "dart", "php":
-		return &lang{kw: words(cKw), lineCmt: []string{"//"}, blockCmt: cStyle, quotes: "\"'", types: true}
-	case "sh", "bash", "zsh", "shell", "console", "fish", "ksh":
-		return &lang{kw: words("if then else elif fi case esac for while until do done in function return local export readonly exit set unset source alias sudo echo cd"), lineCmt: []string{"#"}, quotes: "\"'", dollarVars: true}
-	case "sql", "mysql", "postgresql", "psql", "sqlite":
-		return &lang{kw: words("select from where and or not insert into values update set delete create table index view drop alter add join left right inner outer full on as group by order having limit offset union all distinct null is in like between case when then else end primary key foreign references default exists returning with"), lineCmt: []string{"--"}, blockCmt: cStyle, quotes: "'\"", ci: true}
-	case "ruby", "rb":
-		return &lang{kw: words("alias and begin break case class def defined? do else elsif end ensure false for if in module next nil not or redo rescue retry return self super then true undef unless until when while yield require puts attr_accessor"), lineCmt: []string{"#"}, quotes: "\"'", types: true}
-	case "lua":
-		return &lang{kw: words("and break do else elseif end false for function goto if in local nil not or repeat return then true until while"), lineCmt: []string{"--"}, quotes: "\"'"}
-	case "yaml", "yml":
-		return &lang{kw: words("true false null yes no on off ~"), lineCmt: []string{"#"}, quotes: "\"'", keyColon: true}
-	case "toml", "ini", "conf", "cfg", "properties", "env", "dotenv":
-		return &lang{kw: words("true false"), lineCmt: []string{"#", ";"}, quotes: "\"'", keyColon: true}
-	case "json", "jsonc", "json5":
-		return &lang{kw: words("true false null"), lineCmt: []string{"//"}, quotes: "\""}
-	case "css", "scss", "less", "sass":
-		return &lang{kw: words("important inherit initial unset none auto"), blockCmt: cStyle, lineCmt: []string{"//"}, quotes: "\"'"}
-	case "html", "xml", "svg", "vue", "svelte":
-		return &lang{kw: map[string]bool{}, blockCmt: [2]string{"<!--", "-->"}, quotes: "\"'"}
-	case "dockerfile", "docker", "containerfile":
-		return &lang{kw: words("FROM RUN CMD COPY ADD ENV ARG WORKDIR EXPOSE ENTRYPOINT USER LABEL VOLUME HEALTHCHECK SHELL ONBUILD STOPSIGNAL AS"), lineCmt: []string{"#"}, quotes: "\"'", dollarVars: true}
-	case "make", "makefile", "mk":
-		return &lang{kw: words("ifeq ifneq ifdef ifndef else endif include define endef export override .PHONY"), lineCmt: []string{"#"}, quotes: "\"'", dollarVars: true}
+// tokKind is what a word or span is highlighted as.
+type tokKind uint8
+
+const (
+	kNone tokKind = iota
+	kKeyword
+	kType
+	kFunc
+	kString
+	kNumber
+	kComment
+	kVar
+)
+
+// lang is a langDef compiled for the tokenizer: the word lists become one
+// map and the space-separated rules slices. Built once per language, on
+// first use, so the tables cost nothing at start-up.
+type lang struct {
+	words      map[string]tokKind
+	line       []string // line-comment prefixes
+	lineStart  []string // line comments only as the first thing on a line
+	open       string   // block comment delimiters
+	close      string
+	nested     bool
+	quotes     string
+	escapes    bool
+	long       [][2]string // multi-line strings (raw: no escapes)
+	identExtra string
+	sigils     string
+	prefix     string
+	caps       bool
+	ci         bool
+	keyColon   bool
+	lispCall   bool
+}
+
+func compile(d *langDef) *lang {
+	lg := &lang{
+		words:      map[string]tokKind{},
+		line:       strings.Fields(d.line),
+		lineStart:  strings.Fields(d.lineStart),
+		nested:     d.nested,
+		quotes:     d.quotes,
+		escapes:    !d.noEscapes,
+		identExtra: d.identExtra,
+		sigils:     d.sigils,
+		prefix:     d.prefix,
+		caps:       d.caps,
+		ci:         d.ci,
+		keyColon:   d.keyColon,
+		lispCall:   d.lispCall,
 	}
-	return &lang{kw: words(baseKw), lineCmt: []string{"//", "#"}, blockCmt: cStyle, quotes: "\"'`", types: true}
+	if d.keyColon {
+		lg.identExtra += "-" // keys such as `key-name:`
+	}
+	if b := strings.Fields(d.block); len(b) == 2 {
+		lg.open, lg.close = b[0], b[1]
+	}
+	for l := strings.Fields(d.long); len(l) >= 2; l = l[2:] {
+		lg.long = append(lg.long, [2]string{l[0], l[1]})
+	}
+	// later lists win: a word listed as keyword and builtin is a keyword
+	for _, set := range [...]struct {
+		words string
+		kind  tokKind
+	}{{d.builtins, kFunc}, {d.types, kType}, {d.keywords, kKeyword}} {
+		for _, w := range strings.Fields(set.words) {
+			lg.words[lg.key(w)] = set.kind
+		}
+	}
+	return lg
+}
+
+var (
+	compiled     [len(langDefs) + 1]*lang // the last one: fallbackLang
+	compiledOnce [len(langDefs) + 1]sync.Once
+)
+
+// langFor returns the lexer for a fenced-code info string (lowercased), or
+// nil for plain text. Unknown languages get a generic C/shell-like lexer.
+func langFor(name string) *lang {
+	if name == "" {
+		return nil
+	}
+	i := langIndex(name)
+	compiledOnce[i].Do(func() {
+		if i == len(langDefs) {
+			compiled[i] = compile(&fallbackLang)
+		} else {
+			compiled[i] = compile(&langDefs[i])
+		}
+	})
+	return compiled[i]
+}
+
+// langIndex finds name among the aliases, or returns len(langDefs).
+func langIndex(name string) int {
+	for i := range langDefs {
+		if hasWord(langDefs[i].aliases, name) {
+			return i
+		}
+	}
+	return len(langDefs)
+}
+
+// hasWord reports whether w is one of the space-separated words of list,
+// without allocating.
+func hasWord(list, w string) bool {
+	for list != "" {
+		i := strings.IndexByte(list, ' ')
+		if i < 0 {
+			return list == w
+		}
+		if list[:i] == w {
+			return true
+		}
+		list = list[i+1:]
+	}
+	return false
 }
 
 func isIdentStart(c byte) bool { return isAlphaByte(c) || c == '_' }
 func isIdent(c byte) bool      { return isIdentStart(c) || (c >= '0' && c <= '9') }
 func isAlphaByte(c byte) bool  { return (c|0x20) >= 'a' && (c|0x20) <= 'z' }
 
-// highlight tokenizes code, reusing lexers already built for this document.
-func (r *renderer) highlight(src, name string) []rline {
-	if r.langs == nil {
-		r.langs = map[string]*lang{}
+func (lg *lang) isWordByte(c byte) bool {
+	return isIdent(c) || lg.identExtra != "" && strings.IndexByte(lg.identExtra, c) >= 0
+}
+
+func (lg *lang) key(w string) string {
+	if lg.ci {
+		return strings.ToLower(w)
 	}
-	lg, ok := r.langs[name]
-	if !ok {
-		lg = langFor(name)
-		r.langs[name] = lg
-	}
-	return highlightWith(src, name, lg, r.th)
+	return w
 }
 
 // highlight tokenizes code into styled lines.
+func (r *renderer) highlight(src, name string) []rline { return highlight(src, name, r.th) }
+
 func highlight(src, name string, th *Theme) []rline {
 	return highlightWith(src, name, langFor(name), th)
+}
+
+func (th *Theme) tokStyle(k tokKind) Style {
+	switch k {
+	case kKeyword:
+		return Style{Fg: th.Keyword}
+	case kType, kVar:
+		return Style{Fg: th.Type}
+	case kFunc:
+		return Style{Fg: th.Func}
+	case kString:
+		return Style{Fg: th.String}
+	case kNumber:
+		return Style{Fg: th.Num}
+	case kComment:
+		return Style{Fg: th.Comment, Attr: Italic}
+	}
+	return Style{}
 }
 
 func highlightWith(src, name string, lg *lang, th *Theme) []rline {
@@ -120,117 +200,234 @@ func highlightWith(src, name string, lg *lang, th *Theme) []rline {
 		}
 		return out
 	}
-	com := Style{Fg: th.Comment, Attr: Italic}
-	inBlock := false
+	var st lexState
 	for i, l := range lines {
-		h := lineLexer{l: l}
-		for h.j < len(l) {
-			if inBlock {
-				e := strings.Index(l[h.j:], lg.blockCmt[1])
-				if e < 0 {
-					h.token(len(l), com)
-					break
-				}
-				h.token(h.j+e+len(lg.blockCmt[1]), com)
-				inBlock = false
-				continue
-			}
-			rest := l[h.j:]
-			if hasAnyPrefix(rest, lg.lineCmt) {
-				h.token(len(l), com)
-				break
-			}
-			if lg.blockCmt[0] != "" && strings.HasPrefix(rest, lg.blockCmt[0]) {
-				if e := strings.Index(rest[len(lg.blockCmt[0]):], lg.blockCmt[1]); e >= 0 {
-					h.token(h.j+len(lg.blockCmt[0])+e+len(lg.blockCmt[1]), com)
-					continue
-				}
-				h.token(len(l), com)
-				inBlock = true
-				break
-			}
-			c := l[h.j]
-			switch {
-			case strings.IndexByte(lg.quotes, c) >= 0:
-				k := h.j + 1
-				for k < len(l) && l[k] != c {
-					if l[k] == '\\' {
-						k++
-					}
-					k++
-				}
-				if k < len(l) {
-					k++
-				}
-				h.token(min(k, len(l)), Style{Fg: th.String})
-			case c >= '0' && c <= '9' && (h.j == 0 || !isIdent(l[h.j-1])):
-				k := h.j
-				for k < len(l) && (isIdent(l[k]) || l[k] == '.') {
-					k++
-				}
-				h.token(k, Style{Fg: th.Num})
-			case c == '$' && lg.dollarVars && h.j+1 < len(l) && (isIdentStart(l[h.j+1]) || l[h.j+1] == '{'):
-				k := h.j + 1
-				for k < len(l) && (isIdent(l[k]) || l[k] == '{' || l[k] == '}') {
-					k++
-				}
-				h.token(k, Style{Fg: th.Type})
-			case isIdentStart(c):
-				k := h.j
-				for k < len(l) && (isIdent(l[k]) || l[k] == '-' && lg.keyColon) {
-					k++
-				}
-				w := l[h.j:k]
-				lookup := w
-				if lg.ci {
-					lookup = strings.ToLower(w)
-				}
-				switch {
-				case lg.keyColon && k < len(l) && (l[k] == ':' || strings.HasPrefix(strings.TrimLeft(l[k:], " "), "=")):
-					h.token(k, Style{Fg: th.Func})
-				case lg.kw[lookup]:
-					h.token(k, Style{Fg: th.Keyword})
-				case k < len(l) && l[k] == '(':
-					h.token(k, Style{Fg: th.Func})
-				case lg.types && w[0] >= 'A' && w[0] <= 'Z':
-					h.token(k, Style{Fg: th.Type})
-				default:
-					h.j = k
-				}
-			default:
-				h.j++
-			}
-		}
+		h := lineLexer{l: l, th: th, mark: -1}
+		lg.lexLine(&h, &st)
 		h.token(len(l), Style{})
 		out[i] = h.out
 	}
 	return out
 }
 
-func hasAnyPrefix(s string, ps []string) bool {
-	for _, p := range ps {
-		if strings.HasPrefix(s, p) {
-			return true
+// lexState is what carries over from one line to the next.
+type lexState struct {
+	depth int // block comment nesting; 0: not in a comment
+	long  int // in the multi-line string long[long-1]; 0: not in one
+}
+
+func (lg *lang) lexLine(h *lineLexer, st *lexState) {
+	l := h.l
+	indent := len(l) - len(strings.TrimLeft(l, " \t")) // once: rescanning it per byte is quadratic
+	for h.j < len(l) {
+		if st.depth > 0 {
+			lg.blockComment(h, st)
+			continue
+		}
+		if st.long > 0 {
+			lg.longString(h, st)
+			continue
+		}
+		rest := l[h.j:]
+		// the longer of a line and a block comment opener wins: Lua's
+		// "--[[" opens a block, its "--" a line comment
+		lineLen := lg.commentPrefix(rest, lg.line)
+		if lineLen == 0 && len(lg.lineStart) > 0 && h.j <= indent {
+			lineLen = lg.commentPrefix(rest, lg.lineStart)
+		}
+		if lg.open != "" && len(lg.open) > lineLen && strings.HasPrefix(rest, lg.open) {
+			h.mark = h.j
+			h.j += len(lg.open)
+			st.depth = 1
+			lg.blockComment(h, st)
+			continue
+		}
+		if lineLen > 0 {
+			h.token(len(l), h.th.tokStyle(kComment))
+			return
+		}
+		if k := lg.longOpen(rest); k > 0 {
+			h.mark = h.j
+			h.j += len(lg.long[k-1][0])
+			st.long = k
+			lg.longString(h, st)
+			continue
+		}
+		c := l[h.j]
+		switch {
+		case strings.IndexByte(lg.quotes, c) >= 0:
+			k := h.j + 1
+			for k < len(l) && l[k] != c {
+				if l[k] == '\\' && lg.escapes {
+					k++
+				}
+				k++
+			}
+			if k < len(l) {
+				k++
+			}
+			h.token(min(k, len(l)), h.th.tokStyle(kString))
+		case c >= '0' && c <= '9' && (h.j == 0 || !isIdent(l[h.j-1])):
+			k := h.j
+			for k < len(l) && (isIdent(l[k]) || l[k] == '.') {
+				k++
+			}
+			h.token(k, h.th.tokStyle(kNumber))
+		case lg.sigils != "" && strings.IndexByte(lg.sigils, c) >= 0 && h.j+1 < len(l) && (isIdentStart(l[h.j+1]) || l[h.j+1] == '{'):
+			k := h.j + 1
+			for k < len(l) && (isIdent(l[k]) || l[k] == '{' || l[k] == '}') {
+				k++
+			}
+			h.token(k, h.th.tokStyle(kVar))
+		case lg.prefix != "" && strings.IndexByte(lg.prefix, c) >= 0 && h.j+1 < len(l):
+			k := h.j + 1
+			if !isIdentStart(l[k]) {
+				h.j = k
+				if c == '\\' {
+					h.j++ // an escaped character, such as \% in LaTeX
+				}
+				break
+			}
+			for k < len(l) && lg.isWordByte(l[k]) {
+				k++
+			}
+			kind, ok := lg.words[lg.key(l[h.j:k])]
+			if !ok {
+				kind = kKeyword
+			}
+			h.token(k, h.th.tokStyle(kind))
+		case isIdentStart(c):
+			k := h.j
+			for k < len(l) && lg.isWordByte(l[k]) {
+				k++
+			}
+			if kind := lg.wordKind(l, h.j, k); kind != kNone {
+				h.token(k, h.th.tokStyle(kind))
+			} else {
+				h.j = k // stays in the pending plain text
+			}
+		default:
+			h.j++
 		}
 	}
-	return false
+}
+
+// wordKind classifies the identifier l[j:k].
+func (lg *lang) wordKind(l string, j, k int) tokKind {
+	w := l[j:k]
+	if lg.keyColon && k < len(l) && (l[k] == ':' || strings.HasPrefix(strings.TrimLeft(l[k:], " "), "=")) {
+		return kFunc
+	}
+	if kind, ok := lg.words[lg.key(w)]; ok {
+		return kind
+	}
+	switch {
+	case k < len(l) && l[k] == '(':
+		return kFunc
+	case lg.lispCall && j > 0 && l[j-1] == '(':
+		return kFunc
+	case lg.caps && w[0] >= 'A' && w[0] <= 'Z':
+		return kType
+	}
+	return kNone
+}
+
+// blockComment continues a block comment at h.j (its opener, if on this
+// line, starts at h.mark), tracking nesting when the language allows it.
+func (lg *lang) blockComment(h *lineLexer, st *lexState) {
+	l := h.l
+	if h.mark < 0 {
+		h.mark = h.j
+	}
+	if !lg.nested {
+		if e := strings.Index(l[h.j:], lg.close); e >= 0 {
+			h.j += e + len(lg.close)
+			st.depth = 0
+		} else {
+			h.j = len(l)
+		}
+	}
+	for lg.nested && st.depth > 0 && h.j < len(l) {
+		switch rest := l[h.j:]; {
+		case strings.HasPrefix(rest, lg.close):
+			h.j += len(lg.close)
+			st.depth--
+		case strings.HasPrefix(rest, lg.open):
+			h.j += len(lg.open)
+			st.depth++
+		default:
+			h.j++
+		}
+	}
+	h.tokenFrom(h.mark, h.j, h.th.tokStyle(kComment))
+}
+
+// longString continues a multi-line string at h.j (its opener, if on this
+// line, starts at h.mark).
+func (lg *lang) longString(h *lineLexer, st *lexState) {
+	if h.mark < 0 {
+		h.mark = h.j
+	}
+	end := lg.long[st.long-1][1]
+	if e := strings.Index(h.l[h.j:], end); e >= 0 {
+		h.j += e + len(end)
+		st.long = 0
+	} else {
+		h.j = len(h.l)
+	}
+	h.tokenFrom(h.mark, h.j, h.th.tokStyle(kString))
+}
+
+// commentPrefix returns the length of the comment prefix s starts with, or
+// 0. A prefix ending in a letter (REM in Batch) must end the word; the
+// match ignores case in case-insensitive languages.
+func (lg *lang) commentPrefix(s string, prefixes []string) int {
+	for _, p := range prefixes {
+		if len(s) < len(p) {
+			continue
+		}
+		if s[:len(p)] != p && !(lg.ci && strings.EqualFold(s[:len(p)], p)) {
+			continue
+		}
+		if isAlphaByte(p[len(p)-1]) && len(s) > len(p) && isIdent(s[len(p)]) {
+			continue
+		}
+		return len(p)
+	}
+	return 0
+}
+
+// longOpen returns 1 + the index of the multi-line string opening s, or 0.
+func (lg *lang) longOpen(s string) int {
+	for i, d := range lg.long {
+		if strings.HasPrefix(s, d[0]) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 // lineLexer accumulates styled tokens; text between tokens stays unstyled.
 type lineLexer struct {
 	l     string
+	th    *Theme
 	j     int // scan position
 	plain int // start of pending unstyled text
+	mark  int // start of a comment or string being scanned; -1: none
 	out   rline
 }
 
 // token emits pending plain text, then l[j:end] with style st.
-func (h *lineLexer) token(end int, st Style) {
-	if h.j > h.plain {
-		h.out = append(h.out, run{text: h.l[h.plain:h.j]})
+func (h *lineLexer) token(end int, st Style) { h.tokenFrom(h.j, end, st) }
+
+// tokenFrom emits pending plain text up to start, then l[start:end] with
+// style st, and continues at end.
+func (h *lineLexer) tokenFrom(start, end int, st Style) {
+	if start > h.plain {
+		h.out = append(h.out, run{text: h.l[h.plain:start]})
 	}
-	if end > h.j {
-		h.out = append(h.out, run{text: h.l[h.j:end], st: st})
+	if end > start {
+		h.out = append(h.out, run{text: h.l[start:end], st: st})
 	}
-	h.j, h.plain = end, end
+	h.j, h.plain, h.mark = end, end, -1
 }

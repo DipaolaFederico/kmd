@@ -1,0 +1,15 @@
+; library
+(define (square x) (* x x))
+(define lst (list 1 2.5 42)) #| block |#
+(display (map square lst))
+(newline)
+(define s "unterminated
+#| open
+-- golden --
+«c|; library»
+(«k|define» («f|square» x) (* x x))
+(«k|define» lst («f|list» «n|1» «n|2.5» «n|42»)) «c|#| block |#»
+(«f|display» («f|map» square lst))
+(«f|newline»)
+(«k|define» s «s|"unterminated»
+«c|#| open»

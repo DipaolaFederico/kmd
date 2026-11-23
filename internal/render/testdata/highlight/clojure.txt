@@ -1,0 +1,13 @@
+(ns app.core) ; namespace
+(defn greet [name]
+  (println (str "Hello, " name)))
+(def nums [1 2.5 42])
+(map inc nums)
+(let [s "unterminated
+-- golden --
+(«k|ns» app.core) «c|; namespace»
+(«k|defn» greet [name]
+  («f|println» («f|str» «s|"Hello, "» name)))
+(«k|def» nums [«n|1» «n|2.5» «n|42»])
+(«f|map» inc nums)
+(«k|let» [s «s|"unterminated»

@@ -1,0 +1,17 @@
+module Main where -- entry
+import Data.List (sort)
+data Shape = Circle Double | Square Int
+area :: Shape -> Double
+area (Circle r) = pi * r * r {- nested {- inner -} -}
+main = putStrLn ("area: " ++ show (area (Circle 1.5)))
+s = "unterminated
+{- open {- deeper -}
+-- golden --
+«k|module» «t|Main» «k|where» «c|-- entry»
+«k|import» «t|Data».«t|List» (sort)
+«k|data» «t|Shape» = «t|Circle» «t|Double» | «t|Square» «t|Int»
+area :: «t|Shape» -> «t|Double»
+area («t|Circle» r) = pi * r * r «c|{- nested {- inner -} -}»
+main = «f|putStrLn» («s|"area: "» ++ «f|show» (area («t|Circle» «n|1.5»)))
+s = «s|"unterminated»
+«c|{- open {- deeper -}»

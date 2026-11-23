@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail # strict
+for f in "$@"; do
+  echo "file: $f" 'raw' ${HOME} $1
+done
+exit 0
+echo "unterminated
+-- golden --
+«c|#!/usr/bin/env bash»
+«k|set» -euo pipefail «c|# strict»
+«k|for» f «k|in» «s|"$@"»; «k|do»
+  «k|echo» «s|"file: $f"» «s|'raw'» «t|${HOME}» $«n|1»
+«k|done»
+«k|exit» «n|0»
+«k|echo» «s|"unterminated»

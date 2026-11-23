@@ -1,0 +1,15 @@
+import { x } from "./mod.js"; // module
+export async function load(url) {
+  const n = 42 + 0.5;
+  return `template ${n}` + 'single';
+} /* done */
+let s = "unterminated
+/* still open
+-- golden --
+«k|import» { x } «k|from» «s|"./mod.js"»; «c|// module»
+«k|export» «k|async» «k|function» «f|load»(url) {
+  «k|const» n = «n|42» + «n|0.5»;
+  «k|return» «s|`template ${n}`» + «s|'single'»;
+} «c|/* done */»
+«k|let» s = «s|"unterminated»
+«c|/* still open»

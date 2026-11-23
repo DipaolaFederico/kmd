@@ -1,0 +1,15 @@
+-- report
+SELECT name, COUNT(*) AS total FROM users
+WHERE age > 18 AND city = 'Rome' /* adults */
+GROUP BY name ORDER BY total DESC LIMIT 10;
+insert into t values (1, 2.5, null);
+select 'unterminated
+/* open
+-- golden --
+«c|-- report»
+«k|SELECT» name, «f|COUNT»(*) «k|AS» total «k|FROM» users
+«k|WHERE» age > «n|18» «k|AND» city = «s|'Rome'» «c|/* adults */»
+«k|GROUP» «k|BY» name «k|ORDER» «k|BY» total DESC «k|LIMIT» «n|10»;
+«k|insert» «k|into» t «k|values» («n|1», «n|2.5», «k|null»);
+«k|select» «s|'unterminated»
+«c|/* open»

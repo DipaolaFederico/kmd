@@ -9,6 +9,14 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- Syntax highlighting for 63 languages (about 25 before), including
+  Haskell, Elixir, OCaml, F#, Clojure, R, Julia, Perl, PowerShell, Zig,
+  Nix, Terraform, Protocol Buffers, GraphQL, Assembly, Batch, LaTeX, CMake
+  and Nginx, with their usual fence names and file extensions (`tf`, `ex`,
+  `hs`, `ps1`…). The full list is in the README and the man page.
+
 ## [0.10.1] - 2026-11-23
 
 ### Added

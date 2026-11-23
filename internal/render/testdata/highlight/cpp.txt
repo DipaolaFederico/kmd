@@ -1,0 +1,17 @@
+#include <vector>
+template <typename T> class Box { // generic
+public:
+    T value = 0;
+    std::string name = "box";
+}; /* end */
+auto s = "unterminated
+/* open
+-- golden --
+#include <vector>
+«k|template» <«k|typename» «t|T»> «k|class» «t|Box» { «c|// generic»
+«k|public»:
+    «t|T» value = «n|0»;
+    std::string name = «s|"box"»;
+}; «c|/* end */»
+«k|auto» s = «s|"unterminated»
+«c|/* open»

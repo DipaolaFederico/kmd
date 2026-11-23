@@ -1,0 +1,19 @@
+#import <Foundation/Foundation.h>
+@interface Greeter : NSObject // class
+@property (nonatomic, strong) NSString *name;
+@end
+@implementation Greeter
+- (void)greet { NSLog(@"Hello %@ %d", self.name, 42); } /* log */
+@end
+NSString *s = @"unterminated
+/* open
+-- golden --
+#«k|import» <«t|Foundation»/«t|Foundation».h>
+«k|@interface» «t|Greeter» : «t|NSObject» «c|// class»
+«k|@property» («k|nonatomic», «k|strong») «t|NSString» *name;
+«k|@end»
+«k|@implementation» «t|Greeter»
+- («k|void»)greet { «f|NSLog»(@«s|"Hello %@ %d"», «k|self».name, «n|42»); } «c|/* log */»
+«k|@end»
+«t|NSString» *s = @«s|"unterminated»
+«c|/* open»

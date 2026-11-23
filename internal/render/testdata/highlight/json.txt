@@ -1,0 +1,17 @@
+// jsonc comment
+{
+  "name": "kmd",
+  "version": 1.5,
+  "ok": true,
+  "none": null
+}
+"unterminated
+-- golden --
+«c|// jsonc comment»
+{
+  «s|"name"»: «s|"kmd"»,
+  «s|"version"»: «n|1.5»,
+  «s|"ok"»: «k|true»,
+  «s|"none"»: «k|null»
+}
+«s|"unterminated»

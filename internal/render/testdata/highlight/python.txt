@@ -1,0 +1,15 @@
+import os  # stdlib
+class Point:
+    def __init__(self, x=0, y=1.5):
+        self.x = "x" + 'y'
+        return None if x else True
+print(len([1, 2, 3]))
+s = 'unterminated
+-- golden --
+«k|import» os  «c|# stdlib»
+«k|class» «t|Point»:
+    «k|def» «f|__init__»(«k|self», x=«n|0», y=«n|1.5»):
+        «k|self».x = «s|"x"» + «s|'y'»
+        «k|return» «k|None» «k|if» x «k|else» «k|True»
+«f|print»(«f|len»([«n|1», «n|2», «n|3»]))
+s = «s|'unterminated»

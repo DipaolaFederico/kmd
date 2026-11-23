@@ -1,0 +1,17 @@
+pragma solidity ^0.8.0; // version
+contract Counter {
+    uint256 public count = 42;
+    function inc() public { count += 1; } /* add */
+    function name() public pure returns (string memory) { return "counter"; }
+}
+string s = "unterminated
+/* open
+-- golden --
+«k|pragma» «k|solidity» ^«n|0.8.0»; «c|// version»
+«k|contract» «t|Counter» {
+    «t|uint256» «k|public» count = «n|42»;
+    «k|function» «f|inc»() «k|public» { count += «n|1»; } «c|/* add */»
+    «k|function» «f|name»() «k|public» «k|pure» «k|returns» («t|string» «k|memory») { «k|return» «s|"counter"»; }
+}
+«t|string» s = «s|"unterminated»
+«c|/* open»

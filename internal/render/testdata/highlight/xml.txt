@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!-- config -->
+<item id="42" name='box'>text 7</item>
+<value attr="unterminated
+<!-- never closed
+-- golden --
+<?xml version=«s|"1.0"»?>
+«c|<!-- config -->»
+<item id=«s|"42"» name=«s|'box'»>text «n|7»</item>
+<value attr=«s|"unterminated»
+«c|<!-- never closed»

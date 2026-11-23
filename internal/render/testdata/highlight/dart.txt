@@ -1,0 +1,17 @@
+import 'dart:io'; // io
+void main() {
+  final n = 42;
+  var s = "n = $n" + 'x';
+  print(s + 1.5.toString()); /* print */
+}
+var bad = "unterminated
+/* open
+-- golden --
+«k|import» «s|'dart:io'»; «c|// io»
+«k|void» «f|main»() {
+  «k|final» n = «n|42»;
+  «k|var» s = «s|"n = $n"» + «s|'x'»;
+  «f|print»(s + «n|1.5.toString»()); «c|/* print */»
+}
+«k|var» bad = «s|"unterminated»
+«c|/* open»

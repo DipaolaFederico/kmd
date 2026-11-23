@@ -1,0 +1,17 @@
+#include <stdio.h>
+int main(void) { // entry
+    unsigned char c = 'a';
+    printf("%d\n", 42 + 0x10); /* print */
+    return 0;
+}
+char *s = "unterminated
+/* never closed
+-- golden --
+#include <stdio.h>
+«k|int» «f|main»(«k|void») { «c|// entry»
+    «k|unsigned» «k|char» c = «s|'a'»;
+    «f|printf»(«s|"%d\n"», «n|42» + «n|0x10»); «c|/* print */»
+    «k|return» «n|0»;
+}
+«k|char» *s = «s|"unterminated»
+«c|/* never closed»

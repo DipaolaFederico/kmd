@@ -1,0 +1,15 @@
+interface User { name: string; age: number } // shape
+export function greet(u: User): string {
+  const n = 3.14;
+  return `hi ${u.name}` + "!";
+} /* end */
+let s = 'unterminated
+/* open
+-- golden --
+«k|interface» «t|User» { name: string; age: number } «c|// shape»
+«k|export» «k|function» «f|greet»(u: «t|User»): string {
+  «k|const» n = «n|3.14»;
+  «k|return» «s|`hi ${u.name}`» + «s|"!"»;
+} «c|/* end */»
+«k|let» s = «s|'unterminated»
+«c|/* open»

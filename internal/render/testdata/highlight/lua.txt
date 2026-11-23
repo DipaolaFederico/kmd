@@ -1,0 +1,15 @@
+local M = {} -- module
+function M.add(a, b)
+  if a == nil then return 0 end
+  return a + b * 1.5, "sum", 'x'
+end
+print(M.add(1, 42))
+local s = "unterminated
+-- golden --
+«k|local» M = {} «c|-- module»
+«k|function» M.«f|add»(a, b)
+  «k|if» a == «k|nil» «k|then» «k|return» «n|0» «k|end»
+  «k|return» a + b * «n|1.5», «s|"sum"», «s|'x'»
+«k|end»
+«f|print»(M.«f|add»(«n|1», «n|42»))
+«k|local» s = «s|"unterminated»

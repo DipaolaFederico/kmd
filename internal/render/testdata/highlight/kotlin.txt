@@ -1,0 +1,17 @@
+package app // package
+fun main() {
+    val n = 42
+    var s = "n = $n" + 'c'
+    println(s + 1.5) /* print */
+}
+val bad = "unterminated
+/* open
+-- golden --
+«k|package» app «c|// package»
+«k|fun» «f|main»() {
+    «k|val» n = «n|42»
+    «k|var» s = «s|"n = $n"» + «s|'c'»
+    «f|println»(s + «n|1.5») «c|/* print */»
+}
+«k|val» bad = «s|"unterminated»
+«c|/* open»

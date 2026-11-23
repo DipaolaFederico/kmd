@@ -1,0 +1,17 @@
+use std::io; // imports
+fn main() -> Result<(), Error> {
+    let mut n: u32 = 42;
+    let s = "text \"quoted\"";
+    println!("{}", n + 0xff); /* note */
+}
+let bad = "unterminated
+/* open
+-- golden --
+«k|use» std::io; «c|// imports»
+«k|fn» «f|main»() -> «t|Result»<(), «t|Error»> {
+    «k|let» «k|mut» n: u32 = «n|42»;
+    «k|let» s = «s|"text \"quoted\""»;
+    println!(«s|"{}"», n + «n|0xff»); «c|/* note */»
+}
+«k|let» bad = «s|"unterminated»
+«c|/* open»

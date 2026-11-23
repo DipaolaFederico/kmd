@@ -1,0 +1,15 @@
+# site
+server {
+    listen 443 ssl;
+    server_name example.com;
+    location / { proxy_pass http://127.0.0.1:8080; add_header X-Id "$request_id" 'x'; }
+}
+return 301 "unterminated
+-- golden --
+«c|# site»
+«k|server» {
+    «k|listen» «n|443» ssl;
+    «k|server_name» example.com;
+    «k|location» / { «k|proxy_pass» «k|http»://«n|127.0.0.1»:«n|8080»; «k|add_header» X-Id «s|"$request_id"» «s|'x'»; }
+}
+«k|return» «n|301» «s|"unterminated»

@@ -1,0 +1,19 @@
+program Hello; // program
+var
+  n: integer;
+begin
+  n := 42; { block }
+  writeln('n = ', n, 1.5);
+end.
+s := 'unterminated
+{ open
+-- golden --
+«k|program» Hello; «c|// program»
+«k|var»
+  n: «t|integer»;
+«k|begin»
+  n := «n|42»; «c|{ block }»
+  «f|writeln»(«s|'n = '», n, «n|1.5»);
+«k|end».
+s := «s|'unterminated»
+«c|{ open»

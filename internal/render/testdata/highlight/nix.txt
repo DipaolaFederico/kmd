@@ -1,0 +1,25 @@
+# package
+{ pkgs ? import <nixpkgs> {} }:
+let version = "0.10.1"; in
+pkgs.stdenv.mkDerivation {
+  pname = "kmd"; inherit version;
+  doCheck = true; /* tests */ jobs = 4;
+  script = ''
+    make build
+  '';
+}
+s = "unterminated
+/* open
+-- golden --
+«c|# package»
+{ «f|pkgs» ? «k|import» <nixpkgs> {} }:
+«k|let» «f|version» = «s|"0.10.1"»; «k|in»
+«f|pkgs».«f|stdenv».«f|mkDerivation» {
+  «f|pname» = «s|"kmd"»; «k|inherit» version;
+  «f|doCheck» = «k|true»; «c|/* tests */» «f|jobs» = «n|4»;
+  «f|script» = «s|''»
+«s|    make build»
+«s|  ''»;
+}
+«f|s» = «s|"unterminated»
+«c|/* open»

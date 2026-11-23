@@ -1,0 +1,17 @@
+import std.stdio; // io
+void main() {
+    int n = 42;
+    double x = 1.5; /+ block /+ nested +/ +/
+    writeln("n = ", n, 'c', `raw`);
+}
+string s = "unterminated
+/+ open
+-- golden --
+«k|import» std.stdio; «c|// io»
+«t|void» «f|main»() {
+    «t|int» n = «n|42»;
+    «t|double» x = «n|1.5»; «c|/+ block /+ nested +/ +/»
+    «f|writeln»(«s|"n = "», n, «s|'c'», «s|`raw`»);
+}
+«t|string» s = «s|"unterminated»
+«c|/+ open»

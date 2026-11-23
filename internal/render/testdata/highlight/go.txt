@@ -1,0 +1,19 @@
+package main // entry point
+
+func Add(a int, b float64) string {
+	s := "sum: %d\n" + `raw` + 'x'
+	return fmt.Sprintf(s, 42, 1.5e3, 0x1F) /* inline */
+}
+var open = "unterminated
+/* block comment
+never closed
+-- golden --
+«k|package» main «c|// entry point»
+
+«k|func» «f|Add»(a int, b float64) string {
+	s := «s|"sum: %d\n"» + «s|`raw`» + «s|'x'»
+	«k|return» fmt.«f|Sprintf»(s, «n|42», «n|1.5e3», «n|0x1F») «c|/* inline */»
+}
+«k|var» open = «s|"unterminated»
+«c|/* block comment»
+«c|never closed»

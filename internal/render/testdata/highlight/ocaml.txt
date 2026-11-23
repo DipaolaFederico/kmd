@@ -1,0 +1,13 @@
+let rec fact n = (* recursive (* nested *) *)
+  if n <= 1 then 1 else n * fact (n - 1)
+type shape = Circle of float | Square of int
+let () = print_endline ("fact: " ^ string_of_int (fact 42)); ignore 1.5
+let s = "unterminated
+(* open (* deeper *)
+-- golden --
+«k|let» «k|rec» fact n = «c|(* recursive (* nested *) *)»
+  «k|if» n <= «n|1» «k|then» «n|1» «k|else» n * fact (n - «n|1»)
+«k|type» shape = «t|Circle» «k|of» «t|float» | «t|Square» «k|of» «t|int»
+«k|let» () = «f|print_endline» («s|"fact: "» ^ string_of_int (fact «n|42»)); «f|ignore» «n|1.5»
+«k|let» s = «s|"unterminated»
+«c|(* open (* deeper *)»

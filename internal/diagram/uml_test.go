@@ -332,7 +332,7 @@ func TestUMLHostile(t *testing.T) {
 		t.Helper()
 		start := time.Now()
 		lines, ok := Mermaid(src, width)
-		if d := time.Since(start); d > raceFactor*500*time.Millisecond {
+		if d := time.Since(start); d > raceFactor()*500*time.Millisecond {
 			t.Errorf("%s took %v", name, d)
 		}
 		if ok {

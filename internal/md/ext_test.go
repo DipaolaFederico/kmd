@@ -151,7 +151,7 @@ func TestPathological(t *testing.T) {
 	for name, in := range cases {
 		start := time.Now()
 		_ = HTML(Parse(in, GFM), HTMLOptions{})
-		if d := time.Since(start); d > raceFactor*500*time.Millisecond {
+		if d := time.Since(start); d > raceFactor()*500*time.Millisecond {
 			t.Errorf("%s took %v", name, d)
 		}
 	}
@@ -200,7 +200,7 @@ func TestSecurityLimits(t *testing.T) {
 		start := time.Now()
 		doc := Parse(src, GFM)
 		_ = HTML(doc, HTMLOptions{})
-		if d := time.Since(start); d > raceFactor*limit {
+		if d := time.Since(start); d > raceFactor()*limit {
 			t.Errorf("%s took %v", name, d)
 		}
 		return doc

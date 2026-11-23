@@ -86,7 +86,7 @@ func TestSlidesLimits(t *testing.T) {
 	doc := Parse(b.String(), GFM)
 	start := time.Now()
 	got = Slides(doc, n+1)
-	if d := time.Since(start); d > raceFactor*time.Second {
+	if d := time.Since(start); d > raceFactor()*time.Second {
 		t.Errorf("%d slides with footnotes took %v", n, d)
 	}
 	if len(got) != n || !strings.Contains(HTML(got[n-1], HTMLOptions{}), "d") {

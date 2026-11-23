@@ -148,7 +148,7 @@ kmd --completion fish > ~/.config/fish/completions/kmd.fish
 ```sh
 kmd README.md                 # render; opens the viewer if it does not fit on screen
 kmd docs/*.md                 # several files, one after another
-kmd docs/                     # a folder: its README.md, or a list of its documents
+kmd docs/                     # a folder: its README.md, or a list of every document under it
 cat notes.md | kmd            # read from standard input
 kmd -f notes.md               # live preview: re-render on every save
 kmd --view short.md           # open the viewer even if the document fits
@@ -212,8 +212,23 @@ The full reference is in the man page: `man kmd`.
 Documents longer than the terminal open in kmd's viewer. Links to other
 Markdown files open in the viewer itself, at the target `#heading` if there
 is one, so a folder of documents can be browsed like a wiki. A folder
-(`kmd notes/`, or a link to one) opens its `README.md` or `index.md`, or a
-list of its Markdown files and subfolders.
+(`kmd notes/`, or a link to one) opens its `README.md` or `index.md`, or
+else the **file picker**: every Markdown file under the folder, with its
+relative path, filtered as you type (fuzzy, case-insensitive). `o` opens
+the picker from any document (for its folder), and `S` searches the text
+of all those documents and lists the matching lines with their file, line
+and section.
+
+| Picker keys | Action |
+|---|---|
+| typing · `Backspace` · `Ctrl-U` | filter (or the text to search) · delete a character · clear |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End`, wheel | choose |
+| `Enter`, click | open the document (a text match opens at its section, the text highlighted); in text search, `Enter` first runs the search |
+| `Tab` | switch between finding files and searching their text |
+| `Esc` | cancel a running search · clear the filter · close the picker |
+
+`Backspace` in a document opened from the picker returns to the list as it
+was. The list skips hidden folders, `.git`, `node_modules` and `vendor`.
 
 | Keys | Action |
 |---|---|
@@ -222,6 +237,7 @@ list of its Markdown files and subfolders.
 | `Backspace` `h` `←` · `H` | back one document · back to the first document |
 | `j` `k` `Space` `b` `d` `u` `g` `G` | scroll (arrows, PgUp/PgDn, Home/End and the mouse wheel also work) |
 | `t` · `[` `]` | table of contents (choose a heading and press Enter) · previous / next section |
+| `o` · `S` | file picker: find a document in this folder · search the text of every document in it |
 | `c` | copy a code block on screen to the clipboard (press again for the next block on screen) |
 | `/` `n` `N` | search, next / previous match |
 | `e` · `r` · `?` · `q` | edit in `$VISUAL`/`$EDITOR` and reload · reload · help · quit |
@@ -476,6 +492,14 @@ threat model:
   the browser (their scripts would run). A click on a link that leaves kmd
   (web, mail, desktop apps) first selects it and shows its target; a second
   click or Enter opens it.
+- **File picker**: listing a folder reads only names, breadth first, at most
+  20 levels deep, 10,000 documents and 200,000 entries (a notice is shown
+  beyond), in the background. Symlinked folders are never entered (no loops,
+  nothing outside the folder); a symlinked document is listed only if it
+  resolves to a regular Markdown file inside the folder. Document contents
+  are read only by a text search the user starts: in the background,
+  cancellable with Esc, ≤ 16 MiB per file, ≤ 256 MiB and 1,000 matches per
+  search. File names and matching lines are sanitized like document text.
 
 Images cost what decoding costs: a large PNG adds a few milliseconds
 (`-i none` disables images; kitty passes PNGs through without decoding).

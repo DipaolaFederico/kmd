@@ -779,11 +779,15 @@ func TestFollowFolderWithoutReadme(t *testing.T) {
 	if h.path != empty || len(h.hist) != 1 || h.page.Lines[0] != "listing of "+empty {
 		t.Fatalf("folder listing: path %q msg %q", h.path, h.msg)
 	}
+	if !h.picking || h.pick.root != empty {
+		t.Fatalf("picker not opened on the folder: %+v", h.pick)
+	}
+	h.keys("esc")                                 // the plain listing stays
 	h.follow("file://" + filepath.ToSlash(empty)) // already there: no reload
 	if len(loaded) != 1 {
 		t.Errorf("reloaded the listing: %v", loaded)
 	}
-	h.keys("e")
+	h.keys("esc", "e")
 	if h.msg != "a folder listing cannot be edited" || len(h.edited) != 0 {
 		t.Errorf("edit a folder: %q %v", h.msg, h.edited)
 	}

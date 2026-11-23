@@ -20,6 +20,15 @@ func moveTo(b *strings.Builder, row, col int) {
 func (m *model) draw(b *strings.Builder) {
 	b.WriteString("\x1b[?2026h")
 	h := m.viewH()
+	if m.picking {
+		m.drawPicker(b)
+		m.status(b)
+		if m.help {
+			m.drawHelp(b)
+		}
+		b.WriteString("\x1b[?2026l")
+		return
+	}
 	for y := range h {
 		moveTo(b, y, 0)
 		if i := m.top + y; i < len(m.page.Lines) {
@@ -89,6 +98,16 @@ func (m *model) status(b *strings.Builder) {
 	switch {
 	case m.prompt:
 		left = "/" + string(m.input)
+	case m.picking && m.msg != "":
+		left = m.msg
+	case m.picking:
+		left, right = "Find: "+string(m.pick.query), "Enter open · Tab text search · Esc close"
+		if m.pick.text {
+			left, right = "Search: "+string(m.pick.tquery), "Enter search/open · Tab files · Esc close"
+		}
+		if styled.Width(left)+styled.Width(right)+6 > m.cols {
+			right = "" // the query comes first
+		}
 	case m.outline:
 		left = "↑↓ choose · Enter jump · Esc close"
 	case m.msg != "":
@@ -109,14 +128,14 @@ func (m *model) status(b *strings.Builder) {
 		}
 		right += "Tab links · ? help"
 	}
-	if right != "" {
+	if right != "" && !m.picking {
 		right += "  " + m.percent()
 	}
 	right = " " + right + " "
 	left = " " + clip(left, max(m.cols-styled.Width(right)-2, 4))
 	pad := max(m.cols-styled.Width(left)-styled.Width(right), 0)
 	b.WriteString(m.opt.Bar + left + strings.Repeat(" ", pad) + right + reset)
-	if m.prompt {
+	if m.prompt || m.picking && m.msg == "" {
 		moveTo(b, m.rows-1, styled.Width(left))
 		b.WriteString("\x1b[?25h")
 	} else {
@@ -204,6 +223,8 @@ var helpText = []string{
 	"H                back to the first document",
 	"",
 	"t                contents: jump to a heading",
+	"o                find a document in this folder",
+	"S                search the text of its documents",
 	"[ ]              previous / next section",
 	"/ n N            search, next / previous match",
 	"c                copy a code block on screen",
@@ -217,6 +238,9 @@ var helpText = []string{
 	"",
 	"Markdown links open here; web links and",
 	"images open in the desktop's default app.",
+	"A folder without a README lists all of its",
+	"documents (o): type to filter, Tab to search",
+	"their text, Enter to open, Backspace returns.",
 }
 
 func (m *model) drawHelp(b *strings.Builder) {

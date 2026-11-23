@@ -22,9 +22,11 @@ Gantt and pie), Graphviz diagrams and LaTeX math rendered with Unicode.
 .PP
 With no \fIFILE\fR, or when \fIFILE\fR is \fB\-\fR, standard input is read.
 A \fIFOLDER\fR shows its \fBREADME.md\fR (or \fBindex.md\fR); a folder without
-one is shown as a list of its Markdown files and subfolders (hidden entries
-excluded, at most 2000 entries read), whose links can be followed in the
-viewer. Links to folders in documents behave the same way.
+one opens the viewer's file picker (see \fBFILE PICKER\fR), which lists every
+Markdown file under it. When standard output is not a terminal, the folder is
+printed as a list of its Markdown files and subfolders (hidden entries
+excluded, at most 2000 entries read). Links to folders in documents behave
+the same way.
 Long documents are shown in the built\-in viewer when standard output is a
 terminal (see \fBVIEWER\fR).
 .SH OPTIONS
@@ -164,6 +166,13 @@ started.
 .B [\fR, \fB]
 Go to the previous or next section (heading).
 .TP
+.B o
+Open the file picker for the folder of the document (or the folder on
+screen); see \fBFILE PICKER\fR.
+.TP
+.B S
+Open the file picker in text search mode.
+.TP
 .B c
 Copy the source of a code block on screen to the clipboard; pressing
 \fBc\fR again copies the next block on screen. Control characters other than
@@ -183,6 +192,27 @@ Reload, help, quit.
 With \fBmouse = off\fR in the configuration file the terminal keeps the
 mouse (clicks do not reach the viewer). Set \fBpager\fR or \fBKMD_PAGER\fR to
 a command such as \fBless \-R\fR to use an external pager instead.
+.SS FILE PICKER
+The picker lists every Markdown file under a folder by its relative path,
+filtered as you type (fuzzy and case\-insensitive: the typed letters must
+appear in order, best matches first). \fBUp\fR/\fBDown\fR, \fBPgUp\fR/\fBPgDn\fR,
+\fBHome\fR/\fBEnd\fR and the wheel choose; \fBEnter\fR or a click opens the
+document, and \fBBackspace\fR in it returns to the list as it was.
+\fBBackspace\fR deletes a character and \fBCtrl\-U\fR clears the filter;
+\fBEsc\fR clears it, or closes the picker.
+.PP
+\fBTab\fR switches to text search: type the text and press \fBEnter\fR to
+search every listed document (case\-insensitive unless the text has capitals).
+Matches are listed with their file, line and section; \fBEnter\fR opens the
+document at that section with the text highlighted. The search runs in the
+background and \fBEsc\fR cancels it.
+.PP
+The listing skips hidden folders, \fB.git\fR, \fBnode_modules\fR and
+\fBvendor\fR, never enters symlinked folders, and lists a symlinked document
+only when it resolves to a regular Markdown file inside the folder. It stops
+at 20 levels, 10,000 documents or 200,000 directory entries, and a search at
+16 MiB per file, 256 MiB in total or 1,000 matches; the picker says when a
+limit was reached.
 .SH SYNTAX HIGHLIGHTING
 Fenced code blocks are highlighted by the language named in their info
 string, matched without regard to case against these names (language, then

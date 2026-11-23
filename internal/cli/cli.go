@@ -102,8 +102,9 @@ Usage:
   kmd [options] [file|folder ...]
   cat README.md | kmd [options]
 
-A folder shows its README.md (or index.md), or else a list of its
-Markdown files and subfolders to browse in the viewer.
+A folder shows its README.md (or index.md), or else a list of every
+Markdown file under it, filtered as you type (o in the viewer opens it
+for the document's folder, S searches the text of all its documents).
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
@@ -146,7 +147,8 @@ Files:
 Viewer (long documents):
   Tab/Shift-Tab select a link (or click it) · Enter open it · Backspace back
   H back to the first document · t contents · [ ] previous/next section
-  / search · c copy a code block · e edit · ? all keys · q quit
+  / search · o find a document · S search all documents · c copy a code
+  block · e edit · ? all keys · q quit
 
 Environment:
   KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG, NO_COLOR,
@@ -470,7 +472,9 @@ func Run(env Env) int {
 	}
 	long := !o.html && !o.toc && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
 		strings.Count(res.text, "\n") > env.Rows
-	if viewable && (s.alwaysView || long && s.pager == builtinPager) {
+	// a folder without a README opens the file picker
+	picker := len(o.files) == 1 && o.files[0] != "-" && isDir(o.files[0])
+	if viewable && (s.alwaysView || picker || long && s.pager == builtinPager) {
 		if err := runViewer(env, o, s, in, false, pageOf(res), env.Cols); err == nil {
 			return res.code
 		}
@@ -787,8 +791,15 @@ func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first
 		return pageOf(res), nil
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
+	root := "." // the picker lists the folder of the document, or the working one
+	if start != "" {
+		root = start
+		if !isDir(start) {
+			root = filepath.Dir(start)
+		}
+	}
 	opt := view.Options{Load: load, Start: start, Mouse: s.mouse, Watch: watch, Poll: env.Poll,
-		Select: sel, Match: match, Bar: bar, First: first, FirstCols: firstCols}
+		Select: sel, Match: match, Bar: bar, First: first, FirstCols: firstCols, Root: root}
 	if env.View != nil {
 		return env.View(opt)
 	}

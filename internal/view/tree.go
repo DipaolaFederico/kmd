@@ -1,0 +1,483 @@
+package view
+
+import (
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"github.com/DipaolaFederico/kmd/internal/render"
+)
+
+// The file picker lists every Markdown document under a folder. The walk
+// and the text search run in the background (see task) and are bounded:
+// a folder link in an untrusted document can point at "/". (Variables so
+// tests can lower them.)
+var (
+	maxPickDepth   = 20      // folder levels below the root
+	maxPickFiles   = 10000   // documents listed
+	maxPickEntries = 200_000 // directory entries read in total
+
+	maxSearchFile  = 16 << 20  // bytes read from one document
+	maxSearchTotal = 256 << 20 // bytes read by one search
+	maxHits        = 1000      // matches listed
+	maxFileHits    = 50        // matches listed per document
+)
+
+const maxHitText = 300 // bytes kept of a matching line
+
+// skipDirs are never walked (besides hidden folders such as .git).
+var skipDirs = map[string]bool{"node_modules": true, "vendor": true}
+
+// doc is a document found by the walk.
+type doc struct {
+	path string // absolute path, to open it
+	name string // path relative to the root, slash-separated and sanitized
+}
+
+// hit is a line of a document that matches a text search.
+type hit struct {
+	doc           doc
+	line          int    // 1-based line in the source
+	heading, text string // section it is in, and the line (sanitized)
+}
+
+// task is a background job (walk, search) whose results are applied on the
+// viewer's loop: the goroutine sends closures to bg, and stops sending once
+// the task is cancelled.
+type task struct{ stop chan struct{} }
+
+func newTask() *task { return &task{stop: make(chan struct{})} }
+
+func (t *task) cancel() {
+	if t != nil {
+		select {
+		case <-t.stop:
+		default:
+			close(t.stop)
+		}
+	}
+}
+
+func (t *task) stopped() bool {
+	select {
+	case <-t.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+// send hands f to the loop; false when the task was cancelled meanwhile.
+func (t *task) send(bg chan<- func(*model), f func(*model)) bool {
+	select {
+	case bg <- f:
+		return true
+	case <-t.stop:
+		return false
+	}
+}
+
+// walkTree lists the Markdown documents under root, breadth first (so a
+// truncated list keeps the shallow documents), calling emit with batches
+// of them; emit returns false to stop. It skips hidden folders and
+// skipDirs, never enters a symlinked folder (no loops, no escaping the
+// root), and lists a symlinked document only if it resolves to a regular
+// Markdown file inside the root — the checks the viewer makes when it
+// follows a link. The result explains any limit that was reached.
+func walkTree(root string, stopped func() bool, emit func([]doc) bool) string {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return errText(err)
+	}
+	rootReal, err := filepath.EvalSymlinks(rootAbs)
+	if err != nil {
+		return errText(err)
+	}
+	type dir struct {
+		path  string
+		depth int
+	}
+	queue := []dir{{rootAbs, 0}}
+	var batch []doc
+	files, entries := 0, 0
+	var notes []string
+	flush := func() bool {
+		ok := len(batch) == 0 || emit(batch)
+		batch = nil
+		return ok
+	}
+	deep, full := false, false
+walk:
+	for len(queue) > 0 {
+		if stopped() {
+			return ""
+		}
+		d := queue[0]
+		queue = queue[1:]
+		budget := maxPickEntries - entries
+		if budget <= 0 {
+			break
+		}
+		f, err := os.Open(d.path)
+		if err != nil {
+			continue // unreadable folder: skip it, like ls -R
+		}
+		ents, _ := f.ReadDir(budget)
+		_ = f.Close()
+		if entries += len(ents); entries >= maxPickEntries && !full {
+			full = true
+			notes = append(notes, "stopped after reading "+strconv.Itoa(maxPickEntries)+" entries")
+		}
+		sort.Slice(ents, func(i, j int) bool { return ents[i].Name() < ents[j].Name() })
+		for _, e := range ents {
+			n := e.Name()
+			if strings.HasPrefix(n, ".") {
+				continue
+			}
+			p := filepath.Join(d.path, n)
+			t := e.Type()
+			switch {
+			case t.IsDir():
+				if skipDirs[n] {
+					continue
+				}
+				if d.depth >= maxPickDepth {
+					deep = true
+					continue
+				}
+				queue = append(queue, dir{p, d.depth + 1})
+				continue
+			case !render.MarkdownExt[strings.ToLower(filepath.Ext(n))]:
+				continue
+			case t&os.ModeSymlink != 0:
+				if !linkInside(p, rootReal) {
+					continue
+				}
+			case !t.IsRegular():
+				continue
+			}
+			rel, err := filepath.Rel(rootAbs, p)
+			if err != nil {
+				continue
+			}
+			batch = append(batch, doc{path: p, name: render.Clean(filepath.ToSlash(rel))})
+			if files++; files >= maxPickFiles {
+				notes = append(notes, "only the first "+strconv.Itoa(maxPickFiles)+" documents")
+				break walk
+			}
+		}
+		if len(batch) >= 256 && !flush() {
+			return ""
+		}
+	}
+	if deep {
+		notes = append(notes, "folders deeper than "+strconv.Itoa(maxPickDepth)+" levels skipped")
+	}
+	if !flush() {
+		return ""
+	}
+	return strings.Join(notes, " · ")
+}
+
+// linkInside reports whether the symlink p resolves to a regular file
+// inside root (already resolved) with the same Markdown extension.
+func linkInside(p, root string) bool {
+	real, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return false
+	}
+	st, err := os.Stat(real)
+	if err != nil || !st.Mode().IsRegular() ||
+		!strings.EqualFold(filepath.Ext(real), filepath.Ext(p)) {
+		return false
+	}
+	rel, err := filepath.Rel(root, real)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// query is a lowercased filter, as runes (fuzzy matching) and as a string
+// (substring bonus).
+type query struct {
+	r []rune
+	s string
+}
+
+func newQuery(s string) query {
+	s = strings.ToLower(s)
+	return query{[]rune(s), s}
+}
+
+// fuzzy scores name against the query q: every rune of q must
+// appear in name in order, ignoring case. Matches at the start of a path
+// segment or word, consecutive matches and matches in the file name score
+// higher. The byte offsets of the matches are appended to pos.
+func fuzzy(name string, fq query, pos []int) (int, []int, bool) {
+	q := fq.r
+	if len(q) == 0 {
+		return 0, pos, true
+	}
+	base := strings.LastIndexByte(name, '/') + 1
+	score, qi, prevMatch := 0, 0, -2
+	prev := '/'
+	for i, r := range name {
+		lr := r
+		switch {
+		case r >= 'A' && r <= 'Z':
+			lr = r + 'a' - 'A'
+		case r >= utf8.RuneSelf:
+			lr = unicode.ToLower(r)
+		}
+		if lr == q[qi] {
+			score++
+			if prev == '/' || prev == '-' || prev == '_' || prev == '.' || prev == ' ' {
+				score += 8
+			}
+			if prevMatch == i-utf8.RuneLen(prev) {
+				score += 4
+			}
+			if i >= base {
+				score += 2
+			}
+			prevMatch = i
+			pos = append(pos, i)
+			if qi++; qi == len(q) {
+				return score + substringBonus(name, base, fq.s), pos, true
+			}
+		}
+		prev = r
+	}
+	return 0, pos, false
+}
+
+// substringBonus favours names that contain the query as typed, above all
+// in the file name and at its start ("guide" → guide.md first).
+func substringBonus(name string, base int, q string) int {
+	i := indexFold(name, q)
+	switch {
+	case i < 0:
+		return 0
+	case i == base:
+		return 40
+	case i > base:
+		return 30
+	}
+	return 20
+}
+
+// indexFold is strings.Index ignoring ASCII case, for a lowercase needle
+// (non-ASCII runes must match exactly: this is only a ranking bonus).
+func indexFold(s, needle string) int {
+	n := len(needle)
+	for i := 0; i+n <= len(s); i++ {
+		j := 0
+		for j < n {
+			c := s[i+j]
+			if c >= 'A' && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != needle[j] {
+				break
+			}
+			j++
+		}
+		if j == n {
+			return i
+		}
+	}
+	return -1
+}
+
+// filterDocs returns the indexes of the documents matching q, best first;
+// with an empty query, all of them in order.
+func filterDocs(docs []doc, q query, out []int) []int {
+	out = out[:0]
+	if len(q.r) == 0 {
+		for i := range docs {
+			out = append(out, i)
+		}
+		return out
+	}
+	type scored struct{ i, s int }
+	var ms []scored
+	var pos []int
+	for i, d := range docs {
+		var s int
+		var ok bool
+		if s, pos, ok = fuzzy(d.name, q, pos[:0]); ok {
+			ms = append(ms, scored{i, s})
+		}
+	}
+	sort.Slice(ms, func(a, b int) bool {
+		x, y := ms[a], ms[b]
+		if x.s != y.s {
+			return x.s > y.s
+		}
+		if lx, ly := len(docs[x.i].name), len(docs[y.i].name); lx != ly {
+			return lx < ly
+		}
+		return x.i < y.i
+	})
+	for _, m := range ms {
+		out = append(out, m.i)
+	}
+	return out
+}
+
+// searchDocs finds the lines of docs containing q (ignoring case unless q
+// has an uppercase letter, like / in the viewer), calling emit with each
+// document's hits and progress (documents searched); emit returns false to
+// stop. Reads are bounded per document and in total; the result explains
+// any limit that was reached.
+func searchDocs(docs []doc, q string, stopped func() bool, emit func(hits []hit, done int) bool) string {
+	fold := strings.ToLower(q) == q
+	ascii := true
+	for i := 0; i < len(q); i++ {
+		ascii = ascii && q[i] < utf8.RuneSelf
+	}
+	needle := []byte(q)
+	var low []byte
+	total, nhits := 0, 0
+	for i, d := range docs {
+		if stopped() {
+			return ""
+		}
+		if total >= maxSearchTotal {
+			return "stopped after reading " + strconv.Itoa(maxSearchTotal>>20) + " MiB"
+		}
+		data := readDoc(d.path, min(maxSearchFile, maxSearchTotal-total))
+		total += len(data)
+		hay := data
+		if fold && ascii {
+			low = lowerASCII(low[:0], data)
+			hay = low
+		}
+		hits := scanDoc(d, data, hay, needle, fold && !ascii, min(maxFileHits, maxHits-nhits))
+		nhits += len(hits)
+		last := i == len(docs)-1 || nhits >= maxHits
+		if (len(hits) > 0 || i%64 == 63 || last) && !emit(hits, i+1) {
+			return ""
+		}
+		if nhits >= maxHits {
+			return "only the first " + strconv.Itoa(maxHits) + " matches"
+		}
+	}
+	return ""
+}
+
+// readDoc reads at most n bytes of a document found by the walk, which
+// must still be a regular file (it may have been replaced since).
+func readDoc(path string, n int) []byte {
+	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	// #nosec G304 -- a document listed by walkTree, which checked it.
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	if st, err := f.Stat(); err != nil || !st.Mode().IsRegular() {
+		return nil
+	}
+	data, _ := io.ReadAll(io.LimitReader(f, int64(n)))
+	return data
+}
+
+// lowerASCII appends src with ASCII letters lowered: the same length as
+// src, so offsets in it are offsets in src.
+func lowerASCII(dst, src []byte) []byte {
+	for _, c := range src {
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		dst = append(dst, c)
+	}
+	return dst
+}
+
+// scanDoc returns up to max lines of data containing needle in hay (data
+// itself, or its ASCII-lowered copy); foldLines lowers each line instead
+// (non-ASCII query). Each hit carries the heading of its section: ATX and
+// setext headings outside fenced code.
+func scanDoc(d doc, data, hay, needle []byte, foldLines bool, max int) []hit {
+	var hits []hit
+	heading, prev := "", []byte(nil)
+	fence := byte(0)
+	for ln, start := 1, 0; start < len(data) && len(hits) < max; ln++ {
+		end := bytes.IndexByte(data[start:], '\n')
+		if end < 0 {
+			end = len(data)
+		} else {
+			end += start
+		}
+		line := data[start:end]
+		t := bytes.TrimLeft(line, " ")
+		switch {
+		case len(line)-len(t) > 3:
+		case fence != 0:
+			if bytes.HasPrefix(t, []byte{fence, fence, fence}) {
+				fence = 0
+			}
+		case bytes.HasPrefix(t, []byte("```")) || bytes.HasPrefix(t, []byte("~~~")):
+			fence = t[0]
+		case len(t) > 0 && t[0] == '#':
+			if h, ok := atxHeading(t); ok {
+				heading = h
+			}
+		case len(prev) > 0 && len(bytes.TrimSpace(t)) > 0 && strings.Trim(string(bytes.TrimSpace(t)), "=") == "",
+			len(prev) > 0 && len(bytes.TrimSpace(t)) > 1 && strings.Trim(string(bytes.TrimSpace(t)), "-") == "":
+			heading = clipBytes(bytes.TrimSpace(prev))
+		}
+		h := hay[start:end]
+		found := false
+		if foldLines {
+			found = strings.Contains(strings.ToLower(string(h)), string(needle))
+		} else {
+			found = bytes.Contains(h, needle)
+		}
+		if found {
+			hits = append(hits, hit{doc: d, line: ln, heading: heading, text: clipBytes(bytes.TrimSpace(line))})
+		}
+		prev = bytes.TrimSpace(line)
+		if fence != 0 {
+			prev = nil
+		}
+		start = end + 1
+	}
+	return hits
+}
+
+// atxHeading returns the text of an ATX heading line ("## Title ##").
+func atxHeading(t []byte) (string, bool) {
+	n := 0
+	for n < len(t) && t[n] == '#' {
+		n++
+	}
+	if n > 6 || n < len(t) && t[n] != ' ' && t[n] != '\t' {
+		return "", false
+	}
+	s := strings.TrimSpace(string(t[n:]))
+	if c := strings.TrimRight(s, "#"); c == "" || strings.HasSuffix(c, " ") {
+		s = strings.TrimSpace(c)
+	}
+	return clipBytes([]byte(s)), true
+}
+
+// clipBytes sanitizes a line of a document, keeping at most maxHitText
+// bytes (on a rune boundary).
+func clipBytes(b []byte) string {
+	if len(b) > maxHitText {
+		n := maxHitText
+		for n > 0 && !utf8.RuneStart(b[n]) {
+			n--
+		}
+		b = b[:n]
+	}
+	return render.Clean(string(b))
+}

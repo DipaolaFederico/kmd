@@ -117,6 +117,11 @@ func dirListing(name string, f *os.File) (string, error) {
 	return b.String(), nil
 }
 
+func isDir(name string) bool {
+	st, err := os.Stat(name)
+	return err == nil && st.IsDir()
+}
+
 // mdEscape makes a file name literal Markdown text.
 func mdEscape(s string) string {
 	var b strings.Builder

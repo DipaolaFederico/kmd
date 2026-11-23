@@ -260,7 +260,7 @@ jobs:
         run: |
           # only the stamped files may differ from the commit: make dist packs
           # untracked files too, so nothing else may be lying around
-          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml)$' || true)
+          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml|CHANGELOG\.md)$' || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected changes before packing the source:"; echo "$unexpected"
             exit 1

@@ -94,10 +94,13 @@ Then, once per channel:
   the forks from the token's login. The bot's first pull request to `kmd`
   needs *Approve and run* for CI (first-time contributor); later ones run
   directly.
-- **winget**: each release opens a pull request from the bot's fork (the
-  first one as *New package*); the winget moderators merge it, which can
-  take a few days. On the first submission sign the Microsoft CLA when the
-  bot asks.
+- **winget**: each release syncs the bot's fork and opens a pull request
+  from it (*New package* until the first one is merged, then *New
+  version*); the winget moderators merge it, which can take a few days. The
+  bot's pull requests for older versions that are still open and not
+  approved (no approving review, no `Moderator-Approved` label) are closed
+  as superseded, so one version waits for moderation at
+  a time. On the first submission sign the Microsoft CLA when the bot asks.
 - **Debian/Ubuntu**: nothing; the `.deb` files are release assets.
 - **Nix**: nothing for the flake. `flake.lock` pins nixpkgs; update it with
   `nix flake update` from time to time. For nixpkgs, open a pull request

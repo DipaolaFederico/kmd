@@ -6,11 +6,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -89,6 +91,7 @@ type options struct {
 	listThemes   bool
 	template     string
 	section      string
+	base         *url.URL // --base
 	showConfig   bool
 	completion   string
 	version      bool
@@ -117,6 +120,9 @@ Display:
       --no-diagrams        show mermaid/graphviz source instead of diagrams
       --commonmark         strict CommonMark: disable GitHub extensions,
                            emoji shortcodes and [[wiki links]]
+      --base URL           resolve relative links of standard input against
+                           URL (http/https; nothing is downloaded), e.g.
+                           curl -fsSL URL | kmd --base URL
   -P, --no-pager           never page long output (no viewer)
       --view               open the viewer even when the document fits
 
@@ -180,6 +186,8 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	str(&o.template, "", "theme-template")
 	str(&o.completion, "", "completion")
 	str(&o.section, "", "s", "section")
+	var baseURL string // validated into o.base below
+	str(&baseURL, "", "base")
 	boolean(&o.noPager, "P", "no-pager")
 	boolean(&o.noMath, "no-math")
 	boolean(&o.noDiagrams, "no-diagrams")
@@ -226,6 +234,10 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	if o.width < 0 || o.width > maxWidth {
 		return o, fmt.Errorf("--width must be between 0 (terminal width) and %d", maxWidth)
 	}
+	var err error
+	if o.base, err = parseBase(baseURL, o.explicitFlag["base"], o.files); err != nil {
+		return o, err
+	}
 	if o.follow && len(o.files) != 1 {
 		return o, errors.New("--follow needs exactly one file")
 	}
@@ -233,6 +245,30 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 		return o, errors.New("--slides shows one document, without --html or --toc")
 	}
 	return o, nil
+}
+
+// parseBase validates --base (nil when not given): an absolute http(s) URL
+// without credentials that is safe to emit as a hyperlink target, for a run
+// that reads standard input. The value is not echoed in errors: it may hold
+// control characters.
+func parseBase(s string, given bool, files []string) (*url.URL, error) {
+	switch {
+	case !given:
+		return nil, nil
+	case s == "": // --base "$URL" with $URL unset
+		return nil, errors.New("--base needs a URL")
+	case !render.SafeURL(s):
+		return nil, errors.New("--base is too long or contains control or invisible characters")
+	}
+	u, err := url.Parse(s)
+	// the host is checked decoded too: %E2%80%AE is a bidi override
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || !render.SafeURL(u.Hostname()) || u.User != nil {
+		return nil, errors.New("--base must be an http or https URL without a user name, such as https://example.com/docs/README.md")
+	}
+	if len(files) > 0 && !slices.Contains(files, "-") {
+		return nil, errors.New("--base applies to standard input: curl -fsSL URL | kmd --base URL")
+	}
+	return u, nil
 }
 
 // settings is the resolved configuration for one run.
@@ -334,6 +370,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 		return s, err
 	}
 	s.opts, s.mdOpt = c.Render, c.Parse
+	s.opts.BaseURL = o.base
 	// The user chose to open the document: its images may live anywhere
 	// (../assets/x.png, absolute paths), unlike in the library's default.
 	s.opts.AnyImagePath = true
@@ -347,6 +384,22 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	s.mouse = cfg.Mouse == nil || *cfg.Mouse
 	s.alwaysView = o.view || cfg.View == "always" && !o.noPager
 	return s, nil
+}
+
+// docOptions returns the render options for document name, whose relative
+// paths resolve against dir; --base applies only to standard input.
+func (s settings) docOptions(name, dir string) render.Options {
+	opts := s.opts
+	opts.BaseDir = dir
+	switch {
+	case name != "-":
+		opts.BaseURL = nil
+	case opts.BaseURL != nil:
+		// the document's images are on the web, next to it: draw only
+		// data: URIs rather than read files from the current folder
+		opts.AnyImagePath = false
+	}
+	return opts
 }
 
 // width is the render width for a terminal cols wide (0 = unknown).
@@ -547,11 +600,10 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 			res.code = 1
 			continue
 		}
-		opts := s.opts
-		opts.BaseDir = base
+		opts := s.docOptions(name, base)
 		switch {
 		case o.html:
-			htmlParts = append(htmlParts, md.HTML(doc, md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML}))
+			htmlParts = append(htmlParts, md.HTML(doc, md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML, BaseURL: opts.BaseURL}))
 			if title == "" {
 				title = docTitle(doc, name)
 			}

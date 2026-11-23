@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"github.com/DipaolaFederico/kmd/internal/md"
 )
 
 // Link is a hyperlink of the rendered document, located on screen so an
@@ -80,7 +82,8 @@ func hasScheme(s string) bool {
 
 // href resolves a link destination for hyperlinks and navigation: a relative
 // path becomes an absolute file:// URL (terminals cannot resolve relative
-// targets, they do not know which directory the document came from).
+// targets, they do not know which directory the document came from), or,
+// with Options.BaseURL, an absolute URL under it.
 //
 // local reports whether the result is a resolved file:// URL of a Markdown
 // or document file (see openable).
@@ -88,7 +91,13 @@ func (r *renderer) href(dest string) (h string, local bool) {
 	// longer targets are never emitted (safeURL) and would be re-processed
 	// for every use of a reference link: a hostile document could make that
 	// quadratic
-	if len(dest) > maxURL || dest == "" || dest[0] == '#' || hasScheme(dest) || strings.HasPrefix(dest, "//") {
+	if len(dest) > maxURL || dest == "" || dest[0] == '#' || hasScheme(dest) {
+		return dest, false
+	}
+	if r.opt.BaseURL != nil {
+		return md.ResolveLink(r.opt.BaseURL, dest), false
+	}
+	if strings.HasPrefix(dest, "//") {
 		return dest, false
 	}
 	p, frag, _ := strings.Cut(dest, "#")

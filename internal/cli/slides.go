@@ -28,7 +28,7 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		if err != nil {
 			return nil, err
 		}
-		vs.opts.BaseDir = base
+		vs.opts = vs.docOptions(name, base)
 		// one budget for the whole deck: images, diagrams and formulas
 		// are limited per document, not per slide
 		vs.opts.Budget = &render.Budget{}

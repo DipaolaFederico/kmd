@@ -11,7 +11,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20FreeBSD%20%7C%20Windows-lightgrey)](https://github.com/DipaolaFederico/kmd/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Installation](#-installation) · [Usage](#-usage) · [Viewer](#-viewer) · [Themes](#-themes) · [Configuration](#%EF%B8%8F-configuration) · [Security](#-security)
+[Installation](#-installation) · [Usage](#-usage) · [Viewer](#-viewer) · [Themes](#-themes) · [Configuration](#%EF%B8%8F-configuration) · [Remote documents](#-remote-documents) · [Security](#-security)
 
 </div>
 
@@ -172,7 +172,7 @@ kmd -w 80 doc.md              # fixed render width
 | 🎯 Read one section, or print it from a script | `kmd -s install README.md` |
 | 📤 Share a rendered document | `kmd --html doc.md > doc.html` |
 | 🎤 Present from the terminal | `kmd --slides talk.md` (`-f` reloads on save) |
-| 🔌 Render remote Markdown without downloading it to disk | `curl -s https://…/README.md \| kmd` |
+| 🔌 Read a remote README (kmd itself [never fetches URLs](#-remote-documents)) | `curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md \| kmd` |
 | 🖨️ Plain output for scripts or logs | `kmd -c never -P doc.md` |
 
 ### Options
@@ -187,6 +187,7 @@ Display:
       --no-math            show LaTeX source instead of rendered formulas
       --no-diagrams        show mermaid/dot source instead of diagrams
       --commonmark         strict CommonMark (no GitHub extensions, emoji or wiki links)
+      --base URL           resolve relative links of standard input against URL
   -P, --no-pager           never page long output (no viewer)
       --view               open the viewer even when the document fits
 Output modes:
@@ -450,12 +451,44 @@ given: pass it names from `Themes`, not raw user input. The functions are safe f
 The API follows semantic versioning from v1.0.0; the rendered output itself
 improves between releases and is not part of it.
 
+## 🌐 Remote documents
+
+kmd never makes network requests: it takes no URLs, downloads no images and
+contacts no server while rendering. This is a security decision, not a
+missing feature: fetching a document would tell its author when and from
+where it is read (tracking pixels), and would put a network client — TLS,
+proxies, redirects — inside a tool that only needs to read text. Let a tool
+made for downloading do it, and pipe the document in:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md | kmd
+```
+
+A piped document has no folder, so its relative links and images resolve
+against the current folder, as if it had been saved there. `--base` takes
+the document's URL and turns its relative links into web links, as a
+browser would, in the terminal, the viewer and `--html`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md |
+  kmd --base https://github.com/OWNER/REPO/blob/main/README.md
+```
+
+Only `http` and `https` URLs without a user name are accepted. With
+`--base` the document's images are on the web too, so only inline `data:`
+images are drawn; the others show their alt text, since drawing them would
+mean downloading them.
+
 ## 🔒 Security
 
 Documents are treated as untrusted (READMEs from cloned repositories,
 downloads, `curl | kmd`). The design was reviewed and fuzzed against that
 threat model:
 
+- **Network**: kmd makes no network requests: no URL arguments, no image
+  downloads, nothing contacted while rendering (a test checks that the
+  binary does not link the `net` package). See
+  [Remote documents](#-remote-documents).
 - **Terminal injection**: C0/C1 control characters, DEL and Unicode bidi
   overrides ("Trojan Source") are stripped from all document text on output,
   including characters produced via entities like `&#27;`. OSC 8 link targets

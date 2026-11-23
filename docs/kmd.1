@@ -60,6 +60,16 @@ Show Mermaid and Graphviz source instead of diagrams.
 Strict CommonMark: disable all GitHub extensions, emoji shortcodes and wiki
 links.
 .TP
+.B \-\-base " " \fIURL\fR
+Resolve the relative links of a document read from standard input against
+\fIURL\fR, the address the document came from, as a browser would: with
+\fBcurl \-fsSL https://example.com/docs/README.md | kmd \-\-base
+https://example.com/docs/README.md\fR, \fB[guide](guide.md)\fR links to
+\fBhttps://example.com/docs/guide.md\fR. Only \fBhttp\fR and \fBhttps\fR
+URLs without a user name are accepted. Applies to the terminal output, the
+viewer and \fB\-\-html\fR. Only inline \fBdata:\fR images are then drawn;
+nothing is ever downloaded (see \fBREMOTE DOCUMENTS\fR).
+.TP
 .BR \-P ", " \-\-no\-pager
 Never page long output (no viewer).
 .TP
@@ -318,11 +328,33 @@ Used by the \fBauto\fR theme to detect light terminals.
 \fBtruecolor\fR or \fB24bit\fR enables 24-bit colors.
 .SH EXIT STATUS
 0 on success, 1 if a file could not be read or written, 2 on usage errors.
+.SH REMOTE DOCUMENTS
+.B kmd
+never makes network requests: it has no URL arguments, does not download
+images, and never contacts a server while rendering. Fetching a document
+would let its author learn when and from where it is read (tracking pixels),
+and would put a network client, with its TLS, proxies and redirects, inside
+a tool that only needs to read text. To read a remote document, download it
+with a tool made for that and pipe it in:
+.PP
+.RS
+.nf
+curl \-fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md | kmd
+.fi
+.RE
+.PP
+A document read from standard input has no folder: its relative links and
+images resolve against the current folder, as if it had been saved there.
+Give \fB\-\-base\fR the document's URL to turn its relative links into
+web links instead. Its images are then on the web too, so only inline
+\fBdata:\fR images are drawn; the others show their alt text, since
+drawing them would mean downloading them.
 .SH SECURITY
 Documents are treated as untrusted. Control characters, escape sequences and
 bidi overrides contained in documents are removed before output, so a
-document cannot control or visually reorder the terminal. Remote images are
-never downloaded. Linked documents are only read when the user follows the
+document cannot control or visually reorder the terminal. kmd makes no
+network requests and remote images are never downloaded (see
+\fBREMOTE DOCUMENTS\fR). Linked documents are only read when the user follows the
 link in the viewer, and only local images, PDFs and other data files (never
 programs) are handed to the desktop. Inputs are limited to 16 MiB and 250,000 blocks, images to
 20 MiB and 40 megapixels (at most 50 per document), and the number of
@@ -344,6 +376,10 @@ Plain outline of a document.
 .TP
 .B kmd \-\-html doc.md > doc.html
 Export to HTML.
+.TP
+.B curl \-fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md | kmd \-\-base https://github.com/OWNER/REPO/blob/main/README.md
+Read a remote README, with its relative links pointing to the repository on
+GitHub.
 .SH SEE ALSO
 .BR less (1)
 .SH AUTHOR

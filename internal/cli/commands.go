@@ -102,10 +102,10 @@ _kmd() {
             COMPREPLY=($(compgen -W "auto blocks kitty iterm2 sixel none" -- "$cur")); return ;;
         --completion)
             COMPREPLY=($(compgen -W "bash zsh fish" -- "$cur")); return ;;
-        -w|--width|-s|--section) return ;;
+        -w|--width|-s|--section|--base) return ;;
     esac
     if [[ "$cur" == -* ]]; then
-        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark -P --no-pager --view --slides --toc -s --section --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
+        COMPREPLY=($(compgen -W "-w --width -t --theme -c --color -i --images --hyperlinks --no-math --no-diagrams --commonmark --base -P --no-pager --view --slides --toc -s --section --html --unsafe-html -f --follow --list-themes --theme-template --config --completion -v --version -h --help" -- "$cur"))
         return
     fi
     COMPREPLY=($(compgen -f -X '!*.@(md|markdown|mdown|mkd|txt|MD)' -- "$cur") $(compgen -d -- "$cur"))
@@ -125,6 +125,7 @@ _arguments -s \
   '--no-math[show LaTeX source]' \
   '--no-diagrams[show diagram source]' \
   '--commonmark[strict CommonMark]' \
+  '--base[resolve relative links of standard input against a URL]:url:_urls' \
   '(-P --no-pager)'{-P,--no-pager}'[never page output]' \
   '--view[open the viewer even for short documents]' \
   '--toc[print table of contents]' \
@@ -152,6 +153,7 @@ complete -c kmd -l hyperlinks -x -a 'auto always never' -d 'Clickable links'
 complete -c kmd -l no-math -d 'Show LaTeX source'
 complete -c kmd -l no-diagrams -d 'Show diagram source'
 complete -c kmd -l commonmark -d 'Strict CommonMark'
+complete -c kmd -l base -x -d 'Resolve relative links of standard input against a URL'
 complete -c kmd -s P -l no-pager -d 'Never page output'
 complete -c kmd -l view -d 'Open the viewer even for short documents'
 complete -c kmd -l toc -d 'Print table of contents'

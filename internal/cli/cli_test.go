@@ -942,3 +942,68 @@ func TestFolderOpensPicker(t *testing.T) {
 		t.Errorf("piped folder: %q", r.out)
 	}
 }
+
+// --base resolves the relative links of standard input only, and refuses
+// anything but a plain http(s) URL without echoing it.
+func TestBase(t *testing.T) {
+	const base = "https://example.com/docs/README.md"
+	stdin := func(src string) func(*Env) {
+		return func(e *Env) { e.Stdin = strings.NewReader(src) }
+	}
+	r := run(t, stdin("[g](guide.md) [a](#x)"), "--base", base, "-P", "-c", "never")
+	if r.code != 0 || !strings.Contains(r.out, "g (https://example.com/docs/guide.md) a") {
+		t.Errorf("stdin: %+v", r)
+	}
+	r = run(t, stdin("[g](guide.md) ![i](i.png)"), "--base", base, "--html")
+	if r.code != 0 || !strings.Contains(r.out, `href="https://example.com/docs/guide.md"`) || !strings.Contains(r.out, `src="i.png"`) {
+		t.Errorf("html: %+v", r)
+	}
+	// with a file too, only standard input is resolved against the URL
+	p := writeFile(t, "local.md", "[l](other.md)")
+	r = run(t, stdin("[g](guide.md)"), "--base", base, "-P", "-c", "never", "-", p)
+	if r.code != 0 || !strings.Contains(r.out, "https://example.com/docs/guide.md") || !strings.Contains(r.out, "l (other.md)") {
+		t.Errorf("stdin and a file: %+v", r)
+	}
+	for _, bad := range []string{
+		"javascript:alert(1)", "file:///etc/passwd", "data:text/html,x", "ftp://h/x",
+		"https://user:pw@example.com/", "https:opaque", "http:///nohost", "example.com/README.md",
+		"https://example.com/\x1b]8;;evil\x07", "https://example.com/\u202e", "https://example.com/\x9b", "https://exa%E2%80%AEmple.com/",
+		"https://example.com/" + strings.Repeat("a", 3000),
+	} {
+		r := run(t, nil, "--base", bad)
+		if r.code != 2 || !strings.Contains(r.errOut, "--base") || strings.ContainsAny(r.errOut, "\x1b\x07\u202e") || strings.Contains(r.errOut, "evil") {
+			t.Errorf("--base %q: %+v", bad, r)
+		}
+	}
+	if r := run(t, nil, "--base", base, p); r.code != 2 || !strings.Contains(r.errOut, "standard input") {
+		t.Errorf("--base with only files: %+v", r)
+	}
+	if r := run(t, nil, "--base", ""); r.code != 2 || !strings.Contains(r.errOut, "--base needs a URL") {
+		t.Errorf("empty --base (an unset variable): %+v", r)
+	}
+	// the document's images are on the web: a path is not read locally
+	img, err := filepath.Abs("../../testdata/gradient.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := stdin("![pic](" + img + ")")
+	if r := run(t, src, "-P", "-c", "always", "-i", "blocks"); !strings.Contains(r.out, "▀") && !strings.Contains(r.out, "▄") {
+		t.Fatalf("image not drawn without --base: %q", r.out)
+	}
+	if r := run(t, src, "--base", base, "-P", "-c", "always", "-i", "blocks"); strings.Contains(r.out, "▀") || strings.Contains(r.out, "▄") {
+		t.Errorf("image read from disk with --base: %q", r.out)
+	}
+	// slides resolve standard input against the base too
+	var got view.Options
+	tty := func(e *Env) {
+		e.Stdin = strings.NewReader("# One\n\n[g](guide.md)\n")
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 30
+		e.View = func(o view.Options) error { got = o; return nil }
+	}
+	if r := run(t, tty, "--slides", "--base", base); r.code != 0 || got.Slides == nil {
+		t.Fatalf("slides: %+v", r)
+	}
+	if pages, err := got.Slides(100, 30); err != nil || len(pages[0].Links) != 1 || pages[0].Links[0].Href != "https://example.com/docs/guide.md" {
+		t.Errorf("slide links: %v", err)
+	}
+}

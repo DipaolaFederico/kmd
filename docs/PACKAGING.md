@@ -1,257 +1,98 @@
-# Distributing kmd
+# Packaging status
 
-Every release is published to these channels by
-[`.github/workflows/release.yml`](../.github/workflows/release.yml), with no
-manual steps once the one-time setup below is done:
+Where kmd can be installed from, what is still pending, and what to do
+next. Every release updates the channels marked *automatic* with no manual
+steps; how the release workflow does it is documented in
+[`.github/workflows/release.yml`](../.github/workflows/release.yml).
 
-| Channel | What users run | Updated by |
-|---------|----------------|------------|
-| GitHub release | archives, `.deb`, `SHA256SUMS`, provenance | `build` + `publish` jobs |
-| Debian/Ubuntu | `sudo apt install ./kmd_*.deb` | `.deb` attached to the release |
-| Homebrew | `brew install DipaolaFederico/tap/kmd` | `tap` job → `DipaolaFederico/homebrew-tap` |
-| Scoop | `scoop bucket add dipaolafederico https://github.com/DipaolaFederico/scoop-bucket` · `scoop install kmd` | `tap` job → `DipaolaFederico/scoop-bucket` |
-| AUR (pending: see below) | `yay -S kmd-bin` | `aur` job → `aur.archlinux.org/kmd-bin.git` |
-| winget | `winget install DipaolaFederico.kmd` | `winget` job → pull request to `microsoft/winget-pkgs` |
-| Nix | `nix run github:DipaolaFederico/kmd` | `flake.nix` in this repository (built from source) |
-| Fedora COPR | `sudo dnf copr enable fdipa/kmd` · `sudo dnf install kmd` | Packit (see [Fedora](#fedora)) |
+*Last updated: 2026-11-23, release v0.11.0.*
 
-## How a release reaches the package managers
+## Channels
 
-1. The `build` job (no secrets, read-only token) builds the archives and
-   the two `.deb` packages (`scripts/package-deb.sh`) and writes
-   `SHA256SUMS`.
-2. The `publish` job attests the archives, the `.deb` files and
-   `SHA256SUMS`, tags a commit that adds the version files the build
-   stamped (RPM spec, man page, AppStream metadata, `CHANGELOG.md`) on top
-   of the released commit, and creates the GitHub release, whose notes
-   start with the version's changelog section.
-3. The `tap`, `aur` and `winget` jobs run only after the release exists.
-   Each downloads the release's `SHA256SUMS`, checks it is the file the
-   `publish` job released (same SHA-256) and that it was attested by this
-   workflow (`gh attestation verify --signer-workflow`),
-   and generates its manifests with `scripts/gen-manifests.sh` from the
-   released commit: the Homebrew formula, the AUR `PKGBUILD` and
-   `.SRCINFO`, the Scoop manifest or the three winget manifests, every
-   download pinned by its SHA-256. Nothing the build job wrote other than
-   the attested checksums reaches a package repository, and only the
-   expected files are copied. These jobs hold the publishing credentials
-   (environment **`packages`**); a channel whose secret is missing is
-   skipped with a warning, so the release itself never depends on them.
-4. The `version-pr` job (also in **`packages`**) stamps the same versions
-   into `main`'s files with `scripts/sync-version.sh`, pushes them to the
-   bot's fork and opens the pull request `chore(release): vX.Y.Z` from
-   there, so the repository always shows the latest release. The
-   maintainer reviews and merges it; it publishes nothing.
+| Channel | Install | Status |
+|---------|---------|--------|
+| GitHub release | archives, `.deb`, `SHA256SUMS` (with provenance) | ✅ automatic |
+| Debian/Ubuntu | `sudo apt install ./kmd_*.deb` | ✅ automatic (release asset) |
+| Homebrew | `brew install DipaolaFederico/tap/kmd` | ✅ automatic |
+| Scoop | `scoop bucket add dipaolafederico https://github.com/DipaolaFederico/scoop-bucket` · `scoop install kmd` | ✅ automatic |
+| Nix flake | `nix run github:DipaolaFederico/kmd` | ✅ builds from source, tested in CI |
+| Fedora COPR | `sudo dnf copr enable fdipa/kmd` · `sudo dnf install kmd` | ✅ automatic (Packit); v0.11.0 built for Fedora 43, 44, 45 and rawhide, x86_64 only |
+| winget | `winget install DipaolaFederico.kmd` | ⏳ first submission waiting: [microsoft/winget-pkgs#487317](https://github.com/microsoft/winget-pkgs/pull/487317) needs the bot to sign the Microsoft CLA |
+| AUR | `yay -S kmd-bin` | ⏸️ blocked: AUR registration is paused ([#27](https://github.com/DipaolaFederico/kmd/issues/27)) |
+| nixpkgs | `nix-env -iA nixpkgs.kmd` | 📝 not submitted yet ([#30](https://github.com/DipaolaFederico/kmd/issues/30)) |
+| Fedora (official) | `sudo dnf install kmd` | 📝 not submitted yet; the spec is ready |
+| homebrew-core | `brew install kmd` | 📝 after 1.0, once kmd meets Homebrew's notability thresholds |
 
-`make packaging` (part of `make ci`) validates the same output from a
-made-up `SHA256SUMS`: Ruby syntax of the formula, `.SRCINFO` against the
-`PKGBUILD` (and `makepkg --printsrcinfo` when available), JSON and YAML of
-the Windows manifests, and the `.deb` contents, ownership,
-reproducibility and `lintian`. Locally missing validators are skipped; CI
-runs it with `STRICT=1`. The Nix flake is built and tested by the CI `nix`
-job (`nix flake check`).
+For 1.0 ([#23](https://github.com/DipaolaFederico/kmd/issues/23)), every
+✅ channel and winget must serve `v1.0.0`; the AUR and nixpkgs are not
+required.
 
-## One-time setup
+## Next steps
 
-In *Settings → Environments*, create the environment **`packages`**,
-limited to the `main` branch (*Deployment branches and tags → Selected
-branches*), and add these secrets to it (not as repository secrets). The
-branch rule is what protects the secrets: a workflow edited on another
-branch can drop any check written in the workflow itself, but cannot enter
-this environment.
+### winget
 
-| Secret | What it is |
-|--------|------------|
-| `PACKAGES_TOKEN` | Fine-grained token, *Only select repositories*: `homebrew-tap` and `scoop-bucket`; permission *Contents: Read and write*. |
-| `AUR_SSH_KEY` | Private key (ed25519, no passphrase) whose public key is in the AUR account's *SSH Public Key*. |
-| `BOT_TOKEN` | Classic token with only the `public_repo` and `workflow` scopes **of a bot account** (fine-grained tokens cannot open pull requests in other owners' repositories; `workflow` because the version branch pushed to the bot's fork carries the commits since the fork was last updated, and GitHub rejects a push that changes `.github/workflows/` without it). It can write to every public repository *of the bot*, which owns nothing but two forks: `<bot>/kmd` (version pull requests) and `<bot>/winget-pkgs` (winget pull requests). The bot must **not** be a collaborator of `kmd`: then the token cannot push tags, branches or releases here, and the owner can approve its pull requests (a pull request opened with the workflow's own token would not run CI; one opened by the owner could not be approved by the owner). |
+1. Sign the Microsoft CLA from the bot account on
+   [#487317](https://github.com/microsoft/winget-pkgs/pull/487317) (reply
+   to the CLA bot's comment as it explains).
+2. Wait for the winget moderators to merge it (usually a few days).
+   Later releases open *New version* pull requests by themselves; an older
+   one still waiting for moderation is closed as superseded.
 
-Then, once per channel:
+### Fedora COPR
 
-- **Homebrew**: create the public repository `DipaolaFederico/homebrew-tap`
-  with a `README.md` (the workflow adds `Formula/kmd.rb`). Users get
-  updates with `brew upgrade`; `brew install DipaolaFederico/tap/kmd` taps it
-  automatically. Submitting to homebrew-core requires notability
-  thresholds (stars, forks); revisit after 1.0.
-- **Scoop**: create the public repository `DipaolaFederico/scoop-bucket`
-  with a `README.md` (the workflow adds `bucket/kmd.json`). The manifest
-  has no `checkver`/`autoupdate` on purpose: only the release workflow,
-  from attested checksums, updates it.
-- **AUR**: create an account at <https://aur.archlinux.org/register> and add
-  the public key of `AUR_SSH_KEY`. The first push creates the package
-  `kmd-bin`; nothing else to do. *Pending:* AUR registration was paused
-  in November 2026, so `AUR_SSH_KEY` is not set yet and the `aur` job is
-  skipped; once the account exists, generate the key
-  (`ssh-keygen -t ed25519 -N ''`), store the private key with
-  `gh secret set AUR_SSH_KEY --env packages < key`, add the README row and
-  publish with *Actions → Release → Run workflow*. To test a PKGBUILD by hand, generate it
-  (`scripts/gen-manifests.sh X.Y.Z DATE SHA256SUMS out/`) and run
-  `makepkg -si` in `out/aur`.
-- **Bot account** (version pull requests and winget): create a GitHub
-  account (e.g. `kmd-release-bot`); with it, fork
-  `DipaolaFederico/kmd` and <https://github.com/microsoft/winget-pkgs>,
-  and create `BOT_TOKEN`. Do not add it as a collaborator. The jobs find
-  the forks from the token's login. The bot's first pull request to `kmd`
-  needs *Approve and run* for CI (first-time contributor); later ones run
-  directly.
-- **winget**: each release syncs the bot's fork and opens a pull request
-  from it (*New package* until the first one is merged, then *New
-  version*); the winget moderators merge it, which can take a few days. The
-  bot's pull requests for older versions that are still open and not
-  approved (no approving review, no `Moderator-Approved` label) are closed
-  as superseded, so one version waits for moderation at
-  a time. On the first submission sign the Microsoft CLA when the bot asks.
-- **Debian/Ubuntu**: nothing; the `.deb` files are release assets.
-- **Nix**: nothing for the flake. `flake.lock` pins nixpkgs; update it with
-  `nix flake update` from time to time. For nixpkgs, open a pull request
-  adding `pkgs/by-name/km/kmd/package.nix` (a `buildGoModule` like the
-  flake's, from the release tag with `vendorHash = null` and the version in
-  `ldflags`), following the
-  [nixpkgs contributing guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md).
-  Its merge is not required for 1.0.
+- Decide whether to add the `aarch64` chroots to the COPR project
+  (*Settings* of <https://copr.fedorainfracloud.org/coprs/fdipa/kmd/>):
+  today only x86_64 is built.
 
-The flake builds whatever commit it is pointed at, so `kmd --version` from
-the flake prints `0-unstable-DATE-COMMIT`. `nix run
-github:DipaolaFederico/kmd/vX.Y.Z` builds exactly the released source.
+### AUR ([#27](https://github.com/DipaolaFederico/kmd/issues/27))
 
-## Verifying the published packages
+1. When registration reopens, create an account at
+   <https://aur.archlinux.org/register>.
+2. Add an SSH key to the account and to the release workflow (see the
+   header of `release.yml`).
+3. Publish with *Actions → Release → Run workflow* and add the AUR row to
+   the README's install table.
 
-After a release, run *Actions → Verify packages → Run workflow*
-([`verify-packages.yml`](../.github/workflows/verify-packages.yml)). On
-clean runners it installs the latest release:
+### nixpkgs ([#30](https://github.com/DipaolaFederico/kmd/issues/30))
 
-- the `.deb` on Ubuntu, after verifying its checksum and attestation;
-- Homebrew on macOS;
-- Scoop and winget on Windows.
+Open a pull request to nixpkgs adding `pkgs/by-name/km/kmd/package.nix`
+(a `buildGoModule` like the flake's, built from the release tag), following
+the [nixpkgs contributing guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md).
 
-Each job checks that `kmd --version` matches the release and that kmd
-renders; where the channel installs them, it also checks the man page and
-completions.
+### Official Fedora repositories
 
-A job fails only for causes in kmd or in what this project publishes. It
-only warns when the cause is elsewhere: the winget package is still
-waiting for its moderators, or Scoop's installer or winget is unavailable on
-the runner. The job summary lists what was verified and what was not.
+The package is ready for review: `packaging/kmd.spec` follows the Fedora Go
+packaging guidelines, passes `rpmlint` with no warnings and builds and
+tests cleanly in `fedora:45` and rawhide. What is left is manual:
 
-## Testing a channel without a release
-
-`scripts/gen-manifests.sh` and `scripts/package-deb.sh` run anywhere. With
-archives built like the release workflow does (see its *Build binaries*
-step) and their `SHA256SUMS`, the generated files can be tried in
-containers: `brew install` from a local tap in `homebrew/brew` (point the
-`url`s at `file://`), `makepkg -si` in `archlinux` with the archive next to
-the `PKGBUILD`, `apt install ./kmd_*.deb` in `ubuntu`, and `nix build` in
-`nixos/nix`.
-
-## Fedora
-
-The goal is `sudo dnf install kmd` on Fedora. There are two stages:
-
-1. **COPR** (a Fedora-hosted package repository, no review): users run
-   `sudo dnf copr enable fdipa/kmd` once, then `dnf install kmd`.
-   Packit builds every release there automatically.
-2. **Official Fedora repositories**: plain `sudo dnf install kmd`, and kmd
-   is listed in the AppStream catalog. This needs a package review and a
-   Fedora packager account.
-
-### What is ready in this repository
-
-- `packaging/kmd.spec` follows the Fedora Go packaging conventions as
-  produced by `go2rpm` 1.19: `%gometa -L -f` (no `%ix86`), Go modules mode,
-  `%gobuild`, `%gotest ./...` in `%check` under `%bcond check`,
-  `%autorelease`/`%autochangelog`. kmd has **no Go dependencies**, so there
-  is no vendor tarball and no `bundled()` provides; the License is MIT.
-- Man page, bash/zsh/fish completions and AppStream metadata
-  (`console-application`, with a screenshot) are installed.
-- `%check` runs the whole test suite, including the CommonMark/GFM
-  specification, and validates the AppStream file. Tests that bound the
-  time of hostile inputs are scaled with `KMD_TEST_TIME_SCALE=50`, so slow
-  builders (riscv64, s390x, ppc64le) do not fail them.
-- Verified: `rpmbuild` in clean `fedora:45` and `fedora:rawhide`
-  containers (tests pass, the package installs and runs), `rpmlint` with
-  0 errors and 0 warnings, the code and tests cross-compile for aarch64,
-  ppc64le, s390x and riscv64.
-- `.packit.yaml`: Packit builds each GitHub release in COPR for every
-  supported Fedora release, and test-builds every pull request.
-- `packaging/packit-distgit.yaml`: once kmd is in Fedora, the same
-  automation for the official package (dist-git pull request, Koji build,
-  Bodhi update for each release).
-
-The release tarball (`kmd-X.Y.Z.tar.gz`, attached to every GitHub release
-by `.github/workflows/release.yml`) is the spec's `Source`; it carries the
-version stamped into the spec, man page and AppStream metadata, as does
-the tag itself (so Packit's `git archive` of the tag has them too).
-
-### Building the RPM locally
-
-```sh
-sudo dnf install rpm-build go-rpm-macros libappstream-glib rpmlint
-make rpm                          # rpmbuild + rpmlint from the working tree
-```
-
-For a build in a clean chroot, like Fedora's builders:
-
-```sh
-sudo dnf install mock fedora-review
-sudo usermod -aG mock $USER       # then log in again
-make srpm
-mock -r fedora-rawhide-x86_64 dist/rpmbuild/SRPMS/kmd-*.src.rpm
-```
-
-### Stage 1: COPR with Packit (manual steps, once)
-
-1. Create a Fedora account (FAS) at <https://accounts.fedoraproject.org>.
-   The COPR owner in `.packit.yaml` (`owner: fdipa`) is the FAS user
-   name.
-2. Log in at <https://copr.fedorainfracloud.org> with that account (this
-   creates your COPR user) and create a project named **kmd**:
-   - Chroots: every `fedora-*` release (x86_64 and aarch64).
-   - Under *Settings → Integrations*, allow the user **packit** to build in
-     the project (or add `packit` with *builder* permission).
-3. Install the Packit GitHub app on the repository:
-   <https://github.com/apps/packit-as-a-service>, then link your FAS account
-   to your GitHub account as Packit asks in its first comment (one-time
-   approval: <https://packit.dev/docs/guide/#2-approval>).
-4. The next published release is built in COPR automatically. Users then
-   install kmd with:
-
-   ```sh
-   sudo dnf copr enable fdipa/kmd
-   sudo dnf install kmd
-   ```
-
-### Stage 2: official Fedora repositories (manual steps)
-
-1. **Join the packager group.** New packagers need a *sponsor*: read
-   <https://docs.fedoraproject.org/en-US/package-maintainers/How_to_Get_Sponsored_into_the_Packager_Group/>,
-   introduce yourself on <https://discussion.fedoraproject.org> (tag
-   `package-review`) and ask for sponsorship, mentioning the review request
-   below. Reviewing someone else's package helps.
-2. **Open the review request.** In Bugzilla (<https://bugzilla.redhat.com>,
-   product *Fedora*, component *Package Review*), title
+1. **Get sponsored into the packager group**: introduce yourself on
+   <https://discussion.fedoraproject.org> (tag `package-review`) and ask for
+   a sponsor, following the
+   [sponsorship guide](https://docs.fedoraproject.org/en-US/package-maintainers/How_to_Get_Sponsored_into_the_Packager_Group/).
+2. **Open the review request** in <https://bugzilla.redhat.com> (product
+   *Fedora*, component *Package Review*), titled
    `Review Request: kmd - Fast, beautiful Markdown previewer for the terminal`,
-   with the URLs of the spec and SRPM: the COPR build of stage 1 provides
-   both (or use <https://fedorapeople.org>). Run
-   `fedora-review -b <bug number>` and attach the result.
-3. **After approval:**
+   with the spec and SRPM URLs of the COPR build, and attach the output of
+   `fedora-review -b <bug number>`.
+3. **After approval**, import and build it:
    ```sh
    fedpkg request-repo kmd <bug number>
    fedpkg request-branch --repo kmd f45      # and other active releases
    fedpkg clone kmd && cd kmd
    fedpkg import <the reviewed SRPM> && git commit && git push
-   fedpkg build                              # rawhide; then each branch
-   fedpkg update                             # branched releases (Bodhi)
+   fedpkg build && fedpkg update
    ```
-4. **Automate updates.** Commit `packaging/packit-distgit.yaml` to the
-   dist-git repository as `.packit.yaml`. In
-   <https://release-monitoring.org> add the project (backend *GitHub*,
-   `DipaolaFederico/kmd`, version prefix `v`) with a mapping to the Fedora
-   package `kmd`, and enable *Monitoring* on
-   <https://src.fedoraproject.org/rpms/kmd>. From then on every GitHub
-   release becomes a dist-git pull request, a Koji build and a Bodhi
-   update without manual work.
+4. **Automate updates**: add `packaging/packit-distgit.yaml` to the
+   dist-git repository as `.packit.yaml`, and register kmd on
+   <https://release-monitoring.org> (backend *GitHub*, version prefix `v`)
+   mapped to the Fedora package `kmd`.
 
-Once in the official repositories kmd appears in the AppStream catalog
-(as a console application, it is found by searching in software centers
-that show command-line tools, such as KDE Discover; GNOME Software focuses
-on graphical applications).
+To try the RPM locally: `make rpm`.
+
+## Checking a release
+
+After each release, run *Actions → Verify packages → Run workflow*. It
+installs the release on clean runners (`.deb` on Ubuntu, Homebrew on macOS,
+Scoop and winget on Windows) and checks the version, rendering, man page and
+completions. A channel that is not available yet (winget before its first
+merge) is reported as a warning, not a failure.

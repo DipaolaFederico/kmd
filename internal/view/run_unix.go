@@ -116,6 +116,7 @@ func Run(opt Options) error {
 		return err
 	}
 	defer t.leave()
+	defer m.stopPicker()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGWINCH, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT,
@@ -167,6 +168,9 @@ func Run(opt Options) error {
 		}
 		redraw = false
 		select {
+		case f := <-m.bg:
+			m.applyBackground(f)
+			redraw = m.picking // results of the picker's work: only it shows them
 		case <-tick:
 			redraw = m.poll()
 		case <-settle:

@@ -62,12 +62,17 @@ type Options struct {
 	// the slides for a terminal cols × rows (Load is then only used to
 	// check that Start can be read).
 	Slides func(cols, rows int) ([]*Page, error)
+
+	// Root is the folder the file picker (o, S) lists when the page on
+	// screen is a document ("" = none); a folder page lists itself.
+	Root string
 }
 
 // entry is a history position.
 type entry struct {
 	path     string
 	top, sel int
+	pick     string // root of the picker that was open ("" = none)
 }
 
 // match is a search hit.
@@ -101,6 +106,10 @@ type model struct {
 
 	outline    bool // the outline (t) is open
 	ocur, otop int  // its selected heading and first visible row
+
+	pick    *picker           // file picker (o, S), kept while documents are read
+	picking bool              // the picker is on screen
+	bg      chan func(*model) // results of background work, applied by the loop
 
 	// watched file and its last seen state (Watch)
 	watched string
@@ -151,7 +160,7 @@ func (m *model) poll() bool {
 const maxMatches = 10000
 
 func newModel(opt Options, cols, rows int) (*model, error) {
-	m := &model{opt: opt, cols: cols, rows: rows, sel: -1, path: opt.Start}
+	m := &model{opt: opt, cols: cols, rows: rows, sel: -1, path: opt.Start, bg: make(chan func(*model), 16)}
 	if opt.Slides != nil {
 		return m, m.loadSlides(0)
 	}
@@ -163,6 +172,9 @@ func newModel(opt Options, cols, rows int) (*model, error) {
 		}
 	}
 	m.setPage(p)
+	if opt.Start != "" && isDir(opt.Start) {
+		m.openPicker(false)
+	}
 	return m, nil
 }
 
@@ -258,7 +270,7 @@ func (m *model) load(path string) error {
 	if err != nil {
 		return err
 	}
-	m.hist = append(m.hist, entry{m.path, m.top, m.sel})
+	m.hist = append(m.hist, entry{path: m.path, top: m.top, sel: m.sel, pick: m.pickedRoot()})
 	m.path = path
 	m.setPage(p)
 	return nil
@@ -287,6 +299,10 @@ func (m *model) goBack(i int) {
 		m.path = e.path
 	}
 	m.hist = m.hist[:i]
+	m.picking = false
+	if e.pick != "" {
+		m.showPicker(e.pick)
+	}
 	m.top, m.sel = e.top, e.sel
 	m.scroll(0)
 	if m.sel >= len(m.page.Links) {
@@ -391,7 +407,7 @@ func (m *model) internal(href string) bool {
 func (m *model) anchorJump(frag string) {
 	top, sel := m.top, m.sel
 	if m.jump(frag) {
-		m.hist = append(m.hist, entry{m.path, top, sel})
+		m.hist = append(m.hist, entry{path: m.path, top: top, sel: sel})
 	}
 }
 
@@ -420,8 +436,10 @@ func (m *model) followFile(path, frag string) {
 			if path != m.path {
 				if err := m.load(path); err != nil {
 					m.msg = errText(err)
+					return
 				}
 			}
+			m.openPicker(false)
 			return
 		}
 	}
@@ -471,6 +489,14 @@ func (m *model) external(target, label string) {
 		return
 	}
 	m.msg = "opened " + label
+}
+
+// pickedRoot is the root of the picker on screen, if any.
+func (m *model) pickedRoot() string {
+	if m.picking {
+		return m.pick.root
+	}
+	return ""
 }
 
 // abs returns the absolute form of a page path ("" stays "").

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DipaolaFederico/kmd/internal/styled"
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 const (
@@ -415,4 +416,20 @@ func TestUMLHostile(t *testing.T) {
 	if _, ok := Mermaid(build("erDiagram", maxNodes+1, func(i int) string { return "E" + itoa(i) }), 200); ok {
 		t.Error("too many entities accepted")
 	}
+	// Under the caps, the time grows linearly with the source (n lines).
+	linear := func(name, head string, maxN int, line func(i int) string) {
+		t.Helper()
+		testlimit.Linear(t, name, maxN, func(n int) func() {
+			src := build(head, n, line)
+			return func() { _, _ = Mermaid(src, 200) }
+		})
+	}
+	linear("class members", "classDiagram", 4096, func(i int) string { return "A : +m" + itoa(i) + "()" })
+	linear("er attrs", "erDiagram\nA {", 2048, func(i int) string { return "string a" + itoa(i) + " PK \"c\"" })
+	linear("stereotypes", "classDiagram\nclass A {", 8192, func(int) string { return "<<a>>" })
+	linear("stereotypes flat", "classDiagram", 4096, func(int) string { return "<<a>> A" })
+	linear("gantt tasks", "gantt", maxTasks, func(i int) string { return "T :t" + itoa(i) + ", 2024-01-01, 1d" })
+	linear("sequence events", "sequenceDiagram", maxEvents, func(int) string { return "A->>B: x" })
+	linear("class relations", "classDiagram", maxNodes, func(i int) string { return "C" + itoa(i) + " <|-- C" + itoa(i+1) })
+	linear("flowchart chain", "graph TD", maxNodes, func(i int) string { return "n" + itoa(i) + " --> n" + itoa(i+1) })
 }

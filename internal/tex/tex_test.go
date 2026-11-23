@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/styled"
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 func text(l styled.Line) string {
@@ -444,6 +445,29 @@ func TestLimits(t *testing.T) {
 	src = "x" + strings.Repeat("^2", 1000) + strings.Repeat("'", 50)
 	if got := Inline(src); got[0].Class == styled.Muted {
 		t.Errorf("repeated scripts fell back to the source")
+	}
+}
+
+// TestLinearTime: under maxSource, the time grows linearly with the
+// formula, inline and displayed (n repetitions of each pattern).
+func TestLinearTime(t *testing.T) {
+	for name, unit := range map[string]string{
+		"symbols":   `\alpha + \beta \times 2 `,
+		"scripts":   "x^2_i ",
+		"fractions": `\frac{a}{b} `,
+		"roots":     `\sqrt{x} `,
+		"fences":    `\left( x \middle| y \right) `,
+		"matrix":    `\begin{matrix}a & b \\ c & d\end{matrix} `,
+		"text":      `\text{some words} `,
+		"unknown":   `\nosuchcommand{x} `,
+	} {
+		testlimit.Linear(t, name, maxSource/len(unit), func(n int) func() {
+			src := strings.Repeat(unit, n)
+			return func() {
+				_ = Inline(src)
+				_ = Display(src, 80)
+			}
+		})
 	}
 }
 

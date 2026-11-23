@@ -908,3 +908,37 @@ func TestSlidesMode(t *testing.T) {
 		t.Errorf("stdin: %+v", r)
 	}
 }
+
+func TestFolderOpensPicker(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# Notes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var got *view.Options
+	viewer := func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 40
+		e.View = func(o view.Options) error { got = &o; return nil }
+	}
+	// a short listing still opens the viewer, where the picker lists it
+	if r := run(t, viewer, dir); r.code != 0 || r.out != "" || got == nil || got.Start != dir || got.Root != dir {
+		t.Fatalf("folder: %+v %+v", r, got)
+	}
+	// a short document is printed; a long one's picker lists its folder
+	got = nil
+	short := filepath.Join(dir, "notes.md")
+	if r := run(t, viewer, short); got != nil || !strings.Contains(r.out, "Notes") {
+		t.Errorf("short document: %+v", got)
+	}
+	if r := run(t, viewer, "--view", short); r.code != 0 || got == nil || got.Root != dir {
+		t.Errorf("document root: %+v", got)
+	}
+	got = nil
+	if r := run(t, viewer, "--view", short, short); r.code != 0 || got == nil || got.Root != "." {
+		t.Errorf("several documents: %+v", got)
+	}
+	// not a terminal: the listing is printed
+	got = nil
+	if r := run(t, nil, dir); got != nil || !strings.Contains(r.out, "notes.md") {
+		t.Errorf("piped folder: %q", r.out)
+	}
+}

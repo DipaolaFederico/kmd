@@ -139,19 +139,22 @@ func hasInvisible(s string) bool {
 }
 
 // clean removes characters that could drive the terminal (C0/C1 controls,
-// DEL) or visually reorder it (bidi controls) from document text. Tabs
-// become spaces.
+// DEL, invalid UTF-8) or visually reorder it (bidi controls) from document
+// text. Tabs become spaces.
 func clean(s string) string {
-	dirty := false
+	dirty, high := false, false
 	for i := 0; i < len(s); i++ {
 		c := s[i]
+		high = high || c >= 0x80
 		if c < 0x20 || c == 0x7f || (c == 0xc2 && i+1 < len(s) && s[i+1] < 0xa0) ||
 			(c == 0xe2 && i+2 < len(s) && ((s[i+1] == 0x80 && s[i+2] >= 0xaa && s[i+2] <= 0xae) || (s[i+1] == 0x81 && s[i+2] >= 0xa6 && s[i+2] <= 0xa9))) {
 			dirty = true
 			break
 		}
 	}
-	if !dirty {
+	// invalid UTF-8 (a lone 0x9b is an 8-bit CSI to terminals that honour
+	// C1 controls) is rewritten too: range turns it into U+FFFD
+	if !dirty && (!high || utf8.ValidString(s)) {
 		return s
 	}
 	var b strings.Builder

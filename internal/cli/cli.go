@@ -102,8 +102,10 @@ Usage:
   kmd [options] [file|folder ...]
   cat README.md | kmd [options]
 
-A folder shows its README.md (or index.md), or else a list of its
-Markdown files and subfolders to browse in the viewer.
+A folder shows its README.md (or index.md), or else a list of every
+Markdown file under it, filtered as you type. In the viewer, o opens that
+list for the folder kmd was started on (the document's folder, or the
+current one) and S searches the text of all its documents.
 
 Display:
   -w, --width N            render width (default: terminal width, max %d)
@@ -146,7 +148,8 @@ Files:
 Viewer (long documents):
   Tab/Shift-Tab select a link (or click it) · Enter open it · Backspace back
   H back to the first document · t contents · [ ] previous/next section
-  / search · c copy a code block · e edit · ? all keys · q quit
+  / search · o find a document · S search all documents · c copy a code
+  block · e edit · ? all keys · q quit
 
 Environment:
   KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG, NO_COLOR,
@@ -470,7 +473,7 @@ func Run(env Env) int {
 	}
 	long := !o.html && !o.toc && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
 		strings.Count(res.text, "\n") > env.Rows
-	if viewable && (s.alwaysView || long && s.pager == builtinPager) {
+	if viewable && (s.alwaysView || singleFolder(o.files) || long && s.pager == builtinPager) {
 		if err := runViewer(env, o, s, in, false, pageOf(res), env.Cols); err == nil {
 			return res.code
 		}
@@ -501,6 +504,13 @@ func Run(env Env) int {
 		return 1
 	}
 	return code
+}
+
+// singleFolder reports whether kmd was given one folder. Folders with a
+// README were replaced by it (resolveDirs), so this one opens the file
+// picker, even when its listing fits on the screen.
+func singleFolder(files []string) bool {
+	return len(files) == 1 && files[0] != "-" && isDir(files[0])
 }
 
 // stdinCache keeps stdin, which can only be read once ("kmd - -", and the
@@ -602,11 +612,11 @@ func (res *output) addNav(r render.Result, offset int) {
 // its relative links resolve against.
 func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Node, base string, err error) {
 	var src string
-	isDir := false
+	folder := false
 	if name == "-" && in.read {
 		src = in.src
 	} else {
-		src, isDir, err = readSource(name, env.Stdin)
+		src, folder, err = readSource(name, env.Stdin)
 		if name == "-" {
 			in.src, in.read = src, true
 		}
@@ -621,7 +631,7 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 		}
 	}
 	switch {
-	case isDir:
+	case folder:
 		base = name
 	case name != "-":
 		base = filepath.Dir(name)
@@ -787,8 +797,15 @@ func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first
 		return pageOf(res), nil
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
+	root := "." // the picker lists the folder kmd was started on, or the working one
+	if start != "" {
+		root = start
+		if !isDir(start) {
+			root = filepath.Dir(start)
+		}
+	}
 	opt := view.Options{Load: load, Start: start, Mouse: s.mouse, Watch: watch, Poll: env.Poll,
-		Select: sel, Match: match, Bar: bar, First: first, FirstCols: firstCols}
+		Select: sel, Match: match, Bar: bar, First: first, FirstCols: firstCols, Root: root}
 	if env.View != nil {
 		return env.View(opt)
 	}

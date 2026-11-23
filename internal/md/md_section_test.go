@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 func TestSection(t *testing.T) {
@@ -92,4 +94,15 @@ func TestSlidesLimits(t *testing.T) {
 	if len(got) != n || !strings.Contains(HTML(got[n-1], HTMLOptions{}), "d") {
 		t.Errorf("footnotes: %d slides", len(got))
 	}
+	testlimit.Linear(t, "slides with footnotes", 4*n, func(n int) func() {
+		var b strings.Builder
+		for i := range n {
+			b.WriteString("x[^" + strconv.Itoa(i) + "]\n\n---\n\n")
+		}
+		for i := range n {
+			b.WriteString("[^" + strconv.Itoa(i) + "]: d\n")
+		}
+		src := b.String()
+		return func() { _ = Slides(Parse(src, GFM), n+1) }
+	})
 }

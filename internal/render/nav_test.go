@@ -202,6 +202,10 @@ func TestRepeatedHeadingsAreLinear(t *testing.T) {
 	if d := time.Since(start); d > testlimit.Scale()*5*time.Second {
 		t.Errorf("40,000 repeated headings took %v", d)
 	}
+	testlimit.Linear(t, "repeated headings", 1<<17, func(n int) func() {
+		doc := md.Parse(strings.Repeat("# a\n", n), md.GFM)
+		return func() { _ = Render(doc, Options{Width: 40, Navigate: true}) }
+	})
 }
 
 func TestOSC8OnlyForOpenableFiles(t *testing.T) {
@@ -232,6 +236,12 @@ func TestHrefHostileInputs(t *testing.T) {
 	if d := time.Since(start); d > testlimit.Scale()*5*time.Second {
 		t.Errorf("long reference destination took %v", d)
 	}
+	// both the destination (always over maxURL) and the number of links
+	// grow with n: linear, not their product
+	testlimit.Linear(t, "long reference destination", 1<<10, func(n int) func() {
+		doc := md.Parse("[r]: <"+strings.Repeat("a/", maxURL/2*n)+"x.md>\n\n"+strings.Repeat("[a][r] ", 64*n), md.GFM)
+		return func() { _ = Render(doc, Options{Width: 80, Color: true, Hyperlinks: true, Navigate: true}) }
+	})
 	if strings.Contains(res.Text, "\x1b]8;;"+dest[:10]) || res.Links[0].Href != dest {
 		t.Error("over-long target must be kept as written and never emitted")
 	}

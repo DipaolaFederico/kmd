@@ -90,7 +90,7 @@ func (m *model) gotoHeading(i int, record bool) {
 		return
 	}
 	if record {
-		m.hist = append(m.hist, entry{m.path, m.top, m.sel})
+		m.hist = append(m.hist, entry{path: m.path, top: m.top, sel: m.sel})
 	}
 	m.top, m.sel = m.page.Headings[i].Line, -1
 	m.scroll(0)

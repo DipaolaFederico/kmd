@@ -73,7 +73,6 @@ func TestStripEscapes(t *testing.T) {
 // fixture writes a small documentation tree and returns its directory.
 func fixture(t *testing.T) string {
 	t.Helper()
-	dir := t.TempDir()
 	files := map[string]string{
 		"README.md": "# Index\n\n[Ticket one](one.md) · [Two, section](sub/two.md#deep) · " +
 			"[Here](#mapa) · [Web](https://example.com) · [Pic](pic.png) · [Script](run.sh) · " +
@@ -88,15 +87,7 @@ func fixture(t *testing.T) string {
 		"run.sh":        "#!/bin/sh\n",
 		"tool.png":      "",
 	}
-	for name, body := range files {
-		p := filepath.Join(dir, name)
-		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	dir := tree(t, files)
 	if err := os.Chmod(filepath.Join(dir, "tool.png"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -311,15 +302,10 @@ func TestFollowAndBack(t *testing.T) {
 
 // Wiki links are followed like relative links, headings by their text.
 func TestFollowWikiLink(t *testing.T) {
-	dir := t.TempDir()
-	for name, body := range map[string]string{
+	dir := tree(t, map[string]string{
 		"README.md":   "# Index\n\nSee [[My Notes#Deep Dive|the notes]].\n",
 		"My Notes.md": "# Notes\n\n" + strings.Repeat("x\n\n", 40) + "## Deep Dive\n\ndeep text\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
+	})
 	h := newHarness(t, dir)
 	h.selectLink(t, "/My%20Notes.md#Deep%20Dive")
 	h.keys("enter")
@@ -723,6 +709,10 @@ func TestClipLongAndExternalClicks(t *testing.T) {
 	if d := time.Since(start); d > testlimit.Scale()*time.Second {
 		t.Errorf("clip of 1 MiB took %v", d)
 	}
+	testlimit.Linear(t, "clip", 1<<20, func(n int) func() {
+		s := strings.Repeat("日a", n)
+		return func() { _ = clip(s, n) }
+	})
 	if clip("12345", 5) != "12345" || clip("123456", 5) != "1234…" || clip("日本語", 6) != "日本語" || clip("日本語x", 6) != "日本…" {
 		t.Errorf("clip edges: %q %q", clip("123456", 5), clip("日本語x", 6))
 	}
@@ -779,11 +769,15 @@ func TestFollowFolderWithoutReadme(t *testing.T) {
 	if h.path != empty || len(h.hist) != 1 || h.page.Lines[0] != "listing of "+empty {
 		t.Fatalf("folder listing: path %q msg %q", h.path, h.msg)
 	}
+	if !h.picking || h.pick.root != empty {
+		t.Fatalf("picker not opened on the folder: %+v", h.pick)
+	}
+	h.keys("esc")                                 // the plain listing stays
 	h.follow("file://" + filepath.ToSlash(empty)) // already there: no reload
 	if len(loaded) != 1 {
 		t.Errorf("reloaded the listing: %v", loaded)
 	}
-	h.keys("e")
+	h.keys("esc", "e")
 	if h.msg != "a folder listing cannot be edited" || len(h.edited) != 0 {
 		t.Errorf("edit a folder: %q %v", h.msg, h.edited)
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/termimg"
@@ -287,4 +288,13 @@ func FuzzRender(f *testing.F) {
 			t.Fatal("BEL leaked")
 		}
 	})
+}
+
+func TestCleanInvalidUTF8(t *testing.T) {
+	// a lone 0x9b is an 8-bit CSI for terminals that honour C1 controls
+	for _, s := range []string{"name\x9b2J.md", "x \x9d0;t\x07 y", "\xc2"} {
+		if c := Clean(s); !utf8.ValidString(c) {
+			t.Errorf("Clean(%q) = %q", s, c)
+		}
+	}
 }

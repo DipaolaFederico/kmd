@@ -17,12 +17,19 @@ TOOLS               := $(CURDIR)/.tools/bin
 STATICCHECK_VERSION := v0.8.2
 GOVULNCHECK_VERSION := v1.10.0
 GOSEC_VERSION       := v2.30.0
+GOCOGNIT_VERSION    := v1.3.0
+DUPL_VERSION        := v1.1.0
+DEADCODE_VERSION    := v0.53.0
+
+# Lint limits (see CONTRIBUTING.md, "Style").
+COGNIT_LIMIT        := 30
+DUPL_TOKENS         := 100
 
 VERSION_RPM := $(shell sed -n 's/^Version: *//p' packaging/kmd.spec)
 APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
-.PHONY: ci fmt fmt-check lint vet staticcheck scripts-test test spec cover api api-update security vuln gosec \
+.PHONY: ci fmt fmt-check lint vet staticcheck complexity dupl deadcode scripts-test test spec cover api api-update security vuln gosec \
         build perf fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
 
 ci: fmt-check lint scripts-test test cover security build packaging perf
@@ -37,7 +44,7 @@ fmt-check:
 	@out=$$(gofmt -s -l .); if [ -n "$$out" ]; then echo "not gofmt'ed:"; echo "$$out"; exit 1; fi
 
 ## Lint ---------------------------------------------------------------------
-lint: vet staticcheck
+lint: vet staticcheck complexity dupl deadcode
 
 vet:
 	@echo '» go vet'
@@ -47,9 +54,29 @@ staticcheck: $(TOOLS)/staticcheck
 	@echo '» staticcheck'
 	@$(TOOLS)/staticcheck ./...
 
+# Cognitive complexity within the limit for functions a change adds or makes
+# more complex (a ratchet: complex code that exists is not flagged until
+# touched). STRICT=1 (CI) fails when there is no main branch to compare with.
+complexity: $(TOOLS)/gocognit
+	@echo '» complexity (gocognit)'
+	@STRICT=$(STRICT) ./scripts/complexity.sh $(TOOLS)/gocognit $(COGNIT_LIMIT)
+
+# No copy-pasted blocks of DUPL_TOKENS tokens or more, tests included.
+dupl: $(TOOLS)/dupl
+	@echo '» duplication (dupl)'
+	@out=$$(git ls-files '*.go' | $(TOOLS)/dupl -files -t $(DUPL_TOKENS) -plumbing 2>&1) || exit 1; \
+	if [ -n "$$out" ]; then echo "$$out"; echo "factor out the duplicated code"; exit 1; fi
+
+# No function unreachable from main or the tests (-test: code used only by
+# tests, such as the public render package's API, counts as reachable).
+deadcode: $(TOOLS)/deadcode
+	@echo '» dead code (deadcode)'
+	@out=$$($(TOOLS)/deadcode -test ./...) || exit 1; \
+	if [ -n "$$out" ]; then echo "$$out"; echo "remove the unused code"; exit 1; fi
+
 ## Tests --------------------------------------------------------------------
 scripts-test:
-	@echo '» release scripts'
+	@echo '» scripts'
 	@./scripts/test-scripts.sh
 
 test:
@@ -153,7 +180,7 @@ uninstall:
 	      $(DATADIR)/zsh/site-functions/_kmd $(DATADIR)/fish/vendor_completions.d/kmd.fish
 
 ## Tooling ------------------------------------------------------------------
-tools: $(TOOLS)/staticcheck $(TOOLS)/govulncheck $(TOOLS)/gosec
+tools: $(TOOLS)/staticcheck $(TOOLS)/govulncheck $(TOOLS)/gosec $(TOOLS)/gocognit $(TOOLS)/dupl $(TOOLS)/deadcode
 
 $(TOOLS)/staticcheck:
 	GOBIN=$(TOOLS) $(GO) install honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION)
@@ -163,6 +190,15 @@ $(TOOLS)/govulncheck:
 
 $(TOOLS)/gosec:
 	GOBIN=$(TOOLS) $(GO) install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+
+$(TOOLS)/gocognit:
+	GOBIN=$(TOOLS) $(GO) install github.com/uudashr/gocognit/cmd/gocognit@$(GOCOGNIT_VERSION)
+
+$(TOOLS)/dupl:
+	GOBIN=$(TOOLS) $(GO) install github.com/mibk/dupl@$(DUPL_VERSION)
+
+$(TOOLS)/deadcode:
+	GOBIN=$(TOOLS) $(GO) install golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION)
 
 hooks:
 	git config core.hooksPath .githooks

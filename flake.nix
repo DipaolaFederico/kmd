@@ -2,7 +2,7 @@
 # `nix run github:DipaolaFederico/kmd/vX.Y.Z` (a release). Builds kmd from
 # source with the binary, man page and shell completions. The version is
 # taken from the commit (release numbers are only stamped at release time):
-# `kmd --version` prints 0-unstable-DATE-COMMIT. See docs/PACKAGING.md.
+# `kmd --version` prints 0-unstable-DATE-COMMIT.
 {
   description = "Fast, beautiful Markdown previewer for the terminal";
 

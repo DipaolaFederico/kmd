@@ -6,9 +6,9 @@
 # - every pull request gets a test build (in Packit's own COPR namespace)
 #
 # Requires the Packit GitHub app on the repository and the COPR project
-# (see docs/PACKAGING.md). Once kmd is in the official Fedora repositories,
-# packaging/packit-distgit.yaml goes into the dist-git repository to keep
-# Fedora updated from each release.
+# (status and next steps: docs/PACKAGING.md). Once kmd is in the official
+# Fedora repositories, packaging/packit-distgit.yaml goes into the dist-git
+# repository to keep Fedora updated from each release.
 specfile_path: packaging/kmd.spec
 upstream_package_name: kmd
 downstream_package_name: kmd

@@ -250,3 +250,30 @@ func TestRunClipboard(t *testing.T) {
 		t.Error("missing program")
 	}
 }
+
+func TestRunPicker(t *testing.T) {
+	root := pickerFixture(t)
+	master, slave := openPTY(t, 80, 24)
+	old := ttyPath
+	ttyPath = slave
+	t.Cleanup(func() { ttyPath = old })
+	scr := &screen{}
+	go scr.drain(master)
+	done := make(chan error, 1)
+	go func() { done <- Run(Options{Load: pickerLoader(), Start: root, Root: root}) }()
+	scr.waitFor(t, "23 documents") // listed in the background
+	send := func(s string) { _, _ = master.WriteString(s) }
+	send("\tneedle\r")
+	scr.waitFor(t, "2 matches")
+	send("\r")
+	scr.waitFor(t, "run the needle command")
+	send("q")
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(testlimit.Scale() * 5 * time.Second):
+		t.Fatal("viewer did not quit")
+	}
+}

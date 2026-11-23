@@ -96,6 +96,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0 # the complexity ratchet compares with the merge base
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -104,10 +105,12 @@ jobs:
         run: make fmt-check
       - name: go vet
         run: make vet
-      - name: Release scripts
+      - name: Helper scripts
         run: make scripts-test
       - name: staticcheck
         run: make staticcheck
+      - name: Complexity, duplication and dead code
+        run: make complexity dupl deadcode STRICT=1
       - name: No third-party dependencies
         run: |
           if grep -q '^require' go.mod; then

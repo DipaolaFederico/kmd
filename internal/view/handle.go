@@ -11,6 +11,11 @@ func (m *model) handle(k key) {
 		m.handlePrompt(k)
 		return
 	}
+	if m.picking {
+		m.msg = ""
+		m.handlePicker(k)
+		return
+	}
 	if m.outline {
 		m.msg = ""
 		m.handleOutline(k)
@@ -84,6 +89,10 @@ func (m *model) handle(k key) {
 		m.help = true
 	case "t":
 		m.openOutline()
+	case "o":
+		m.openPicker(false)
+	case "S":
+		m.openPicker(true)
 	case "c":
 		m.copyCode()
 	case "]":

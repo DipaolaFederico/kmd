@@ -39,8 +39,9 @@ request, green CI and the maintainer's approval (see `.github/CODEOWNERS`).
    pull requests that each leave `main` working.
 4. **Run the local CI** — it is the same as GitHub's plus the perf gate:
    ```sh
-   make ci        # fmt, vet, staticcheck, release scripts, race tests,
-                  # coverage, govulncheck, gosec, build, packaging, perf
+   make ci        # fmt, vet, staticcheck, complexity, duplication, dead
+                  # code, helper scripts, race tests, coverage,
+                  # govulncheck, gosec, build, packaging, perf
    make hooks     # optional: run `make ci` automatically before every push
    ```
 5. **Open a pull request** against `main`, titled as a Conventional Commit
@@ -64,6 +65,14 @@ workflows) skip lint, tests and build in CI automatically.
 - **Untrusted input**: if the change touches parsing or rendering, think
   about hostile input. Add a pathological or fuzz case when relevant
   (`make fuzz`). Anything that grows with input needs a bound.
+  Pathological tests keep an absolute time limit (scaled by
+  `internal/testlimit`) and also call `testlimit.Linear`, which times the
+  work at n, 2n and 4n and fails when both doublings cost well over 2×
+  (a quadratic costs ≈ 4×), measuring again at larger n before failing.
+  New pathological cases should use it too. It catches quadratics an
+  absolute limit misses, such as a `strings.Count` over the rest of the
+  input at each `[`, and does not depend on the machine's speed. It runs
+  in plain and coverage runs, not under `-race`.
 - **Performance**: if the change is on the hot path, include before/after
   numbers (`make bench`, `make perf`).
 - **Documentation**: user-visible changes update `README.md`, the man page
@@ -73,6 +82,12 @@ workflows) skip lint, tests and build in CI automatically.
   `CHANGELOG.md` (see [Changelog](#changelog)).
 - **Style**: `gofmt -s`, clear names, comments that explain *why*. Code,
   comments, commit messages and documentation are written in English.
+  `make lint` also checks that functions a change adds or makes more
+  complex stay within a cognitive complexity of 30 (`gocognit`; existing
+  complex functions are only flagged once a change makes them worse, and
+  moving or renaming one counts as a change), that there are no duplicated
+  blocks of 100 tokens or more (`dupl`, tests included) and no unreachable
+  functions (`deadcode`; a function used only by tests counts as used).
 
 ## Commit messages
 

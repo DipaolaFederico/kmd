@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 func gfmHTML(src string) string {
@@ -116,44 +118,63 @@ func backtickLadder(k int) string {
 	return b.String()
 }
 
-// TestPathological checks inputs known to make naive parsers quadratic.
+// TestPathological checks inputs known to make naive parsers quadratic:
+// each case builds n repetitions of a hostile pattern, rendered within a
+// time limit at the size given and timed at growing sizes, where the time
+// must grow linearly (testlimit.Linear).
 func TestPathological(t *testing.T) {
-	cases := map[string]string{
-		"nested brackets":  strings.Repeat("[", 50000) + strings.Repeat("]", 50000),
-		"nested quotes":    strings.Repeat("> ", 50000) + "x",
-		"nested lists":     strings.Repeat("- ", 50000) + "x",
-		"emphasis openers": strings.Repeat("*a ", 50000),
-		"underscores":      strings.Repeat("_a ", 50000) + strings.Repeat("a_ ", 50000),
-		"backticks":        strings.Repeat("`a``", 30000),
-		"links in links":   strings.Repeat("[a](b)", 30000) + strings.Repeat("[", 30000),
-		"unclosed links":   strings.Repeat("[a](", 50000),
-		"many refs":        strings.Repeat("[x]: /u\n", 30000),
-		"table rows":       "| a | b |\n|---|---|\n" + strings.Repeat("| x | y |\n", 30000),
-		"math":             strings.Repeat("$a ", 50000),
-		"emails":           strings.Repeat("a@ ", 50000),
-		"emphasis + links": strings.Repeat("*a* **b** `c` [d](e) ", 20000),
-		"underscore links": strings.Repeat("_a [x](y) ", 20000),
-		"backtick lengths": backtickLadder(1500),
-		"colons":           strings.Repeat(":", 100000),
-		"shortcode-like":   strings.Repeat(":"+strings.Repeat("a", 39), 5000),
-		"long shortcodes":  strings.Repeat(":"+strings.Repeat("a", 60)+":", 3000),
-		"split colons":     strings.Repeat(":_a_", 30000),
-		"emoji":            strings.Repeat(":rocket:", 30000),
-		"wiki openers":     strings.Repeat("[[", 100000),
-		"wiki closers":     strings.Repeat("]]", 100000),
-		"wiki unclosed":    strings.Repeat("[[a", 50000),
-		"wiki long":        strings.Repeat("[["+strings.Repeat("a", 2000), 50),
-		"wiki long colons": strings.Repeat("[["+strings.Repeat("a:", 1000), 50),
-		"unclosed + emoji": strings.Repeat("[[a :x: ", 30000),
-		"wiki links":       strings.Repeat("[[a|:x:]] ", 30000),
-		"wiki in emphasis": strings.Repeat("*[[a_b]]* ", 30000),
+	rep := func(s string) func(int) string { return func(n int) string { return strings.Repeat(s, n) } }
+	cases := []struct {
+		name string
+		n    int
+		gen  func(n int) string
+		// quadratic: the input itself grows with n², so its time cannot
+		// grow linearly (only the absolute limit applies)
+		quadratic bool
+	}{
+		{"nested brackets", 50000, func(n int) string { return strings.Repeat("[", n) + strings.Repeat("]", n) }, false},
+		{"nested quotes", 50000, func(n int) string { return strings.Repeat("> ", n) + "x" }, false},
+		{"nested lists", 50000, func(n int) string { return strings.Repeat("- ", n) + "x" }, false},
+		{"emphasis openers", 50000, rep("*a "), false},
+		{"underscores", 50000, func(n int) string { return strings.Repeat("_a ", n) + strings.Repeat("a_ ", n) }, false},
+		{"backticks", 30000, rep("`a``"), false},
+		{"links in links", 30000, func(n int) string { return strings.Repeat("[a](b)", n) + strings.Repeat("[", n) }, false},
+		{"unclosed links", 50000, rep("[a]("), false},
+		{"many refs", 30000, rep("[x]: /u\n"), false},
+		{"table rows", 30000, func(n int) string { return "| a | b |\n|---|---|\n" + strings.Repeat("| x | y |\n", n) }, false},
+		{"math", 50000, rep("$a "), false},
+		{"emails", 50000, rep("a@ "), false},
+		{"emphasis + links", 20000, rep("*a* **b** `c` [d](e) "), false},
+		{"underscore links", 20000, rep("_a [x](y) "), false},
+		{"backtick lengths", 1500, backtickLadder, true},
+		{"colons", 100000, rep(":"), false},
+		{"shortcode-like", 5000, rep(":" + strings.Repeat("a", 39)), false},
+		{"long shortcodes", 3000, rep(":" + strings.Repeat("a", 60) + ":"), false},
+		{"split colons", 30000, rep(":_a_"), false},
+		{"emoji", 30000, rep(":rocket:"), false},
+		{"wiki openers", 100000, rep("[["), false},
+		{"wiki closers", 100000, rep("]]"), false},
+		{"wiki unclosed", 50000, rep("[[a"), false},
+		{"wiki long", 50, rep("[[" + strings.Repeat("a", 2000)), false},
+		{"wiki long colons", 50, rep("[[" + strings.Repeat("a:", 1000)), false},
+		{"unclosed + emoji", 30000, rep("[[a :x: "), false},
+		{"wiki links", 30000, rep("[[a|:x:]] "), false},
+		{"wiki in emphasis", 30000, rep("*[[a_b]]* "), false},
 	}
-	for name, in := range cases {
+	for _, c := range cases {
+		in := c.gen(c.n)
 		start := time.Now()
 		_ = HTML(Parse(in, GFM), HTMLOptions{})
 		if d := time.Since(start); d > raceFactor()*500*time.Millisecond {
-			t.Errorf("%s took %v", name, d)
+			t.Errorf("%s took %v", c.name, d)
 		}
+		if c.quadratic {
+			continue
+		}
+		testlimit.Linear(t, c.name, 8*c.n, func(n int) func() {
+			in := c.gen(n)
+			return func() { _ = HTML(Parse(in, GFM), HTMLOptions{}) }
+		})
 	}
 }
 

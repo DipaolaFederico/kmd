@@ -9,6 +9,29 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- A file picker for folders: `kmd docs/` without a `README.md` lists every
+  Markdown file under the folder, filtered as you type (fuzzy), and Enter
+  opens it; Backspace returns to the list. `o` opens the picker from any
+  document, for the folder kmd was started on.
+- Search across documents: `S` (or `Tab` in the picker) searches the text
+  of every document in the folder and lists the matches with their file,
+  line and section; Enter opens the document at the match. The search runs
+  in the background and Esc cancels it.
+
+### Changed
+
+- A folder without a `README.md` opens the built-in viewer (with the file
+  picker) even when its listing fits on the screen; piped output, and an
+  external pager set with `pager` or `KMD_PAGER`, are unchanged.
+
+### Security
+
+- File names with invalid UTF-8 in messages (a lone byte such as `0x9b`,
+  an 8-bit control sequence for some terminals) are shown with U+FFFD
+  instead of reaching the terminal as they are.
+
 ## [0.11.0] - 2026-11-23
 
 ### Added

@@ -40,7 +40,11 @@ func TestParseKeys(t *testing.T) {
 		"\x1b[12":                nil,
 		"\r\n\t\x7f\x08\x03\x1a": {"enter", "enter", "tab", "backspace", "backspace", "ctrl-c", "ctrl-z"},
 		"\x1b[<0;5;7M":           {"mouse"},
-		"\x1b[<0;5M\x1b[<99999999999999999999;1;1M": nil,
+		// late answers to the background query are not keys ("e" would edit)
+		"\x1b]11;rgb:eeee/eeee/eeee\x1b\\\x1b[?62;22cj": {"char:j"},
+		"\x1b]11;rgb:1c1c/1c1c/1c1c\aq":                 {"char:q"},
+		"\x1b]11;rgb:ec":                                nil,
+		"\x1b[<0;5M\x1b[<99999999999999999999;1;1M":     nil,
 	} {
 		if got := names(in); !reflect.DeepEqual(got, want) {
 			t.Errorf("parseKeys(%q) = %v, want %v", in, got, want)

@@ -62,9 +62,9 @@ type Env struct {
 	StdoutTTY      bool
 	Cols, Rows     int
 	CellW, CellH   int // terminal cell size in pixels (0 = unknown)
-	// LightBackground asks the terminal whether its background is light
-	// (ok false: no answer); nil never asks.
-	LightBackground func() (light, ok bool)
+	// LightBackground asks the terminal whether its background is light,
+	// giving up after silent without an answer (ok false); nil never asks.
+	LightBackground func(silent time.Duration) (light, ok bool)
 	// Pager displays content through a pager; nil uses the system pager.
 	Pager func(content, command string) error
 	// View runs the built-in interactive viewer; nil uses the terminal.
@@ -300,32 +300,64 @@ func firstNonEmpty(v ...string) string {
 	return ""
 }
 
-// isLightFGBG interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light.
-func isLightFGBG(fgbg string) bool {
+// parseFGBG interprets $COLORFGBG ("fg;bg"): bg 7 or 9–15 is light. ok is
+// false when bg is not a color number (unset, "default").
+func parseFGBG(fgbg string) (light, ok bool) {
 	n, err := strconv.Atoi(fgbg[strings.LastIndexByte(fgbg, ';')+1:])
-	return err == nil && n != 8 && n >= 7 && n <= 15
+	return n != 8 && n >= 7 && n <= 15, err == nil
 }
 
 // Sources of the light/dark choice of theme = auto, for kmd --config.
 const (
-	srcFGBG    = "COLORFGBG"
-	srcOSC11   = "OSC 11 terminal background"
-	srcDefault = "no background information, dark"
+	srcFGBG     = "COLORFGBG"
+	srcOSC11    = "terminal background (OSC 11)"
+	srcNoAnswer = "the terminal did not say its background"
+	srcNotAsked = "the terminal was not asked"
+)
+
+// How long kmd waits for a terminal that does not answer the background
+// query. A local terminal answers in about a millisecond; over SSH the
+// answer takes a round trip, and one arriving after kmd gave up would be
+// read by the shell or the viewer as typed keys.
+const (
+	silentLocal = 100 * time.Millisecond
+	silentSSH   = time.Second
 )
 
 // lightBackground decides between the light and dark default themes and
 // names the source that decided. $COLORFGBG is free to read, so it wins when
 // set; otherwise the terminal is asked when ask allows it, else dark.
 func lightBackground(env Env, ask bool) (light bool, source string) {
-	if fgbg := env.Getenv("COLORFGBG"); fgbg != "" {
-		return isLightFGBG(fgbg), srcFGBG
+	get := env.Getenv
+	if light, ok := parseFGBG(get("COLORFGBG")); ok {
+		return light, srcFGBG
 	}
-	if ask && env.LightBackground != nil {
-		if light, ok := env.LightBackground(); ok {
-			return light, srcOSC11
-		}
+	if !ask || env.LightBackground == nil {
+		return false, srcNotAsked
 	}
-	return false, srcDefault
+	silent := silentLocal
+	if get("SSH_CONNECTION") != "" || get("SSH_TTY") != "" {
+		silent = silentSSH
+	}
+	if light, ok := env.LightBackground(silent); ok {
+		return light, srcOSC11
+	}
+	return false, srcNoAnswer
+}
+
+// autoTheme picks the light or dark theme of theme = auto and names the
+// source that decided (see lightBackground); color reports colored output.
+func autoTheme(o options, cfg config, env Env, color bool) (name, source string) {
+	// the query goes to the terminal kmd is drawing on, interactively:
+	// never into a pipe, a file, or output without colors, nor just to
+	// print the usage (no document on an interactive standard input)
+	ask := env.StdinTTY && env.StdoutTTY && color && !o.html && env.Getenv("TERM") != "dumb" &&
+		(len(o.files) > 0 || o.showConfig || o.listThemes)
+	light, source := lightBackground(env, ask)
+	if light {
+		return firstNonEmpty(cfg.LightTheme, "tokyo-night-day"), source
+	}
+	return firstNonEmpty(cfg.DarkTheme, "tokyo-night"), source
 }
 
 // resolve turns flags, configuration and environment into settings. The
@@ -357,15 +389,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 
 	name := firstNonEmpty(o.theme, get("KMD_THEME"), cfg.Theme, "auto")
 	if name == "auto" {
-		// the query goes to the terminal kmd is drawing on, interactively:
-		// never into a pipe, a file, or output without colours
-		ask := env.StdinTTY && env.StdoutTTY && pub.Color && !o.html && get("TERM") != "dumb"
-		var light bool
-		light, s.themeSrc = lightBackground(env, ask)
-		name = firstNonEmpty(cfg.DarkTheme, "tokyo-night")
-		if light {
-			name = firstNonEmpty(cfg.LightTheme, "tokyo-night-day")
-		}
+		name, s.themeSrc = autoTheme(o, cfg, env, pub.Color)
 	}
 	th, err := api.LoadTheme(name, render.ThemeDirs(get)...)
 	if errors.Is(err, api.ErrUnknownTheme) {

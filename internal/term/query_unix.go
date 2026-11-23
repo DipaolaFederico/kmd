@@ -16,21 +16,21 @@ import (
 var errNoReply = errors.New("terminal did not answer")
 
 // LightBackground asks the terminal at path (normally /dev/tty) for its
-// background colour. ok is false when the terminal does not say, or could
-// not be asked; light reports whether the colour is light (see IsLight).
-func LightBackground(path string, timeout time.Duration) (light, ok bool) {
-	reply, _ := QueryBackground(path, timeout) // a partial reply may still hold the colour
-	r, g, b, ok := ParseBackground(reply)
-	return ok && IsLight(r, g, b), ok
+// background color. ok is false when the terminal does not say, or could
+// not be asked; light reports whether the color is light (see isLight).
+// A terminal that stays silent is given up on after silent; one that has
+// started to answer is given until MaxQueryWait.
+func LightBackground(path string, silent time.Duration) (light, ok bool) {
+	reply, _ := queryBackground(path, silent) // a partial reply may still hold the color
+	r, g, b, ok := parseBackground(reply)
+	return ok && isLight(r, g, b), ok
 }
 
-// QueryBackground writes the background query to the terminal at path and
-// returns what it answered, up to maxReply bytes, for ParseBackground. It
-// stops at the DA1 reply, after a tenth of a second without input, or at
-// the first read past timeout, so it never waits longer than timeout plus a
-// tenth of a second. The terminal mode is restored before it returns, and
-// also when a signal ends the process meanwhile.
-func QueryBackground(path string, timeout time.Duration) ([]byte, error) {
+// queryBackground writes the background query to the terminal at path and
+// returns what it answered, up to maxReply bytes, for parseBackground (see
+// readReply for how long it waits). The terminal mode is restored before it
+// returns, and also when a signal ends the process meanwhile.
+func queryBackground(path string, silent time.Duration) ([]byte, error) {
 	// #nosec G304 -- path is /dev/tty (a pty in tests), never from a document.
 	f, err := os.OpenFile(path, os.O_RDWR|syscall.O_NOCTTY, 0)
 	if err != nil {
@@ -43,42 +43,77 @@ func QueryBackground(path string, timeout time.Duration) ([]byte, error) {
 		// stop kmd with SIGTTOU
 		return nil, errors.New("not the terminal's foreground process")
 	}
-	restore, err := makeRaw(fd, 0, 1) // reads return after 0.1 s of silence
+	// watch for signals before the mode changes, so none can leave it raw
+	var mu sync.Mutex
+	var restore func() error
+	undo := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if restore != nil {
+			_ = restore()
+			restore = nil
+		}
+	}
+	defer restoreOnSignal(undo)()
+	defer undo()
+	mu.Lock()
+	restore, err = makeRaw(fd, 0, 1) // reads return after 0.1 s of silence
+	mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
-	var once sync.Once
-	undo := func() { once.Do(func() { _ = restore() }) }
-	defer undo()
-	defer restoreOnSignal(undo)()
 	if _, err := f.WriteString(backgroundQuery); err != nil {
 		return nil, err
 	}
-	return readReply(int(fd), time.Now().Add(timeout)) // #nosec G115 -- file descriptors fit in an int
+	return readReply(fd, 1, silent)
 }
 
-// readReply reads from a terminal in raw mode with a read timeout until a
-// DA1 reply ends the answer, the terminal stays silent, the deadline passes
-// or maxReply bytes arrived.
-func readReply(fd int, deadline time.Time) ([]byte, error) {
+// MaxQueryWait bounds the wait for the terminal's answer once it has
+// begun: stopping halfway would leave the rest of it in the terminal's
+// input, where the shell or the viewer would read it as typed keys.
+const MaxQueryWait = time.Second
+
+// readReply reads from a terminal in raw mode, whose read timeout is vtime
+// tenths of a second, until the DA1 reply ends the answer or maxReply bytes
+// arrived. It gives up when nothing arrived within silent, or the answer
+// is still incomplete after MaxQueryWait (both rounded to a twentieth of
+// a second, the precision of the timeout).
+func readReply(fd uintptr, vtime uint8, silent time.Duration) ([]byte, error) {
+	start := time.Now()
 	buf := make([]byte, maxReply)
 	n := 0
 	for n < len(buf) && !da1Done(buf[:n]) {
-		if !time.Now().Before(deadline) {
+		wait := min(silent, MaxQueryWait)
+		if n > 0 {
+			wait = MaxQueryWait
+		}
+		left := wait - time.Since(start)
+		if left <= 0 {
 			return buf[:n], errNoReply
 		}
-		m, err := syscall.Read(fd, buf[n:])
+		if t := tenths(left); t != vtime {
+			if err := setReadTimeout(fd, t); err != nil {
+				return buf[:n], err
+			}
+			vtime = t
+		}
+		m, err := syscall.Read(int(fd), buf[n:]) // #nosec G115 -- file descriptors fit in an int
 		switch {
 		case errors.Is(err, syscall.EINTR):
 			continue
 		case err != nil:
 			return buf[:n], err
-		case m <= 0:
+		case m == 0: // the read timeout expired without input
 			return buf[:n], errNoReply
 		}
 		n += m
 	}
 	return buf[:n], nil
+}
+
+// tenths converts d to a termios read timeout: tenths of a second, 1–255.
+func tenths(d time.Duration) uint8 {
+	return uint8(min(max((d+50*time.Millisecond)/(100*time.Millisecond), 1), 255)) // #nosec G115 -- clamped to 1–255
 }
 
 // foreground reports whether kmd may change the mode of the terminal fd:

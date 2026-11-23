@@ -36,6 +36,17 @@ func makeRaw(fd uintptr, vmin, vtime uint8) (restore func() error, err error) {
 	return func() error { return termios(fd, ioctlSet, &old) }, nil
 }
 
+// setReadTimeout changes the read timeout of a terminal in non-canonical
+// mode to vtime tenths of a second.
+func setReadTimeout(fd uintptr, vtime uint8) error {
+	var t syscall.Termios
+	if err := termios(fd, ioctlGet, &t); err != nil {
+		return err
+	}
+	t.Cc[syscall.VTIME] = vtime
+	return termios(fd, ioctlSet, &t)
+}
+
 func termios(fd, req uintptr, t *syscall.Termios) error {
 	// #nosec G103 -- the termios ioctls require a pointer to a Termios struct.
 	if _, _, errno := syscall.Syscall(syscall.SYS_IOCTL, fd, req, uintptr(unsafe.Pointer(t))); errno != 0 {

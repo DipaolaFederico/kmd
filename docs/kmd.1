@@ -300,11 +300,11 @@ with no name is plain text.
 With \fBtheme = auto\fR (the default), kmd uses \fBlight\-theme\fR on a
 light terminal background and \fBdark\-theme\fR otherwise. The background is
 taken from \fBCOLORFGBG\fR when it is set; otherwise kmd asks the terminal
-(OSC 11, followed by a device attributes request that every terminal
+(OSC 11, followed by a device attributes request that nearly every terminal
 answers), but only when colors are on and both standard input and output
 are the terminal: never into a pipe, with \fB\-\-html\fR or with
-\fBTERM=dumb\fR. A terminal that answers neither costs at most 0.2 s; with no
-answer the dark theme is used. \fBkmd \-\-config\fR shows which source
+\fBTERM=dumb\fR. kmd gives up on a terminal that stays silent after 0.1 s
+(1 s over SSH) and then uses the dark theme. \fBkmd \-\-config\fR shows which source
 decided. Setting a theme skips the detection.
 .PP
 A theme file \fI~/.config/kmd/themes/NAME.theme\fR contains \fBkey = #rrggbb\fR
@@ -367,8 +367,8 @@ network requests and remote images are never downloaded (see
 \fBREMOTE DOCUMENTS\fR). Linked documents are only read when the user follows the
 link in the viewer, and only local images, PDFs and other data files (never
 programs) are handed to the desktop. The only query sent to the terminal
-asks for its background color (see \fBTHEMES\fR); its answer is bounded and
-parsed strictly. Inputs are limited to 16 MiB and 250,000 blocks, images to
+asks for its background color (see \fBTHEMES\fR); its answer is read for at
+most 1 s and 256 bytes and parsed strictly. Inputs are limited to 16 MiB and 250,000 blocks, images to
 20 MiB and 40 megapixels (at most 50 per document), and the number of
 diagrams and display formulas per document is bounded, as are the bytes
 reference links may copy from their definitions (1 MiB plus the document's

@@ -25,16 +25,16 @@ func TestParseBackground(t *testing.T) {
 		{"\x1b]11;rgb:0/0/0/0\a", 0, 0, 0, false},                               // four channels
 		{"\x1b]11;rgb:0/0/0", 0, 0, 0, false},                                   // unterminated
 		{"\x1b]11;rgb:0/0/0\x1b", 0, 0, 0, false},                               // half a terminator
-		{"\x1b]11;rgba:0/0/0/0\a", 0, 0, 0, false},                              // other colour forms
+		{"\x1b]11;rgba:0/0/0/0\a", 0, 0, 0, false},                              // other color forms
 		{"\x1b]11;#ffffff\a", 0, 0, 0, false},                                   //
 		{"\x1b]11;rgb:g/0/0\a", 0, 0, 0, false},                                 // not hex
 		{"\x1b]10;rgb:ffff/ffff/ffff\a", 0, 0, 0, false},                        // foreground, not background
 		{"\x1b]11;rgb:-1/0/0\a", 0, 0, 0, false},                                // sign
 		{strings.Repeat("x", maxReply) + "\x1b]11;rgb:f/f/f\a", 0, 0, 0, false}, // too long
 	} {
-		r, g, b, ok := ParseBackground([]byte(tc.reply))
+		r, g, b, ok := parseBackground([]byte(tc.reply))
 		if ok != tc.ok || math.Abs(r-tc.r) > 1e-9 || math.Abs(g-tc.g) > 1e-9 || math.Abs(b-tc.b) > 1e-9 {
-			t.Errorf("ParseBackground(%q) = %v,%v,%v,%v; want %v,%v,%v,%v", tc.reply, r, g, b, ok, tc.r, tc.g, tc.b, tc.ok)
+			t.Errorf("parseBackground(%q) = %v,%v,%v,%v; want %v,%v,%v,%v", tc.reply, r, g, b, ok, tc.r, tc.g, tc.b, tc.ok)
 		}
 	}
 }
@@ -54,8 +54,8 @@ func TestIsLight(t *testing.T) {
 		{0, 0, 1, false},         // saturated blue is dark
 		{0, 1, 0, true},          // saturated green is light
 	} {
-		if got := IsLight(tc.r, tc.g, tc.b); got != tc.light {
-			t.Errorf("IsLight(%v,%v,%v) = %v", tc.r, tc.g, tc.b, got)
+		if got := isLight(tc.r, tc.g, tc.b); got != tc.light {
+			t.Errorf("isLight(%v,%v,%v) = %v", tc.r, tc.g, tc.b, got)
 		}
 	}
 }
@@ -82,10 +82,10 @@ func FuzzBackground(f *testing.F) {
 	f.Add([]byte("\x1b]11;rgb:fffff/0/0\a"))
 	f.Add([]byte("\x1b[?1;2c"))
 	f.Fuzz(func(t *testing.T, reply []byte) {
-		r, g, b, ok := ParseBackground(reply)
+		r, g, b, ok := parseBackground(reply)
 		if !ok {
 			if r != 0 || g != 0 || b != 0 {
-				t.Fatal("colour without ok")
+				t.Fatal("color without ok")
 			}
 			return
 		}

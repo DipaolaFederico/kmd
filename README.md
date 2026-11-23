@@ -381,9 +381,9 @@ background:
 1. `COLORFGBG`, when the terminal sets it;
 2. otherwise kmd asks the terminal for its background color (OSC 11),
    only when colors are on and both standard input and output are the
-   terminal (never into a pipe, with `--html` or with `TERM=dumb`). The
-   answer takes well under a millisecond on a local terminal; one that
-   does not answer costs at most 0.2 s;
+   terminal (never into a pipe, with `--html` or with `TERM=dumb`). A local
+   terminal answers in about a millisecond; kmd gives up on one that stays
+   silent after 0.1 s (1 s over SSH, where the answer takes a round trip);
 3. otherwise the dark theme.
 
 `kmd --config` shows which one decided. Set a theme (`-t`, `KMD_THEME` or
@@ -543,10 +543,11 @@ threat model:
 - **Terminal queries**: the only thing kmd ever asks the terminal is its
   background color, for `theme = auto` (see [Themes](#-themes)), on the
   controlling terminal and only from the foreground. The answer is read
-  for at most 0.2 s and 256 bytes, must be exactly `rgb:R/G/B` with 1–4
-  hex digits per channel, and is used only to choose between two themes;
-  the terminal mode is restored before kmd continues, and also when a
-  signal ends it meanwhile.
+  for at most 1 s and 256 bytes, must be exactly `rgb:R/G/B` with 1–4 hex
+  digits per channel, and is used only to choose between two themes; keys
+  typed meanwhile are discarded, and the viewer ignores an answer that
+  arrives too late. The terminal mode is restored before kmd continues,
+  and also when a signal ends it meanwhile.
 - **File picker**: listing a folder reads only names, breadth first, at most
   20 levels deep, 10,000 documents and 200,000 entries (a notice is shown
   beyond), in the background, without leaving the folder's file system

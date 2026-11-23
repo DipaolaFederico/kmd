@@ -40,9 +40,10 @@ func openPtyPair(t *testing.T) (*os.File, string) {
 	return master, path
 }
 
-// fakeTerminal answers the background query on master with reply, after
-// delay, and returns what it read.
-func fakeTerminal(t *testing.T, master *os.File, reply string, delay time.Duration) <-chan []byte {
+// fakeTerminal answers the background query on master: it writes each
+// part of the answer, pausing for pause before every part after the first,
+// and then sends what it read.
+func fakeTerminal(t *testing.T, master *os.File, pause time.Duration, parts ...string) <-chan []byte {
 	t.Helper()
 	got := make(chan []byte, 1)
 	go func() {
@@ -55,11 +56,28 @@ func fakeTerminal(t *testing.T, master *os.File, reply string, delay time.Durati
 			}
 			in = append(in, b[:n]...)
 		}
-		time.Sleep(delay)
-		_, _ = master.WriteString(reply)
+		for i, p := range parts {
+			if i > 0 {
+				time.Sleep(pause)
+			}
+			_, _ = master.WriteString(p)
+		}
 		got <- in
 	}()
 	return got
+}
+
+// receive waits for what the fake terminal read, failing instead of
+// hanging when the query never came.
+func receive(t *testing.T, sent <-chan []byte) []byte {
+	t.Helper()
+	select {
+	case q := <-sent:
+		return q
+	case <-time.After(testlimit.Scale() * 5 * time.Second):
+		t.Fatal("the query never reached the terminal")
+		return nil
+	}
 }
 
 // termiosOf reads the mode of the terminal at path.
@@ -81,27 +99,26 @@ func TestLightBackgroundPty(t *testing.T) {
 	const da1 = "\x1b[?62;22c"
 	for _, tc := range []struct {
 		name      string
-		reply     string
+		reply     []string // written with a pause between parts
 		light, ok bool
 	}{
-		{"light", "\x1b]11;rgb:fdfd/f6f6/e3e3\x1b\\" + da1, true, true},
-		{"dark", "\x1b]11;rgb:1a1a/1b1b/2626\a" + da1, false, true},
-		{"no OSC 11", da1, false, false},
-		{"hostile", "\x1b]11;rgb:ffff/ffff/ffff\x1b]0;pwned\a" + da1, false, false},
+		{"light", []string{"\x1b]11;rgb:fdfd/f6f6/e3e3\x1b\\" + da1}, true, true},
+		{"dark", []string{"\x1b]11;rgb:1a1a/1b1b/2626\a" + da1}, false, true},
+		{"no OSC 11", []string{da1}, false, false},
+		{"hostile", []string{"\x1b]11;rgb:ffff/ffff/ffff\x1b]0;pwned\a" + da1}, false, false},
+		// an answer that has begun is read to the end, so none of it is
+		// left for the shell or the viewer
+		{"slow", []string{"\x1b]11;rgb:ffff/", "ffff/ffff\a\x1b[?6", "2c"}, true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			master, slave := openPtyPair(t)
 			before := termiosOf(t, slave)
-			sent := fakeTerminal(t, master, tc.reply, 0)
-			start := time.Now()
-			light, ok := LightBackground(slave, testlimit.Scale()*5*time.Second)
+			sent := fakeTerminal(t, master, 300*time.Millisecond, tc.reply...)
+			light, ok := LightBackground(slave, 100*time.Millisecond)
 			if light != tc.light || ok != tc.ok {
 				t.Fatalf("LightBackground = %v,%v; want %v,%v", light, ok, tc.light, tc.ok)
 			}
-			if d := time.Since(start); d > testlimit.Scale()*time.Second {
-				t.Errorf("waited %v although the terminal answered", d) // the DA1 reply ends the wait
-			}
-			if q := <-sent; string(q) != backgroundQuery {
+			if q := receive(t, sent); string(q) != backgroundQuery {
 				t.Errorf("sent %q", q)
 			}
 			if after := termiosOf(t, slave); after != before {
@@ -114,15 +131,13 @@ func TestLightBackgroundPty(t *testing.T) {
 func TestQueryBackgroundSilentTerminal(t *testing.T) {
 	master, slave := openPtyPair(t)
 	before := termiosOf(t, slave)
-	fakeTerminal(t, master, "", 0)
+	fakeTerminal(t, master, 0)
 	start := time.Now()
-	reply, err := QueryBackground(slave, 50*time.Millisecond)
-	d := time.Since(start)
+	reply, err := queryBackground(slave, 100*time.Millisecond)
 	if !errors.Is(err, errNoReply) || len(reply) != 0 {
-		t.Fatalf("QueryBackground = %q, %v", reply, err)
+		t.Fatalf("queryBackground = %q, %v", reply, err)
 	}
-	// 0.1 s of silence ends the wait (the termios timeout has tenths)
-	if d < 50*time.Millisecond || d > testlimit.Scale()*time.Second {
+	if d := time.Since(start); d > testlimit.Scale()*time.Second {
 		t.Errorf("waited %v", d)
 	}
 	if after := termiosOf(t, slave); after != before {
@@ -131,41 +146,44 @@ func TestQueryBackgroundSilentTerminal(t *testing.T) {
 }
 
 func TestQueryBackgroundBounded(t *testing.T) {
-	master, slave := openPtyPair(t)
-	// a terminal that never stops talking: the answer is cut at maxReply
-	go func() {
-		b := make([]byte, 64)
-		_, _ = master.Read(b)
-		junk := bytes.Repeat([]byte("x"), 64)
-		for {
-			if _, err := master.Write(junk); err != nil {
-				return
+	// the writers stop when the test's cleanup closes the master
+	t.Run("size", func(t *testing.T) {
+		master, slave := openPtyPair(t)
+		go func() { // a terminal that never stops talking
+			b := make([]byte, 64)
+			_, _ = master.Read(b)
+			junk := bytes.Repeat([]byte("x"), 64)
+			for {
+				if _, err := master.Write(junk); err != nil {
+					return
+				}
 			}
+		}()
+		reply, err := queryBackground(slave, time.Second)
+		if err != nil || len(reply) != maxReply {
+			t.Fatalf("queryBackground = %d bytes, %v", len(reply), err)
 		}
-	}()
-	reply, err := QueryBackground(slave, testlimit.Scale()*5*time.Second)
-	if err != nil || len(reply) != maxReply {
-		t.Fatalf("QueryBackground = %d bytes, %v", len(reply), err)
-	}
-	// and the deadline ends a slow trickle
-	master2, slave2 := openPtyPair(t)
-	go func() {
-		b := make([]byte, 64)
-		_, _ = master2.Read(b)
-		for {
-			if _, err := master2.WriteString("x"); err != nil {
-				return
+	})
+	t.Run("time", func(t *testing.T) {
+		master, slave := openPtyPair(t)
+		go func() { // a trickle that never completes the answer
+			b := make([]byte, 64)
+			_, _ = master.Read(b)
+			for {
+				if _, err := master.WriteString("x"); err != nil {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
 			}
-			time.Sleep(10 * time.Millisecond)
+		}()
+		start := time.Now()
+		if _, err := queryBackground(slave, 100*time.Millisecond); !errors.Is(err, errNoReply) {
+			t.Fatalf("err = %v", err)
 		}
-	}()
-	start := time.Now()
-	if _, err := QueryBackground(slave2, 50*time.Millisecond); !errors.Is(err, errNoReply) {
-		t.Fatalf("err = %v", err)
-	}
-	if d := time.Since(start); d > testlimit.Scale()*time.Second {
-		t.Errorf("waited %v", d)
-	}
+		if d := time.Since(start); d < MaxQueryWait || d > MaxQueryWait+testlimit.Scale()*time.Second {
+			t.Errorf("waited %v; want about %v", d, MaxQueryWait)
+		}
+	})
 }
 
 func TestQueryBackgroundNotATerminal(t *testing.T) {
@@ -177,11 +195,20 @@ func TestQueryBackgroundNotATerminal(t *testing.T) {
 	}
 }
 
+func TestTenths(t *testing.T) {
+	for d, want := range map[time.Duration]uint8{0: 1, 40 * time.Millisecond: 1, 100 * time.Millisecond: 1,
+		160 * time.Millisecond: 2, time.Second: 10, time.Hour: 255} {
+		if got := tenths(d); got != want {
+			t.Errorf("tenths(%v) = %d; want %d", d, got, want)
+		}
+	}
+}
+
 // TestQueryRestoresOnSignal kills a process waiting for the terminal's
 // answer and checks that the terminal is no longer in raw mode.
 func TestQueryRestoresOnSignal(t *testing.T) {
 	if path := os.Getenv("KMD_TERM_QUERY_CHILD"); path != "" {
-		_, _ = QueryBackground(path, time.Minute)
+		_, _ = queryBackground(path, time.Minute)
 		os.Exit(0) // not reached: killed by the parent
 	}
 	master, slave := openPtyPair(t)
@@ -190,7 +217,8 @@ func TestQueryRestoresOnSignal(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	<-fakeTerminal(t, master, "", 0) // the query is out, so the terminal is raw
+	t.Cleanup(func() { _ = cmd.Process.Kill() }) // if the test fails before the signal
+	receive(t, fakeTerminal(t, master, 0))       // the query is out, so the terminal is raw
 	if raw := termiosOf(t, slave); raw.Lflag&syscall.ICANON != 0 {
 		t.Fatal("terminal not in raw mode during the query")
 	}

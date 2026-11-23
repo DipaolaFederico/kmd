@@ -28,6 +28,11 @@ func parseKeys(b []byte) []key {
 	for len(b) > 0 {
 		c := b[0]
 		switch {
+		case c == 0x1b && len(b) > 2 && b[1] == ']':
+			// a terminal's answer to an OSC query (kmd asks for the
+			// background color) that arrived late: not typed keys
+			b = b[oscLen(b):]
+			continue
 		case c == 0x1b && len(b) > 2 && (b[1] == '[' || b[1] == 'O'):
 			k, n := parseSeq(b)
 			if k.name != "" {
@@ -54,6 +59,20 @@ func parseKeys(b []byte) []key {
 		b = b[1:]
 	}
 	return out
+}
+
+// oscLen is the length of the OSC string at the start of b, up to its BEL
+// or ESC \ terminator, or all of b when the terminator is missing.
+func oscLen(b []byte) int {
+	for i := 2; i < len(b); i++ {
+		switch {
+		case b[i] == '\a':
+			return i + 1
+		case b[i] == 0x1b && i+1 < len(b) && b[i+1] == '\\':
+			return i + 2
+		}
+	}
+	return len(b)
 }
 
 // parseSeq decodes the CSI or SS3 sequence at the start of b and returns

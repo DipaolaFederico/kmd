@@ -31,8 +31,14 @@ func tree(t *testing.T, files map[string]string) string {
 
 func walkNames(t *testing.T, root string) ([]string, string) {
 	t.Helper()
+	return walkNamesWith(t, root, pickLimit)
+}
+
+// walkNamesWith walks root with the limits lim.
+func walkNamesWith(t *testing.T, root string, lim pickLimits) ([]string, string) {
+	t.Helper()
 	var names []string
-	note := walkTree(root, func() bool { return false }, func(b []doc) bool {
+	note := walkTree(root, lim, func() bool { return false }, func(b []doc) bool {
 		for _, d := range b {
 			names = append(names, d.name)
 		}
@@ -40,13 +46,6 @@ func walkNames(t *testing.T, root string) ([]string, string) {
 	})
 	sort.Strings(names)
 	return names, note
-}
-
-// setVar lowers a limit for one test.
-func setVar(t *testing.T, p *int, v int) {
-	old := *p
-	*p = v
-	t.Cleanup(func() { *p = old })
 }
 
 func TestWalkTree(t *testing.T) {
@@ -70,7 +69,7 @@ func TestWalkTree(t *testing.T) {
 	link(filepath.Join(root, "notes.txt"), "notes.md") // extension changes: not listed
 	link(filepath.Join(root, "missing.md"), "dead.md") // dangling
 	if err := syscallMkfifo(filepath.Join(root, "fifo.md")); err != nil {
-		t.Fatal(err)
+		t.Skip("no FIFOs:", err)
 	}
 	names, note := walkNames(t, root)
 	want := []string{"README.md", "UP.MD", "a.markdown", "bad[31mname.md", "docs/deep/x.md", "docs/guide.md", "g.md"}
@@ -79,24 +78,24 @@ func TestWalkTree(t *testing.T) {
 	}
 
 	// stopping (with the default limits): by the caller, or by emit
-	if n := walkTree(root, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
+	if n := walkTree(root, pickLimit, func() bool { return true }, func([]doc) bool { t.Error("emitted"); return true }); n != "" {
 		t.Error(n)
 	}
-	if n := walkTree(root, func() bool { return false }, func([]doc) bool { return false }); n != "" {
+	if n := walkTree(root, pickLimit, func() bool { return false }, func([]doc) bool { return false }); n != "" {
 		t.Error(n)
 	}
 
-	setVar(t, &maxPickDepth, 1)
-	if names, note := walkNames(t, root); len(names) != 6 || !strings.Contains(note, "deeper than 1") {
+	lim := pickLimit
+	lim.depth = 1
+	if names, note := walkNamesWith(t, root, lim); len(names) != 6 || !strings.Contains(note, "deeper than 1") {
 		t.Errorf("depth limit: %q %q", names, note)
 	}
-	setVar(t, &maxPickFiles, 3)
-	if names, note := walkNames(t, root); len(names) != 3 || !strings.Contains(note, "first 3 documents") {
+	lim.files = 3
+	if names, note := walkNamesWith(t, root, lim); len(names) != 3 || !strings.Contains(note, "first 3 documents") {
 		t.Errorf("file limit: %q %q", names, note)
 	}
-	setVar(t, &maxPickFiles, 100)
-	setVar(t, &maxPickEntries, 4)
-	if names, note := walkNames(t, root); len(names) > 4 || !strings.Contains(note, "4 entries") {
+	lim.files, lim.entries = 100, 4
+	if names, note := walkNamesWith(t, root, lim); len(names) > 4 || !strings.Contains(note, "4 entries") {
 		t.Errorf("entry limit: %q %q", names, note)
 	}
 	if _, note := walkNames(t, filepath.Join(root, "nope")); note == "" {
@@ -111,7 +110,7 @@ func TestWalkStopsInBigFolders(t *testing.T) {
 	}
 	root := tree(t, files)
 	batches := 0
-	walkTree(root, func() bool { return false }, func(b []doc) bool { batches++; return false })
+	walkTree(root, pickLimit, func() bool { return false }, func(b []doc) bool { batches++; return false })
 	if batches != 1 {
 		t.Errorf("%d batches after emit refused", batches)
 	}
@@ -155,9 +154,10 @@ func TestSearchDocs(t *testing.T) {
 	for _, n := range names {
 		docs = append(docs, doc{path: filepath.Join(root, n), name: n})
 	}
+	lim := searchLimit
 	search := func(q string) ([]hit, string) {
 		var hs []hit
-		note := searchDocs(docs, root, q, func() bool { return false }, func(h []hit, _ int) bool { hs = append(hs, h...); return true })
+		note := searchDocs(docs, root, q, lim, func() bool { return false }, func(h []hit, _ int) bool { hs = append(hs, h...); return true })
 		return hs, note
 	}
 	hs, note := search("make")
@@ -182,27 +182,27 @@ func TestSearchDocs(t *testing.T) {
 		t.Errorf("non-ASCII fold: %+v", hs)
 	}
 
-	setVar(t, &maxFileHits, 2)
+	lim.fileHits = 2
 	if hs, _ := search("make"); len(hs) != 4 {
 		t.Errorf("per-document limit: %d", len(hs))
 	}
-	setVar(t, &maxHits, 3)
+	lim.hits = 3
 	if hs, note := search("make"); len(hs) != 3 || !strings.Contains(note, "first 3 matches") {
 		t.Errorf("match limit: %d %q", len(hs), note)
 	}
-	setVar(t, &maxHits, 100)
-	setVar(t, &maxSearchFile, 4) // "# In": no match
+	lim.hits = 100
+	lim.file = 4 // "# In": no match
 	if hs, _ := search("make"); len(hs) != 0 {
 		t.Errorf("file read limit: %+v", hs)
 	}
-	setVar(t, &maxSearchFile, 1<<20)
-	if n := searchDocs(docs, root, "make", func() bool { return true }, nil); n != "" {
+	lim.file = 1 << 20
+	if n := searchDocs(docs, root, "make", lim, func() bool { return true }, nil); n != "" {
 		t.Error(n)
 	}
-	if n := searchDocs(docs, root, "make", func() bool { return false }, func([]hit, int) bool { return false }); n != "" {
+	if n := searchDocs(docs, root, "make", lim, func() bool { return false }, func([]hit, int) bool { return false }); n != "" {
 		t.Error(n)
 	}
-	setVar(t, &maxSearchTotal, 10)
+	lim.total = 10
 	if _, note := search("zzz"); !strings.Contains(note, "stopped after reading") {
 		t.Errorf("total limit: %q", note)
 	}
@@ -580,8 +580,9 @@ func TestWalkHostileLinks(t *testing.T) {
 	if want := []string{"dots.md", "one.md", "real/a.md"}; !reflect.DeepEqual(names, want) || note != "" {
 		t.Errorf("links: %q %q", names, note)
 	}
-	setVar(t, &maxPickLinks, 2)
-	if names, note := walkNames(t, root); !strings.Contains(note, "first 2 symlinked") || len(names) != 2 {
+	lim := pickLimit
+	lim.links = 2
+	if names, note := walkNamesWith(t, root, lim); !strings.Contains(note, "first 2 symlinked") || len(names) != 2 {
 		t.Errorf("link cap: %q %q", names, note)
 	}
 
@@ -611,7 +612,7 @@ func TestWalkHostileLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := syscallMkfifo(a.path); err != nil {
-		t.Fatal(err)
+		t.Skip("no FIFOs:", err)
 	}
 	done := make(chan []byte, 1)
 	go func() { done <- readDoc(a, root, 100) }()

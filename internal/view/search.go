@@ -11,14 +11,18 @@ import (
 	"github.com/DipaolaFederico/kmd/internal/render"
 )
 
-// Bounds of a text search across the picker's documents, which reads files
-// only when the user asks for it. (Variables so tests can lower them.)
-var (
-	maxSearchFile  = 16 << 20  // bytes read from one document
-	maxSearchTotal = 256 << 20 // bytes read by one search
-	maxHits        = 1000      // matches listed
-	maxFileHits    = 50        // matches listed per document
-)
+// searchLimits bound a text search across the picker's documents, which
+// reads files only when the user asks for it.
+type searchLimits struct {
+	file     int // bytes read from one document
+	total    int // bytes read by one search
+	hits     int // matches listed
+	fileHits int // matches listed per document
+}
+
+// searchLimit are the viewer's limits. Tests pass lower ones to searchDocs
+// rather than change these, which searches still running would read.
+var searchLimit = searchLimits{file: 16 << 20, total: 256 << 20, hits: 1000, fileHits: 50}
 
 const maxHitText = 300 // bytes kept of a matching line
 
@@ -37,9 +41,9 @@ type hit struct {
 // searchDocs finds the lines of docs (found under root) containing q,
 // ignoring case unless q has an uppercase letter (like / in the viewer).
 // It calls emit with each document's hits and progress (documents
-// searched); emit returns false to stop. Reads are bounded per document and in total; the result explains
-// any limit that was reached.
-func searchDocs(docs []doc, root, q string, stopped func() bool, emit func(hits []hit, done int) bool) string {
+// searched); emit returns false to stop. Reads are bounded per document and
+// in total; the result explains any limit of lim that was reached.
+func searchDocs(docs []doc, root, q string, lim searchLimits, stopped func() bool, emit func(hits []hit, done int) bool) string {
 	fold := strings.ToLower(q) == q
 	ascii := true
 	for i := 0; i < len(q); i++ {
@@ -52,24 +56,24 @@ func searchDocs(docs []doc, root, q string, stopped func() bool, emit func(hits 
 		if stopped() {
 			return ""
 		}
-		if total >= maxSearchTotal {
-			return "stopped after reading " + strconv.Itoa(maxSearchTotal>>20) + " MiB"
+		if total >= lim.total {
+			return "stopped after reading " + strconv.Itoa(lim.total>>20) + " MiB"
 		}
-		data := readDoc(d, root, min(maxSearchFile, maxSearchTotal-total))
+		data := readDoc(d, root, min(lim.file, lim.total-total))
 		total += len(data)
 		hay := data
 		if fold && ascii {
 			low = lowerASCII(low[:0], data)
 			hay = low
 		}
-		hits := scanDoc(d, data, hay, needle, fold && !ascii, min(maxFileHits, maxHits-nhits))
+		hits := scanDoc(d, data, hay, needle, fold && !ascii, min(lim.fileHits, lim.hits-nhits))
 		nhits += len(hits)
-		last := i == len(docs)-1 || nhits >= maxHits
+		last := i == len(docs)-1 || nhits >= lim.hits
 		if (len(hits) > 0 || i%64 == 63 || last) && !emit(hits, i+1) {
 			return ""
 		}
-		if nhits >= maxHits {
-			return "only the first " + strconv.Itoa(maxHits) + " matches"
+		if nhits >= lim.hits {
+			return "only the first " + strconv.Itoa(lim.hits) + " matches"
 		}
 	}
 	return ""

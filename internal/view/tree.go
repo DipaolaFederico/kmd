@@ -10,16 +10,20 @@ import (
 	"github.com/DipaolaFederico/kmd/internal/render"
 )
 
-// The file picker lists every Markdown document under a folder. The walk
-// runs in the background (see task) and is bounded: a folder link in an
-// untrusted document can point at "/". (Variables so tests can lower them.)
-var (
-	maxPickDepth   = 20      // folder levels below the root
-	maxPickFiles   = 10000   // documents listed
-	maxPickEntries = 200_000 // directory entries read in total
-	maxPickLinks   = 1000    // symlinked documents checked
-	maxPickName    = 512     // bytes of a listed path (filtering cost per keystroke)
-)
+// pickLimits bound the file picker's walk, which lists every Markdown
+// document under a folder in the background (see task): a folder link in
+// an untrusted document can point at "/".
+type pickLimits struct {
+	depth   int // folder levels below the root
+	files   int // documents listed
+	entries int // directory entries read in total
+	links   int // symlinked documents checked
+	name    int // bytes of a listed path (filtering cost per keystroke)
+}
+
+// pickLimit are the viewer's limits. Tests pass lower ones to walkTree
+// rather than change these, which walks still running would read.
+var pickLimit = pickLimits{depth: 20, files: 10000, entries: 200_000, links: 1000, name: 512}
 
 // skipDirs are never walked, like hidden folders and files (.git…).
 var skipDirs = map[string]bool{"node_modules": true, "vendor": true}
@@ -45,8 +49,8 @@ func newDoc(path, rel string, link bool) doc {
 // shares), never enters a symlinked folder (no loops, no escaping the
 // root), and lists a symlinked document only if it points directly at a
 // regular Markdown file inside the root (see linkInside). The result
-// explains any limit that was reached.
-func walkTree(root string, stopped func() bool, emit func([]doc) bool) string {
+// explains any limit of lim that was reached.
+func walkTree(root string, lim pickLimits, stopped func() bool, emit func([]doc) bool) string {
 	rootAbs, err := filepath.Abs(root)
 	if err != nil {
 		return errText(err)
@@ -55,7 +59,7 @@ func walkTree(root string, stopped func() bool, emit func([]doc) bool) string {
 	if err != nil {
 		return errText(err)
 	}
-	w := &walker{root: rootAbs, stopped: stopped}
+	w := &walker{root: rootAbs, lim: lim, stopped: stopped}
 	w.dev, w.hasDev = device(st)
 	w.queue = []walkDir{{rootAbs, 0}}
 	for first := true; len(w.queue) > 0 && !w.done(); first = false {
@@ -87,6 +91,7 @@ type walkDir struct {
 // and which limits were reached.
 type walker struct {
 	root    string
+	lim     pickLimits
 	dev     uint64
 	hasDev  bool
 	stopped func() bool
@@ -98,7 +103,7 @@ type walker struct {
 }
 
 // done reports whether a limit stops the walk.
-func (w *walker) done() bool { return w.files >= maxPickFiles || w.entries >= maxPickEntries }
+func (w *walker) done() bool { return w.files >= w.lim.files || w.entries >= w.lim.entries }
 
 func (w *walker) flush(emit func([]doc) bool) bool {
 	ok := len(w.batch) == 0 || emit(w.batch)
@@ -123,7 +128,7 @@ func (w *walker) visit(d walkDir, open func(string) (*os.File, error)) bool {
 		if w.stopped() {
 			return false
 		}
-		if w.add(d, e); w.files >= maxPickFiles {
+		if w.add(d, e); w.files >= w.lim.files {
 			break
 		}
 	}
@@ -141,7 +146,7 @@ func (w *walker) read(f *os.File) ([]os.DirEntry, error) {
 		w.mounts = true
 		return nil, os.ErrInvalid
 	}
-	ents, _ := f.ReadDir(maxPickEntries - w.entries)
+	ents, _ := f.ReadDir(w.lim.entries - w.entries)
 	w.entries += len(ents)
 	return ents, nil
 }
@@ -159,7 +164,7 @@ func (w *walker) add(d walkDir, e os.DirEntry) {
 	case t.IsDir():
 		switch {
 		case skipDirs[n]:
-		case d.depth >= maxPickDepth:
+		case d.depth >= w.lim.depth:
 			w.deep = true
 		default:
 			w.queue = append(w.queue, walkDir{p, d.depth + 1})
@@ -168,7 +173,7 @@ func (w *walker) add(d walkDir, e os.DirEntry) {
 	case !render.MarkdownExt[strings.ToLower(filepath.Ext(n))]:
 		return
 	case t&os.ModeSymlink != 0:
-		if w.links++; w.links > maxPickLinks {
+		if w.links++; w.links > w.lim.links {
 			w.manyLinks = true
 			return
 		}
@@ -182,7 +187,7 @@ func (w *walker) add(d walkDir, e os.DirEntry) {
 	rel, err := filepath.Rel(w.root, p)
 	switch {
 	case err != nil:
-	case len(rel) > maxPickName:
+	case len(rel) > w.lim.name:
 		w.long = true
 	default:
 		w.batch = append(w.batch, newDoc(p, rel, link))
@@ -198,12 +203,12 @@ func (w *walker) notes() string {
 			notes = append(notes, strings.Replace(s, "N", strconv.Itoa(n), 1))
 		}
 	}
-	note(w.files >= maxPickFiles, "only the first N documents", maxPickFiles)
-	note(w.entries >= maxPickEntries, "stopped after reading N entries", maxPickEntries)
-	note(w.deep, "folders deeper than N levels skipped", maxPickDepth)
-	note(w.manyLinks, "only the first N symlinked documents checked", maxPickLinks)
+	note(w.files >= w.lim.files, "only the first N documents", w.lim.files)
+	note(w.entries >= w.lim.entries, "stopped after reading N entries", w.lim.entries)
+	note(w.deep, "folders deeper than N levels skipped", w.lim.depth)
+	note(w.manyLinks, "only the first N symlinked documents checked", w.lim.links)
 	note(w.mounts, "other file systems skipped", 0)
-	note(w.long, "paths longer than N bytes skipped", maxPickName)
+	note(w.long, "paths longer than N bytes skipped", w.lim.name)
 	return strings.Join(notes, " · ")
 }
 

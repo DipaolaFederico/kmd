@@ -30,7 +30,7 @@ APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
 .PHONY: ci fmt fmt-check lint vet staticcheck complexity dupl deadcode scripts-test test spec cover api api-update security vuln gosec \
-        build perf fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
+        build perf build-ai test-ai fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
 
 ci: fmt-check lint scripts-test test cover security build packaging perf
 	@printf '\n\033[1;32m✔ local CI passed\033[0m\n'
@@ -138,6 +138,17 @@ build:
 perf: build
 	@echo '» perf (end-to-end, < $(PERF_MAX_MS) ms)'
 	@./scripts/perf.sh $(BIN) testdata/sample.md $(PERF_MAX_MS) $(PERF_RUNS)
+
+## Experimental AI (docs/experimental/ai.md) ------------------------------
+# Only builds made with -tags kmdai contain it; the released binary does not.
+build-ai:
+	@echo '» build (-tags kmdai)'
+	@CGO_ENABLED=0 $(GO) build -trimpath -tags kmdai -ldflags '$(LDFLAGS)' -o bin/kmd-ai .
+
+# vet, staticcheck, race tests and coverage of the tagged build
+test-ai:
+	@echo '» experimental AI (-tags kmdai)'
+	@GOFLAGS=-tags=kmdai $(MAKE) --no-print-directory vet staticcheck test cover
 
 ## Packaging -----------------------------------------------------------------
 # STRICT=1 (CI) fails when a package validator (ruby, dpkg-deb, lintian,

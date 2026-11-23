@@ -85,6 +85,7 @@ func showConfig(env Env, cfg config, s settings) int {
 	if s.themeSrc != "" {
 		eff["theme"] += " (auto: " + s.themeSrc + ")"
 	}
+	s.ai.describe(eff)
 	path := firstNonEmpty(cfg.path, "(no HOME)")
 	fmt.Fprintf(env.Stdout, "Config file:  %s\nTheme dirs:   %s\n\nEffective settings:\n%s\nTemplate (copy to the config file and uncomment):\n\n%s",
 		path, strings.Join(render.ThemeDirs(env.Getenv), ", "), cfg.describe(eff), configTemplate)

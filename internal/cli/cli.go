@@ -286,6 +286,7 @@ type settings struct {
 	maxWidth   int    // cap for the automatic width
 	mouse      bool   // the viewer reports clicks and the wheel
 	alwaysView bool   // --view / view = always: viewer even for short documents
+	ai         aiSettings
 }
 
 // builtinPager names the interactive viewer in KMD_PAGER / pager.
@@ -536,6 +537,7 @@ func Run(env Env) int {
 		fmt.Fprintf(env.Stderr, "kmd: %v\nTry 'kmd --help'.\n", err)
 		return 2
 	}
+	s.ai = resolveAI(cfg, env)
 	switch {
 	case o.listThemes:
 		return listThemes(env, s)

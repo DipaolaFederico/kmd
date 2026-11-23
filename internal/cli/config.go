@@ -30,6 +30,11 @@ type config struct {
 	Diagrams   *bool
 	Mouse      *bool
 	View       string
+	// Experimental AI (docs/experimental/ai.md): read by every build so one
+	// config file serves both, used only by builds made with -tags kmdai.
+	AI        *bool
+	AIURL     string
+	AIKeyFile string
 }
 
 // configPath returns $KMD_CONFIG, or $XDG_CONFIG_HOME/kmd/config, or ~/.config/kmd/config.
@@ -161,6 +166,12 @@ func (c *config) set(k, v string) error {
 		if v != "auto" && v != "always" {
 			err = fmt.Errorf("invalid view %q (auto | always)", v)
 		}
+	case "ai":
+		c.AI, err = parseBool(v)
+	case "ai-url":
+		c.AIURL = v
+	case "ai-key-file":
+		c.AIKeyFile = v
 	default:
 		return fmt.Errorf("unknown setting %q", k)
 	}

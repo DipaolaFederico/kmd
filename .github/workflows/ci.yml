@@ -186,6 +186,28 @@ jobs:
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -trimpath -o /dev/null . && echo "$t ok"
           done
 
+  # The experimental AI (docs/experimental/ai.md) is not in the released
+  # binary, but every pull request builds and tests it, so a change elsewhere
+  # that breaks it fails in its own pull request, where the fix is small.
+  ai:
+    name: Experimental AI (-tags kmdai)
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
+      - name: Build
+        run: make build-ai
+      - name: vet, staticcheck, race tests and coverage
+        run: make test-ai
+
   nix:
     name: Nix flake
     needs: changes

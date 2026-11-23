@@ -39,8 +39,9 @@ request, green CI and the maintainer's approval (see `.github/CODEOWNERS`).
    pull requests that each leave `main` working.
 4. **Run the local CI** — it is the same as GitHub's plus the perf gate:
    ```sh
-   make ci        # fmt, vet, staticcheck, release scripts, race tests,
-                  # coverage, govulncheck, gosec, build, packaging, perf
+   make ci        # fmt, vet, staticcheck, complexity, duplication, dead
+                  # code, release scripts, race tests, coverage,
+                  # govulncheck, gosec, build, packaging, perf
    make hooks     # optional: run `make ci` automatically before every push
    ```
 5. **Open a pull request** against `main`, titled as a Conventional Commit
@@ -81,6 +82,11 @@ workflows) skip lint, tests and build in CI automatically.
   `CHANGELOG.md` (see [Changelog](#changelog)).
 - **Style**: `gofmt -s`, clear names, comments that explain *why*. Code,
   comments, commit messages and documentation are written in English.
+  `make lint` also checks that functions a change adds or makes more
+  complex stay within a cognitive complexity of 30 (`gocognit`; existing
+  complex functions are only flagged once a change makes them worse), that
+  there are no duplicated blocks of 100 tokens or more (`dupl`, tests
+  included) and no unreachable functions (`deadcode`).
 
 ## Commit messages
 

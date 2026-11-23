@@ -473,9 +473,7 @@ func Run(env Env) int {
 	}
 	long := !o.html && !o.toc && env.StdoutTTY && s.pager != "" && env.Rows > 0 &&
 		strings.Count(res.text, "\n") > env.Rows
-	// a folder left by resolveDirs has no README: it opens the file picker
-	folder := len(o.files) == 1 && o.files[0] != "-" && isDir(o.files[0])
-	if viewable && (s.alwaysView || folder || long && s.pager == builtinPager) {
+	if viewable && (s.alwaysView || singleFolder(o.files) || long && s.pager == builtinPager) {
 		if err := runViewer(env, o, s, in, false, pageOf(res), env.Cols); err == nil {
 			return res.code
 		}
@@ -506,6 +504,13 @@ func Run(env Env) int {
 		return 1
 	}
 	return code
+}
+
+// singleFolder reports whether kmd was given one folder. Folders with a
+// README were replaced by it (resolveDirs), so this one opens the file
+// picker, even when its listing fits on the screen.
+func singleFolder(files []string) bool {
+	return len(files) == 1 && files[0] != "-" && isDir(files[0])
 }
 
 // stdinCache keeps stdin, which can only be read once ("kmd - -", and the

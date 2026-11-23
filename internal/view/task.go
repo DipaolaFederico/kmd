@@ -35,3 +35,17 @@ func (t *task) send(bg chan<- func(*model), f func(*model)) bool {
 		return false
 	}
 }
+
+// applyBackground applies f, a result of background work, and what else is
+// ready (a few), so the loop draws once for all of them.
+func (m *model) applyBackground(f func(*model)) {
+	f(m)
+	for range 64 {
+		select {
+		case f := <-m.bg:
+			f(m)
+		default:
+			return
+		}
+	}
+}

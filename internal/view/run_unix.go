@@ -169,16 +169,7 @@ func Run(opt Options) error {
 		redraw = false
 		select {
 		case f := <-m.bg:
-			f(m)
-		drain: // apply what else is ready (a few), then draw once
-			for range 64 {
-				select {
-				case f := <-m.bg:
-					f(m)
-				default:
-					break drain
-				}
-			}
+			m.applyBackground(f)
 			redraw = m.picking // results of the picker's work: only it shows them
 		case <-tick:
 			redraw = m.poll()

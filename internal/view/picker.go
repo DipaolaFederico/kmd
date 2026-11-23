@@ -305,33 +305,13 @@ func (m *model) pickOpen(i int) {
 	}
 }
 
-func (m *model) drawPicker(b *strings.Builder) {
-	p := m.pick
-	p.refresh()
-	h := m.listH()
-	n := p.rows()
-	if p.cur < p.top {
-		p.top = p.cur
-	}
-	if p.cur >= p.top+h {
-		p.top = p.cur - h + 1
-	}
-	p.top = min(p.top, max(n-h, 0))
-
+// header is the picker's first line: counts, progress, limits and root.
+func (p *picker) header() string {
 	var parts []string
+	where := "in "
 	if p.text {
-		switch {
-		case p.searched == "":
-			parts = append(parts, "type text and press Enter")
-		default:
-			parts = append(parts, plural(len(p.hits), "match", "matches"))
-			if p.search != nil {
-				parts = append(parts, "searching "+strconv.Itoa(p.done)+"/"+strconv.Itoa(p.total)+"…")
-			}
-		}
-		if p.tnote != "" {
-			parts = append(parts, p.tnote)
-		}
+		where = "search in "
+		parts = p.searchStatus()
 	} else {
 		c := plural(len(p.docs), "document", "documents")
 		if len(p.query) > 0 {
@@ -345,12 +325,38 @@ func (m *model) drawPicker(b *strings.Builder) {
 	if p.note != "" {
 		parts = append(parts, p.note)
 	}
-	where := "in "
-	if p.text {
-		where = "search in "
+	return strings.Join(append(parts, where+p.label), " · ")
+}
+
+// searchStatus describes the text search: matches, progress, limits.
+func (p *picker) searchStatus() []string {
+	if p.searched == "" {
+		return []string{"type text and press Enter"}
 	}
-	head := " " + strings.Join(append(parts, where+p.label), " · ")
-	head = clip(head, m.cols)
+	parts := []string{plural(len(p.hits), "match", "matches")}
+	if p.search != nil {
+		parts = append(parts, "searching "+strconv.Itoa(p.done)+"/"+strconv.Itoa(p.total)+"…")
+	}
+	if p.tnote != "" {
+		parts = append(parts, p.tnote)
+	}
+	return parts
+}
+
+func (m *model) drawPicker(b *strings.Builder) {
+	p := m.pick
+	p.refresh()
+	h := m.listH()
+	n := p.rows()
+	if p.cur < p.top {
+		p.top = p.cur
+	}
+	if p.cur >= p.top+h {
+		p.top = p.cur - h + 1
+	}
+	p.top = min(p.top, max(n-h, 0))
+
+	head := clip(" "+p.header(), m.cols)
 	moveTo(b, 0, 0)
 	b.WriteString(m.opt.Bar + head + strings.Repeat(" ", max(m.cols-styled.Width(head), 0)) + reset)
 

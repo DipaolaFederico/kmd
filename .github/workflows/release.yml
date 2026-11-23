@@ -14,8 +14,9 @@
 # conditions. See CONTRIBUTING.md, "Releases".
 #
 # The tag vX.Y.Z points to a child of the released commit that adds the
-# version files (RPM spec, man page, AppStream metainfo) stamped with X.Y.Z;
-# the version-pr job opens a pull request bringing them to main.
+# version files (RPM spec, man page, AppStream metainfo, CHANGELOG.md)
+# stamped with X.Y.Z; the version-pr job opens a pull request bringing them
+# to main. The release notes start with the version's changelog section.
 #
 # After publishing, the package channels are updated (Homebrew tap, Scoop
 # bucket, AUR, winget). Each channel job regenerates its manifests from the
@@ -197,7 +198,7 @@ jobs:
 
       # the same files go into the tagged commit (publish job): the tag, its
       # git archive and the source tarball carry the released version
-      - name: Stamp the version into spec, man page and AppStream metadata
+      - name: Stamp the version into spec, man page, AppStream metadata and changelog
         run: scripts/sync-version.sh "$VERSION" "$DATE"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -207,6 +208,7 @@ jobs:
             packaging/kmd.spec
             docs/kmd.1
             packaging/io.github.dipaolafederico.kmd.metainfo.xml
+            CHANGELOG.md
           if-no-files-found: error
           retention-days: 7
 
@@ -346,25 +348,37 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
-          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml"
-          # exactly these three regular files, stamped with this version
+          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml CHANGELOG.md"
+          # exactly these regular files, stamped with this version
           got=$(cd version-files && find . -mindepth 1 ! -type d | sed 's,^\./,,' | sort)
           [ "$got" = "$(printf '%s\n' $files | sort)" ] || { echo "::error::unexpected version files: $got"; exit 1; }
           if [ -n "$(find version-files -mindepth 1 ! -type d ! -type f)" ]; then echo "::error::version files must be regular files"; exit 1; fi
           grep -Eq "^Version:[[:space:]]+$VERSION\$" version-files/packaging/kmd.spec &&
             grep -q "\"kmd $VERSION\"" version-files/docs/kmd.1 &&
-            grep -q "<release version=\"$VERSION\"" version-files/packaging/io.github.dipaolafederico.kmd.metainfo.xml ||
+            grep -q "<release version=\"$VERSION\"" version-files/packaging/io.github.dipaolafederico.kmd.metainfo.xml &&
+            grep -Eq "^## \[${VERSION//./\\.}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" version-files/CHANGELOG.md ||
             { echo "::error::the version files are not stamped with $VERSION"; exit 1; }
 
-          # and they differ from the released commit only in version lines:
-          # the build job's output becomes the tag's content
+          # and they differ from the released commit only in version lines,
+          # each file in its own: the build job's output becomes the tag's
+          # content
+          url="https://github.com/$REPO/compare/v[0-9]+\.[0-9]+\.[0-9]+\.\.\."
           for f in $files; do
+            case $f in
+              packaging/kmd.spec) ok=('[-+]Version:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+') ;;
+              docs/kmd.1) ok=('[-+]\.TH KMD 1 "[0-9]{4}-[0-9]{2}-[0-9]{2}" "kmd [0-9]+\.[0-9]+\.[0-9]+" "User Commands"') ;;
+              *.metainfo.xml) ok=('\+    <release version="[0-9]+\.[0-9]+\.[0-9]+" date="[0-9]{4}-[0-9]{2}-[0-9]{2}"/>') ;;
+              # a version heading, blank lines and the compare links
+              CHANGELOG.md) ok=('\+## \[[0-9]+\.[0-9]+\.[0-9]+\] - [0-9]{4}-[0-9]{2}-[0-9]{2}' '\+'
+                "[-+]\\[Unreleased\\]: ${url}HEAD"
+                "\\+\\[[0-9]+\\.[0-9]+\\.[0-9]+\\]: ${url}v[0-9]+\\.[0-9]+\\.[0-9]+") ;;
+              *) echo "::error::no rule for $f"; exit 1 ;;
+            esac
+            pats=()
+            for p in "${ok[@]}"; do pats+=(-e "$p"); done
             gh api -H "Accept: application/vnd.github.raw" "repos/$REPO/contents/$f?ref=$SHA" >"$RUNNER_TEMP/base"
             bad=$(diff --unchanged-line-format= --old-line-format='-%L' --new-line-format='+%L' "$RUNNER_TEMP/base" "version-files/$f" |
-              grep -v -x -E \
-                -e '[-+]Version:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' \
-                -e '[-+]\.TH KMD 1 "[0-9]{4}-[0-9]{2}-[0-9]{2}" "kmd [0-9]+\.[0-9]+\.[0-9]+" "User Commands"' \
-                -e '\+    <release version="[0-9]+\.[0-9]+\.[0-9]+" date="[0-9]{4}-[0-9]{2}-[0-9]{2}"/>' || true)
+              grep -v -x -E "${pats[@]}" || true)
             [ -z "$bad" ] || { echo "::error::$f has changes other than the version:"; echo "$bad"; exit 1; }
           done
 
@@ -392,15 +406,20 @@ jobs:
           fi
           echo "Tagged v$VERSION at $commit (version files on top of $SHA)" >> "$GITHUB_STEP_SUMMARY"
 
+      # notes: the version's changelog section, then GitHub's list of pull
+      # requests (--generate-notes appends it)
       - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
+          awk -v h="## [$VERSION] - " 'index($0, h) == 1 { f = 1; next } f && (/^## / || /^\[(Unreleased|[0-9]+\.[0-9]+\.[0-9]+)\]: /) { exit } f' \
+            version-files/CHANGELOG.md >"$RUNNER_TEMP/notes.md"
           gh release create "v$VERSION" \
             --repo "$REPO" \
             --verify-tag \
             --title "kmd v$VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
             --generate-notes \
             dist/kmd-* dist/kmd_*.deb dist/SHA256SUMS
 
@@ -423,6 +442,7 @@ jobs:
     env:
       VERSION: ${{ needs.plan.outputs.version }}
       DATE: ${{ needs.plan.outputs.date }}
+      SHA: ${{ needs.plan.outputs.sha }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -432,9 +452,10 @@ jobs:
 
       # main's own (reviewed) script, before the token step; the token step
       # trusts what it leaves (same boundary: main's reviewed code), and
-      # still runs git without hooks
+      # still runs git without hooks. The changelog moves only the entries
+      # the released commit had: later merges stay unreleased.
       - name: Stamp main's version files
-        run: scripts/sync-version.sh "$VERSION" "$DATE"
+        run: scripts/sync-version.sh "$VERSION" "$DATE" "$SHA"
 
       - name: Pull request
         env:
@@ -451,8 +472,8 @@ jobs:
           [[ $fork =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || { echo "::error::bad fork '$fork'"; exit 1; }
           [ "$(gh api "repos/$fork" --jq '.fork and .parent.full_name == env.REPO')" = true ] ||
             { echo "::error::$fork must be a fork of $REPO (see docs/PACKAGING.md)"; exit 1; }
-          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml"
-          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml)$' || true)
+          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml CHANGELOG.md"
+          unexpected=$(git status --porcelain --untracked-files=all | grep -v -E '^ M (packaging/kmd\.spec|docs/kmd\.1|packaging/io\.github\.dipaolafederico\.kmd\.metainfo\.xml|CHANGELOG\.md)$' || true)
           if [ -n "$unexpected" ]; then
             echo "::error::Unexpected changes:"; echo "$unexpected"
             exit 1
@@ -480,7 +501,7 @@ jobs:
           url=$(gh pr list --repo "$REPO" --head "$branch" --author "@me" --state open --json url --jq '.[0].url // empty')
           if [ -z "$url" ]; then
             url=$(gh pr create --repo "$REPO" --base main --head "$bot:$branch" --title "$title" --body \
-              "Brings the version files of [v$VERSION](https://github.com/$REPO/releases/tag/v$VERSION) (RPM spec, man page, AppStream release history) to main. Opened by the release workflow; \`chore\`, so merging it publishes no release.")
+              "Brings the version files of [v$VERSION](https://github.com/$REPO/releases/tag/v$VERSION) (RPM spec, man page, AppStream release history, changelog) to main. Opened by the release workflow; \`chore\`, so merging it publishes no release.")
           fi
           # an older version pull request still open is superseded: this one
           # carries its versions too (scripts/sync-version.sh)

@@ -69,6 +69,8 @@ workflows) skip lint, tests and build in CI automatically.
 - **Documentation**: user-visible changes update `README.md`, the man page
   (`docs/kmd.1`), `kmd --help` and the shell completions
   (`internal/cli/commands.go`) as needed.
+- **Changelog**: a `feat`, `fix`, `perf` or `revert` adds an entry to
+  `CHANGELOG.md` (see [Changelog](#changelog)).
 - **Style**: `gofmt -s`, clear names, comments that explain *why*. Code,
   comments, commit messages and documentation are written in English.
 
@@ -114,6 +116,48 @@ ci: run lint and tests only when the project changes
 Since pull requests are squash-merged, **the PR title is the commit that
 lands on `main`** and is what the *PR conventions* check validates; commits
 inside the branch should follow the same format too.
+
+## Changelog
+
+[`CHANGELOG.md`](CHANGELOG.md) follows
+[Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/): the
+notable changes of each version, written for the people who use kmd or its
+`render` package — not a copy of the commit log.
+
+- Every pull request that asks for a release (`feat`, `fix`, `perf`,
+  `revert`, or a breaking change) adds its entry under `## [Unreleased]`,
+  in the same pull request. The *PR conventions* check enforces it; when
+  users would not notice the change (a fix to a test, say), the maintainer
+  labels the pull request `changelog:skip` instead.
+- Group entries under these headings, in this order, adding only the ones
+  needed: `### Added` (new features), `### Changed` (changes in existing
+  behaviour), `### Deprecated`, `### Removed`, `### Fixed` (bug fixes) and
+  `### Security` (vulnerabilities). A breaking change starts its entry with
+  **Breaking:** and says what users must do.
+- One bullet per change, in the present tense of a release note
+  ("`--section` renders one section", "Tables no longer overflow narrow
+  terminals"): what changes for the user, not how it was implemented. Name
+  flags, keys and config options as users type them. Continuation lines
+  are indented by two spaces.
+- Never write a version heading or edit a released section: the release
+  workflow does it. On release, `scripts/stamp-changelog.sh` (through
+  `scripts/sync-version.sh`) turns the entries that were unreleased in the
+  released commit into `## [X.Y.Z] - YYYY-MM-DD`, updates the compare links
+  at the bottom, and the section becomes the start of the GitHub release
+  notes. Entries merged after the released commit stay under
+  `[Unreleased]`.
+
+```markdown
+## [Unreleased]
+
+### Added
+
+- `--slides` shows a speaker-notes window with `n`.
+
+### Fixed
+
+- Wide tables no longer overflow terminals narrower than 40 columns.
+```
 
 ## Branch names
 
@@ -162,7 +206,8 @@ build-provenance attestation; its notes list the merged pull requests.
 - Verify a download with `sha256sum -c SHA256SUMS --ignore-missing` and its
   origin with `gh attestation verify <file> --repo DipaolaFederico/kmd`.
 - The version files (RPM spec, man page and AppStream metadata, one
-  `<release>` per version) are stamped by `scripts/sync-version.sh`. The tag
+  `<release>` per version, and `CHANGELOG.md`) are stamped by
+  `scripts/sync-version.sh`. The tag
   points to a commit that adds them on top of the released commit, so the
   tag and the source tarball carry the released version. `main` only accepts
   reviewed pull requests, so the workflow then opens one,

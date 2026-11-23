@@ -486,6 +486,7 @@ To report a vulnerability, see [SECURITY.md](SECURITY.md).
 
 Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) describes the
 workflow, the local CI (`make ci`) and the source layout.
+What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 ## 📄 License
 

@@ -1,6 +1,12 @@
 package diagram
 
-import "github.com/DipaolaFederico/kmd/internal/testlimit"
+import (
+	"time"
 
-// raceFactor scales time limits in tests (race detector, KMD_TEST_TIME_SCALE).
-var raceFactor = testlimit.Scale()
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
+)
+
+// raceFactor scales time limits in tests (race detector, coverage,
+// KMD_TEST_TIME_SCALE). A function, not a variable: the coverage mode is
+// only known once the tests start, after package variables are set.
+func raceFactor() time.Duration { return testlimit.Scale() }

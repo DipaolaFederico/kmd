@@ -695,11 +695,22 @@ jobs:
           gh api "repos/$UPSTREAM/contents/manifests/d/DipaolaFederico/kmd" >/dev/null 2>&1 || kind="New package"
           title="$kind: DipaolaFederico.kmd version $VERSION"
           branch=DipaolaFederico.kmd-$VERSION
-          # a branch of the fork at upstream's head (forks share objects)
-          base=$(gh api "repos/$UPSTREAM/git/ref/heads/master" --jq .object.sha)
+          # a branch of the fork at upstream's head. The fork's master is
+          # synced first: GitHub only creates a ref to a commit the fork
+          # has, and upstream moves many times a day.
+          gh api -X POST "repos/$FORK/merge-upstream" -f branch=master >/dev/null
+          base=$(gh api "repos/$FORK/git/ref/heads/master" --jq .object.sha)
+          [[ $base =~ ^[0-9a-f]{40}$ ]] || { echo "::error::bad base '$base'"; exit 1; }
+          # and it must be upstream's own history: a sync of a diverged fork
+          # makes a merge commit, which the pull request would then carry
+          st=$(gh api "repos/$UPSTREAM/compare/$base...master" --jq .status)
+          [[ $st == identical || $st == ahead ]] || { echo "::error::$FORK master has diverged from $UPSTREAM ($st)"; exit 1; }
           # (a re-run resets this release's branch)
-          gh api -X POST "repos/$FORK/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null 2>&1 ||
+          if gh api "repos/$FORK/git/ref/heads/$branch" >/dev/null 2>&1; then
             gh api -X PATCH "repos/$FORK/git/refs/heads/$branch" -f sha="$base" -F force=true >/dev/null
+          else
+            gh api -X POST "repos/$FORK/git/refs" -f ref="refs/heads/$branch" -f sha="$base" >/dev/null
+          fi
           for f in "manifests/winget/$dir"/*.yaml; do
             gh api -X PUT "repos/$FORK/contents/$dir/${f##*/}" -f message="$title" -f branch="$branch" \
               -f content="$(base64 -w0 "$f")" >/dev/null

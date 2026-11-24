@@ -3,6 +3,9 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 fails=0
+root=$(mktemp -d) # every scratch directory lives here
+trap 'rm -rf "$root"' EXIT
+scratch() { mktemp -d "$root/XXXXXX"; }
 eq() { # want got description
   if [ "$1" = "$2" ]; then return; fi
   echo "FAIL: $3: want '$1', got '$2'"
@@ -38,29 +41,41 @@ eq "" "$(bump 'Update stuff' 'feat:x' 'Feat: x' 'feat : x' 'wip: x')" "not conve
 
 # build-version.sh, in a scratch repository: the spec's version, the commits
 # since it was stamped, the commit, -dirty; the tag on a release tag
-bv=$(mktemp -d)
+bv=$(scratch)
 mkdir -p "$bv/scripts" "$bv/packaging"
 cp scripts/build-version.sh "$bv/scripts/"
 printf 'Name: kmd\nVersion:                1.2.3\n' > "$bv/packaging/kmd.spec"
-eq v1.2.3 "$("$bv/scripts/build-version.sh")" "build-version outside git (source tarball)"
-g() { git -C "$bv" -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=false "$@" >/dev/null; }
-g init -q
-eq v1.2.3 "$("$bv/scripts/build-version.sh")" "build-version before the first commit"
-g add -A && g commit -qm 'chore(release): v1.2.3'
-g commit -q --allow-empty -m 'feat: a'
+bv_version() { "$bv/scripts/build-version.sh" 2>/dev/null; }
+bv_git() { # without the user's configuration (hooks, signing)
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$bv" -c user.name=t -c user.email=t@t "$@" >/dev/null
+}
+bv_head() { git -C "$bv" rev-parse --short HEAD; }
+eq v1.2.3 "$(bv_version)" "build-version outside git (source tarball)"
+bv_git init -q
+eq v1.2.3 "$(bv_version)" "build-version before the first commit"
+bv_git add -A && bv_git commit -qm 'chore(release): v1.2.3'
+bv_git commit -q --allow-empty -m 'feat: a'
 echo 'Release: 2' >> "$bv/packaging/kmd.spec" # a packaging change, not a release
-g commit -qam 'build: b'
-eq "v1.2.3-2-g$(git -C "$bv" rev-parse --short HEAD)" "$("$bv/scripts/build-version.sh")" "build-version on main"
+bv_git commit -qam 'build: b'
+eq "v1.2.3-2-g$(bv_head)" "$(bv_version)" "build-version: commits since the release"
 echo '# x' >> "$bv/packaging/kmd.spec"
-eq "v1.2.3-2-g$(git -C "$bv" rev-parse --short HEAD)-dirty" "$("$bv/scripts/build-version.sh")" "build-version dirty"
-g checkout -q -- packaging/kmd.spec
-g tag v1.3.0
-eq v1.3.0 "$("$bv/scripts/build-version.sh")" "build-version on a release tag"
-rm -rf "$bv"
+eq "v1.2.3-2-g$(bv_head)-dirty" "$(bv_version)" "build-version: uncommitted changes"
+bv_git checkout -q -- packaging/kmd.spec
+sed -i 's/1\.2\.3/1.3.0/' "$bv/packaging/kmd.spec"
+bv_git commit -qam 'chore(release): v1.3.0 (#9)'
+eq "v1.3.0-0-g$(bv_head)" "$(bv_version)" "build-version: the next release restarts the count"
+bv_git tag v1.3.0
+eq v1.3.0 "$(bv_version)" "build-version on a release tag"
+bv_git tag "v1';touch\${IFS}pwned;'" # shell syntax would reach the go build command
+bv_git tag -d v1.3.0
+if bv_version >/dev/null; then eq rejected accepted "build-version with a hostile tag"; fi
+outer=$(scratch) # a source tarball unpacked inside another repository
+mkdir -p "$outer/kmd" && cp -r "$bv/scripts" "$bv/packaging" "$outer/kmd/"
+GIT_CONFIG_GLOBAL=/dev/null git -C "$outer" init -q
+eq v1.3.0 "$("$outer/kmd/scripts/build-version.sh")" "build-version inside another repository"
 
 # stamp-version.sh (on a copy)
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+tmp=$(scratch)
 mkdir -p "$tmp/scripts" "$tmp/packaging" "$tmp/docs"
 cp scripts/stamp-version.sh "$tmp/scripts/"
 cp packaging/kmd.spec packaging/io.github.dipaolafederico.kmd.metainfo.xml "$tmp/packaging/"
@@ -74,8 +89,7 @@ if "$tmp/scripts/stamp-version.sh" 1.2 2030-01-02 >/dev/null 2>&1; then eq rejec
 
 # stamp-changelog.sh (in its own git repository): the version gets the
 # entries unreleased in the released commit; later ones stay unreleased
-cl=$(mktemp -d)
-trap 'rm -rf "$tmp" "$cl"' EXIT
+cl=$(scratch)
 mkdir -p "$cl/scripts"
 cp scripts/stamp-changelog.sh "$cl/scripts/"
 changelog() { # unreleased entries..., as a Keep a Changelog file at 9.8.7
@@ -155,7 +169,7 @@ fi
 
 # complexity.sh, in a scratch repository with a stub gocognit that prints
 # the scores of the base tree or of the working tree
-cx=$(mktemp -d)
+cx=$(scratch)
 mkdir -p "$cx/repo/scripts"
 cp scripts/complexity.sh "$cx/repo/scripts/"
 cat >"$cx/gocognit" <<'STUB'
@@ -186,7 +200,6 @@ eq "complexity: no main branch to compare with (shallow clone?): not checked|rc=
   "$(cx_run '' '45 a New a.go:3:1\n' | paste -sd'|')" "complexity: no base"
 eq rc=1 "$(STRICT=1 cx_run '' '45 a New a.go:3:1\n' | tail -1)" "complexity: no base, STRICT"
 unset STUB
-rm -rf "$cx"
 
 if [ "$fails" -gt 0 ]; then
   echo "$fails script test(s) failed"

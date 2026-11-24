@@ -736,11 +736,8 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 	if err != nil {
 		return nil, "", err
 	}
-	doc = md.Parse(src, s.mdOpt)
-	if sec != "" {
-		if doc = section(doc, sec); doc == nil {
-			return nil, "", fmt.Errorf("%s: no section matching %q", displayName(name), sec)
-		}
+	if doc, err = sectionOf(md.Parse(src, s.mdOpt), name, sec); err != nil {
+		return nil, "", err
 	}
 	switch {
 	case folder:
@@ -749,6 +746,18 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 		base = filepath.Dir(name)
 	}
 	return doc, base, nil
+}
+
+// sectionOf returns the section of doc (read from name) under the heading
+// named sec, or all of doc when sec is empty.
+func sectionOf(doc *md.Node, name, sec string) (*md.Node, error) {
+	if sec == "" {
+		return doc, nil
+	}
+	if doc = section(doc, sec); doc == nil {
+		return nil, fmt.Errorf("%s: no section matching %q", displayName(name), sec)
+	}
+	return doc, nil
 }
 
 // section extracts the section under the heading named q: the heading whose

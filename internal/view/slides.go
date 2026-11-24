@@ -21,14 +21,17 @@ const lastStep = math.MaxInt
 // loadSlides renders the slides for the current terminal size and shows
 // slide i at step (both clamped).
 func (m *model) loadSlides(i, step int) error {
-	slides, err := m.opt.Slides(m.cols, m.rows)
+	deck, err := m.opt.Slides(m.cols, m.rows)
 	if err != nil {
 		return err
 	}
-	if len(slides) == 0 {
-		slides = []*Page{{Lines: []string{""}}}
+	if deck == nil {
+		deck = &Deck{}
 	}
-	m.slides = slides
+	if len(deck.Slides) == 0 {
+		deck.Slides = []*Page{{Lines: []string{""}}}
+	}
+	m.deck, m.slides = deck, deck.Slides
 	m.showSlide(i, step)
 	return nil
 }
@@ -151,10 +154,13 @@ func (m *model) slideLink(href string) bool {
 	return !render.MarkdownExt[strings.ToLower(filepath.Ext(u.Path))] && filepath.Ext(u.Path) != ""
 }
 
-func (m *model) slideStatus() string {
-	s := "slide " + strconv.Itoa(m.slide+1) + "/" + strconv.Itoa(len(m.slides))
-	if n := len(m.slides[m.slide].Steps); n > 0 {
-		s += " · step " + strconv.Itoa(m.step+1) + "/" + strconv.Itoa(n+1)
+// footer returns the two sides of the bottom line during a presentation,
+// for the audience: the deck's footer text and the slide number, with the
+// scroll position on a slide taller than the screen.
+func (m *model) footer() (left, right string) {
+	right = strconv.Itoa(m.slide+1) + " / " + strconv.Itoa(len(m.slides))
+	if p := m.percent(); p != "all" {
+		right += "  " + p
 	}
-	return s
+	return m.deck.Footer, right
 }

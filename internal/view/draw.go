@@ -116,9 +116,11 @@ func (m *model) status(b *strings.Builder) {
 	case m.visible(m.sel):
 		left = "→ " + m.target(m.page.Links[m.sel].Href)
 		right = "Enter open · Esc clear"
+	case m.slides != nil && m.deck.NoFooter:
+		b.WriteString("\x1b[2K\x1b[?25l")
+		return
 	case m.slides != nil:
-		left = m.slideStatus()
-		right = "← → slides · q quit"
+		left, right = m.footer()
 	default:
 		left = m.breadcrumb()
 		if len(m.matches) > 0 && m.cur >= 0 {
@@ -129,7 +131,7 @@ func (m *model) status(b *strings.Builder) {
 		}
 		right += "Tab links · ? help"
 	}
-	if right != "" && !m.picking {
+	if right != "" && !m.picking && m.slides == nil {
 		right += "  " + m.percent()
 	}
 	right = " " + right + " "

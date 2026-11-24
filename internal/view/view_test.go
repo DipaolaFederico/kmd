@@ -204,6 +204,13 @@ func (h *harness) screen() string {
 	return b.String()
 }
 
+// bottom returns the text of the bottom line, without escape sequences.
+func (h *harness) bottom() string {
+	var b strings.Builder
+	h.status(&b)
+	return strings.TrimSpace(stripEscapes(b.String()))
+}
+
 func TestNewModelError(t *testing.T) {
 	_, err := newModel(Options{Load: func(string, int) (*Page, error) { return nil, os.ErrNotExist }}, 80, 20)
 	if err == nil {
@@ -744,6 +751,10 @@ func TestClipLongAndExternalClicks(t *testing.T) {
 	start := time.Now()
 	if got := clip(long, 40); styled.Width(got) != 40 || !strings.HasSuffix(got, "…") {
 		t.Errorf("clip width %d", styled.Width(got))
+	}
+	// an emoji made wide by U+FE0F counts as two columns
+	if got := clip(strings.Repeat("❤\ufe0f", 40), 20); styled.Width(got) > 20 {
+		t.Errorf("emoji: %d columns", styled.Width(got))
 	}
 	if d := time.Since(start); d > testlimit.Scale()*time.Second {
 		t.Errorf("clip of 1 MiB took %v", d)

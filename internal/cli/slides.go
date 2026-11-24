@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/render"
@@ -19,13 +20,19 @@ const slideWidth = 80
 func runSlides(env Env, o options, s settings, watch bool) error {
 	in := &stdinCache{}
 	name := o.files[0]
-	slides := func(cols, rows int) ([]*view.Page, error) {
+	slides := func(cols, rows int) (*view.Deck, error) {
 		vs := viewerSettings(s, max(cols, 1))
 		if s.fixedWidth == 0 {
 			vs.opts.Width = min(vs.opts.Width, slideWidth) // centered on wide screens
 		}
-		doc, base, err := loadDoc(env, name, o.section, vs, in)
+		// the footer comes from the front matter, which a section leaves out
+		doc, base, err := loadDoc(env, name, "", vs, in)
 		if err != nil {
+			return nil, err
+		}
+		deck := &view.Deck{}
+		deck.Footer, deck.NoFooter = deckFooter(doc)
+		if doc, err = sectionOf(doc, name, o.section); err != nil {
 			return nil, err
 		}
 		vs.opts = vs.docOptions(name, base)
@@ -34,16 +41,16 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		vs.opts.Budget = &render.Budget{}
 		vs.opts.Pauses = true
 		parts := md.Slides(doc, maxSlides)
-		pages := make([]*view.Page, 0, len(parts))
+		deck.Slides = make([]*view.Page, 0, len(parts))
 		for _, p := range parts {
 			r := render.Render(p, vs.opts)
 			res := output{text: r.Text, anchors: map[string]int{}}
 			res.addNav(r, 0)
 			page := pageOf(res)
 			page.Steps = r.Pauses
-			pages = append(pages, centered(page, cols, rows, vs.opts.Width))
+			deck.Slides = append(deck.Slides, centered(page, cols, rows, vs.opts.Width))
 		}
-		return pages, nil
+		return deck, nil
 	}
 	// render once before the screen is taken over, to report errors there;
 	// the viewer's first call for the same size reuses that render
@@ -53,7 +60,7 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		return err
 	}
 	fresh := slides
-	slides = func(c, r int) ([]*view.Page, error) {
+	slides = func(c, r int) (*view.Deck, error) {
 		if first != nil && c == cols && r == rows {
 			p := first
 			first = nil
@@ -74,9 +81,74 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 	return view.Run(opt)
 }
 
+// deckFooter reads the footer of a presentation from the document's front
+// matter: its footer key, or else its title and author; a footer of false,
+// off or no hides it.
+func deckFooter(doc *md.Node) (text string, hide bool) {
+	if doc.FirstChild == nil || doc.FirstChild.Type != md.FrontMatter {
+		return "", false
+	}
+	var title, author, footer string
+	set := false
+	for line := range strings.Lines(doc.FirstChild.Literal) {
+		key, val, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "title":
+			title = footerValue(val)
+		case "author":
+			author = footerValue(val)
+		case "footer":
+			footer, set = footerValue(val), true
+		}
+	}
+	switch {
+	case set && (strings.EqualFold(footer, "false") || strings.EqualFold(footer, "off") || strings.EqualFold(footer, "no")):
+		return "", true
+	case set:
+		return footer, false
+	case title != "" && author != "":
+		return title + " · " + author, false
+	}
+	return title + author, false
+}
+
+// footerValue returns a one-line YAML value as footer text: unquoted (no
+// escapes), without a trailing comment, cleaned for the terminal and at
+// most maxFooter runes. Block scalars, lists and nested keys are not
+// read: a front matter is not worth a YAML parser here.
+func footerValue(v string) string {
+	v = strings.TrimSpace(v)
+	if q := v[:min(len(v), 1)]; q == `"` || q == "'" {
+		if end := strings.Index(v[1:], q); end >= 0 {
+			v = v[1 : end+1]
+		}
+	} else if i := strings.Index(v, " #"); i >= 0 {
+		v = v[:i]
+	}
+	if n := 4 * maxFooter; len(v) > n { // cleaning a huge value costs memory
+		for n > 0 && !utf8.RuneStart(v[n]) {
+			n--
+		}
+		v = v[:n]
+	}
+	v = strings.Join(strings.Fields(render.Clean(v)), " ")
+	if r := []rune(v); len(r) > maxFooter {
+		v = string(r[:maxFooter])
+	}
+	return v
+}
+
+// maxFooter bounds each front matter value kept for the footer: the viewer
+// measures the footer on every redraw, and a hostile title can be
+// megabytes long.
+const maxFooter = 200
+
 // centered places a slide in the middle of a cols × rows terminal: lines
 // are indented to center the render width, and a slide shorter than the
-// screen (minus the status bar) is moved down to its middle. Its steps
+// screen (minus the footer line) is moved down to its middle. Its steps
 // stay where the whole slide puts them, so revealing one moves nothing.
 func centered(p *view.Page, cols, rows, width int) *view.Page {
 	left := max((cols-width)/2, 0)

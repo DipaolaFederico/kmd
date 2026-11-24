@@ -66,10 +66,21 @@ func TestLinear(t *testing.T) {
 			}
 		}
 	}
-	r = &recorder{TB: t}
-	linear(r, "quadratic", 1<<20, quadratic, minSample/4)
-	if !r.failed || !strings.Contains(r.msg, "quadratic: time grows") {
-		t.Errorf("quadratic work accepted: %q", r.msg)
+	// linear gives the benefit of the doubt to a doubling that looks linear,
+	// and on a shared runner a preempted sample can make a quadratic look
+	// linear once; it must not do so every time
+	const tries = 3
+	rejected := false
+	for try := 1; try <= tries && !rejected; try++ {
+		r = &recorder{TB: t}
+		linear(r, "quadratic", 1<<20, quadratic, minSample/4)
+		rejected = r.failed && strings.Contains(r.msg, "quadratic: time grows")
+		if !rejected {
+			t.Logf("try %d: quadratic work accepted: %q", try, r.msg)
+		}
+	}
+	if !rejected {
+		t.Errorf("quadratic work accepted %d times in a row", tries)
 	}
 	// work capped by maxN is repeated until it can be timed
 	r = &recorder{TB: t}

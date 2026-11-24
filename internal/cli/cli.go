@@ -141,7 +141,8 @@ Output modes:
   -f, --follow             live preview: re-render when the file changes
       --slides             present the document as slides (split at --- or
                            at level 1-2 headings, revealed in steps at
-                           <!-- pause -->); with -f, live
+                           <!-- pause -->); with -f, live; with --html,
+                           a page to print as a PDF deck
       --notes              in another terminal: the speaker notes
                            (<!-- notes: ... -->) of the slide on screen
 
@@ -255,8 +256,10 @@ func (o options) checkModes() error {
 	switch {
 	case o.follow && len(o.files) != 1:
 		return errors.New("--follow needs exactly one file")
-	case o.slides && (len(o.files) > 1 || o.html || o.toc):
-		return errors.New("--slides shows one document, without --html or --toc")
+	case o.slides && (len(o.files) > 1 || o.toc):
+		return errors.New("--slides shows one document, without --toc")
+	case o.slides && o.html && o.follow:
+		return errors.New("--slides --html writes the page once: it cannot follow the file (-f)")
 	case o.notes && (len(o.files) != 1 || o.files[0] == "-" || o.slides || o.html || o.toc):
 		return errors.New("--notes needs one file and cannot be combined with --slides, --html or --toc")
 	}
@@ -666,7 +669,7 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 		opts := s.docOptions(name, base)
 		switch {
 		case o.html:
-			htmlParts = append(htmlParts, md.HTML(doc, md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML, BaseURL: opts.BaseURL}))
+			htmlParts = append(htmlParts, md.HTML(doc, htmlOptions(o, opts.BaseURL)))
 			if title == "" {
 				title = docTitle(doc, name)
 			}
@@ -696,6 +699,12 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	}
 	res.text = out.String()
 	return res
+}
+
+// htmlOptions are the options of the HTML export: safe unless the user
+// asked for --unsafe-html.
+func htmlOptions(o options, base *url.URL) md.HTMLOptions {
+	return md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML, BaseURL: base}
 }
 
 // addNav appends a document's links and anchors, shifted to line offset.
@@ -755,10 +764,13 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 // returns the exit status.
 func present(env Env, o options, s settings) int {
 	run, mode := runSlides, "--slides"
-	if o.notes {
+	switch {
+	case o.notes:
 		run, mode = runNotes, "--notes"
+	case o.html:
+		run = exportSlides
 	}
-	if !env.StdoutTTY || !view.Supported {
+	if !o.html && (!env.StdoutTTY || !view.Supported) {
 		fmt.Fprintf(env.Stderr, "kmd: %s needs a terminal\n", mode)
 		return 2
 	}

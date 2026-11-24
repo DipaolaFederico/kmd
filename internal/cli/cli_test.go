@@ -891,7 +891,7 @@ func TestSlidesMode(t *testing.T) {
 	if r := run(t, nil, "--slides", p); r.code != 2 || !strings.Contains(r.errOut, "needs a terminal") {
 		t.Errorf("not a terminal: %+v", r)
 	}
-	for _, args := range [][]string{{"--slides", p, p}, {"--slides", "--html", p}, {"--slides", "--toc", p}} {
+	for _, args := range [][]string{{"--slides", p, p}, {"--slides", "--html", "-f", p}, {"--slides", "--toc", p}} {
 		if r := run(t, tty, args...); r.code != 2 {
 			t.Errorf("%v: %+v", args, r)
 		}
@@ -946,11 +946,11 @@ func TestDeckFooter(t *testing.T) {
 		"---\nauthor: Ana # me\ndate: 2026\n---\n":                "Ana",
 		"---\ntitle: \"A \x1b[31m\tB\"\nfooter: Conf 2026\n---\n": "Conf 2026",
 		"---\ntitle: \"A \x1b[31m\tB\"\n---\n":                    "A [31m B",
-		"---\ntitle: " + long + "\n---\n":                         long[:maxFooter],
+		"---\ntitle: " + long + "\n---\n":                         long[:maxFrontValue],
 		"---\nfooter: false\n---\n":                               "<hidden>",
 		"---\nfooter: Off\n---\n":                                 "<hidden>",
 		"---\ntitle: \"A # b\" # note\n---\n":                     "A # b",
-		"---\ntitle: é" + strings.Repeat("é", 1<<20) + "\n---\n":  strings.Repeat("é", maxFooter),
+		"---\ntitle: é" + strings.Repeat("é", 1<<20) + "\n---\n":  strings.Repeat("é", maxFrontValue),
 		"---\nfooter: \"\"\n---\n":                                "",
 	} {
 		front := ""

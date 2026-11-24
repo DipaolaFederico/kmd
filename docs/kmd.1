@@ -91,7 +91,12 @@ the next heading of the same or a higher level. Works with \fB\-\-toc\fR,
 Export a standalone HTML page using the selected theme colors. Documents are
 treated as untrusted: raw HTML is omitted, \fBjavascript:\fR, \fBvbscript:\fR,
 \fBfile:\fR and non-image \fBdata:\fR URLs are dropped, and the page carries a
-restrictive Content-Security-Policy.
+restrictive Content-Security-Policy. With \fB\-\-slides\fR, export the deck
+instead: one 16:9 slide per section with its footer, one per page when
+printed, so the browser's \fBPrint to PDF\fR makes a PDF deck (pauses
+show the whole slide; notes are left out, even with \fB\-\-unsafe\-html\fR;
+content taller than a slide is cut). The colors are the theme's: pick a
+light one with \fB\-t\fR for paper.
 .TP
 .B \-\-unsafe\-html
 With \fB\-\-html\fR: keep raw HTML and every URL. Use only with trusted input.
@@ -126,7 +131,9 @@ Speaker notes go in \fB<!\-\- notes: ... \-\->\fR comments, never shown on
 the slide; see \fB\-\-notes\fR.
 Web links and files open as in the viewer; linked
 Markdown documents do not. Works with \fB\-f\fR (the slides are re\-rendered
-when the file changes) and \fB\-s\fR. Needs a terminal.
+when the file changes) and \fB\-s\fR. Needs a terminal, except with
+\fB\-\-html\fR, which writes the deck as a page instead (see \fB\-\-html\fR;
+not with \fB\-f\fR).
 .TP
 .B \-\-notes
 In a second terminal, show the speaker notes of the slide that
@@ -422,6 +429,9 @@ Plain outline of a document.
 .TP
 .B kmd \-\-html doc.md > doc.html
 Export to HTML.
+.TP
+.B kmd \-\-slides \-\-html talk.md > talk.html
+Export a presentation; print it to PDF from the browser.
 .TP
 .B curl \-fsSL https://raw.githubusercontent.com/OWNER/REPO/main/README.md | kmd \-\-base https://github.com/OWNER/REPO/blob/main/README.md
 Read a remote README, with its relative links pointing to the repository on

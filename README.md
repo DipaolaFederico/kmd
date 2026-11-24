@@ -157,6 +157,7 @@ kmd --toc CHANGELOG.md        # table of contents only
 kmd -s install README.md      # only the section under the "Installation" heading
 kmd --html doc.md > doc.html  # export a standalone HTML page
 kmd --slides talk.md          # present: one slide per "---" (or per # / ## heading)
+kmd --slides --html talk.md > talk.html  # the deck as a page: print it to PDF
 kmd -t catppuccin-mocha doc.md
 kmd -w 80 doc.md              # fixed render width
 ```
@@ -288,6 +289,14 @@ and, on the left, the `title` and `author` from the document's front
 matter. A `footer:` key there replaces that text (`footer: ""` leaves only
 the number), and `footer: false` (or `off`) hides the footer. A slide
 taller than the screen also shows how far it is scrolled.
+
+`kmd --slides --html talk.md > talk.html` exports the deck as one page,
+with the safe defaults of `--html`: each slide a 16:9 box with its footer,
+and one slide per page when printed, so the browser's *Print to PDF* makes
+a PDF deck without any PDF library. Pauses show the whole slide, notes are
+left out (even with `--unsafe-html`) and content taller than a slide is
+cut, so split it. The colors are the theme's: `-t` with a light theme suits
+paper.
 
 Speaker notes go in `<!-- notes: … -->` comments (Markdown, several lines
 if needed), which never show on the slide. Run `kmd --notes talk.md` in a

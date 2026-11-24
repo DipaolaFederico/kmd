@@ -36,6 +36,28 @@ eq major "$(bump "$(printf 'fix: x\n\nbody\n\nRefs: #1\nBREAKING CHANGE: real fo
 eq "" "$(bump 'BREAKING CHANGE: subject only')" "not conventional"
 eq "" "$(bump 'Update stuff' 'feat:x' 'Feat: x' 'feat : x' 'wip: x')" "not conventional"
 
+# build-version.sh, in a scratch repository: the spec's version, the commits
+# since it was stamped, the commit, -dirty; the tag on a release tag
+bv=$(mktemp -d)
+mkdir -p "$bv/scripts" "$bv/packaging"
+cp scripts/build-version.sh "$bv/scripts/"
+printf 'Name: kmd\nVersion:                1.2.3\n' > "$bv/packaging/kmd.spec"
+eq v1.2.3 "$("$bv/scripts/build-version.sh")" "build-version outside git (source tarball)"
+g() { git -C "$bv" -c user.name=t -c user.email=t@t -c commit.gpgsign=false -c tag.gpgsign=false "$@" >/dev/null; }
+g init -q
+eq v1.2.3 "$("$bv/scripts/build-version.sh")" "build-version before the first commit"
+g add -A && g commit -qm 'chore(release): v1.2.3'
+g commit -q --allow-empty -m 'feat: a'
+echo 'Release: 2' >> "$bv/packaging/kmd.spec" # a packaging change, not a release
+g commit -qam 'build: b'
+eq "v1.2.3-2-g$(git -C "$bv" rev-parse --short HEAD)" "$("$bv/scripts/build-version.sh")" "build-version on main"
+echo '# x' >> "$bv/packaging/kmd.spec"
+eq "v1.2.3-2-g$(git -C "$bv" rev-parse --short HEAD)-dirty" "$("$bv/scripts/build-version.sh")" "build-version dirty"
+g checkout -q -- packaging/kmd.spec
+g tag v1.3.0
+eq v1.3.0 "$("$bv/scripts/build-version.sh")" "build-version on a release tag"
+rm -rf "$bv"
+
 # stamp-version.sh (on a copy)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT

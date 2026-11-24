@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -17,7 +16,7 @@ const maxSlides = 1000
 const slideWidth = 80
 
 // runSlides presents the document as slides in the viewer (--slides).
-func runSlides(env Env, o options, s settings, watch bool) error {
+func runSlides(env Env, o options, s settings) error {
 	in := &stdinCache{}
 	name := o.files[0]
 	slides := func(cols, rows int) (*view.Deck, error) {
@@ -25,28 +24,20 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		if s.fixedWidth == 0 {
 			vs.opts.Width = min(vs.opts.Width, slideWidth) // centered on wide screens
 		}
-		// the footer comes from the front matter, which a section leaves out
-		doc, base, err := loadDoc(env, name, "", vs, in)
+		parts, front, base, err := readDeck(env, name, o.section, vs, in)
 		if err != nil {
 			return nil, err
 		}
-		deck := &view.Deck{}
-		deck.Footer, deck.NoFooter = deckFooter(doc)
-		if doc, err = sectionOf(doc, name, o.section); err != nil {
-			return nil, err
-		}
+		deck := &view.Deck{Slides: make([]*view.Page, 0, len(parts))}
+		deck.Footer, deck.NoFooter = deckFooter(front)
 		vs.opts = vs.docOptions(name, base)
 		// one budget for the whole deck: images, diagrams and formulas
 		// are limited per document, not per slide
 		vs.opts.Budget = &render.Budget{}
 		vs.opts.Pauses = true
-		parts := md.Slides(doc, maxSlides)
-		deck.Slides = make([]*view.Page, 0, len(parts))
 		for _, p := range parts {
 			r := render.Render(p, vs.opts)
-			res := output{text: r.Text, anchors: map[string]int{}}
-			res.addNav(r, 0)
-			page := pageOf(res)
+			page := renderedPage(r)
 			page.Steps = r.Pauses
 			deck.Slides = append(deck.Slides, centered(page, cols, rows, vs.opts.Width))
 		}
@@ -73,24 +64,46 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		start = name
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
-	opt := view.Options{Slides: slides, Start: start, Mouse: s.mouse, Watch: watch, Poll: env.Poll,
+	opt := view.Options{Slides: slides, Start: start, Mouse: s.mouse, Watch: o.follow, Poll: env.Poll,
 		Select: sel, Match: match, Bar: bar}
+	defer publishSlides(env, name, &opt)()
 	if env.View != nil {
 		return env.View(opt)
 	}
 	return view.Run(opt)
 }
 
+// readDeck reads the deck at name and splits it into slides, the same way
+// for the presentation and its notes window so that their numbers agree.
+// front is the front matter, which a section (sec) leaves out.
+func readDeck(env Env, name, sec string, vs settings, in *stdinCache) (slides []*md.Node, front, base string, err error) {
+	doc, base, err := loadDoc(env, name, "", vs, in)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if c := doc.FirstChild; c != nil && c.Type == md.FrontMatter {
+		front = c.Literal
+	}
+	if doc, err = sectionOf(doc, name, sec); err != nil {
+		return nil, "", "", err
+	}
+	return md.Slides(doc, maxSlides), front, base, nil
+}
+
+// renderedPage is a viewer page of a render made with Navigate.
+func renderedPage(r render.Result) *view.Page {
+	res := output{text: r.Text, anchors: map[string]int{}}
+	res.addNav(r, 0)
+	return pageOf(res)
+}
+
 // deckFooter reads the footer of a presentation from the document's front
 // matter: its footer key, or else its title and author; a footer of false,
 // off or no hides it.
-func deckFooter(doc *md.Node) (text string, hide bool) {
-	if doc.FirstChild == nil || doc.FirstChild.Type != md.FrontMatter {
-		return "", false
-	}
+func deckFooter(front string) (text string, hide bool) {
 	var title, author, footer string
 	set := false
-	for line := range strings.Lines(doc.FirstChild.Literal) {
+	for line := range strings.Lines(front) {
 		key, val, ok := strings.Cut(line, ":")
 		if !ok {
 			continue
@@ -192,5 +205,3 @@ func centered(p *view.Page, cols, rows, width int) *view.Page {
 	}
 	return p
 }
-
-var errSlidesTTY = errors.New("--slides needs a terminal")

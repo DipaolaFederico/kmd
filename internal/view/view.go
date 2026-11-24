@@ -75,6 +75,14 @@ type Options struct {
 	// the deck for a terminal cols × rows (Load is then only used to
 	// check that Start can be read).
 	Slides func(cols, rows int) (*Deck, error)
+	// OnSlide, when set, is told the slide on screen every time a slide is
+	// shown: on each step and reload too, so the same one comes repeated
+	// (the speaker notes follow it).
+	OnSlide func(slide int)
+	// Changed, when set, is asked every Poll whether the page must be
+	// loaded again with Load, from its top (the notes of another slide);
+	// for documents, not with Slides.
+	Changed func() bool
 
 	// Root is the folder the file picker (o, S) lists when the page on
 	// screen is a document ("" = none); a folder page lists itself.
@@ -168,6 +176,50 @@ func (m *model) poll() bool {
 	m.reload()
 	m.top = top
 	m.scroll(0)
+	return true
+}
+
+// ticker returns the channel that paces the checks for changes (Watch,
+// Changed), nil when there are none, and the function that stops it.
+func (m *model) ticker() (<-chan time.Time, func()) {
+	if !m.opt.Watch && m.opt.Changed == nil {
+		return nil, func() {}
+	}
+	poll := m.opt.Poll
+	if poll <= 0 {
+		poll = 250 * time.Millisecond
+	}
+	if m.opt.Watch {
+		m.poll() // remember the current version
+	}
+	t := time.NewTicker(poll)
+	return t.C, t.Stop
+}
+
+// tick checks for changes; true means the screen must be drawn again.
+func (m *model) tick() bool {
+	if !m.reloadIfChanged() {
+		return m.opt.Watch && m.poll()
+	}
+	if m.opt.Watch { // just loaded: only remember the file's version
+		m.watched = ""
+		m.poll()
+	}
+	return true
+}
+
+// reloadIfChanged loads the page again from its top if Options.Changed
+// says so.
+func (m *model) reloadIfChanged() bool {
+	if m.opt.Changed == nil || !m.opt.Changed() {
+		return false
+	}
+	p, err := m.opt.Load(m.path, m.cols)
+	if err != nil {
+		m.msg = errText(err)
+		return true
+	}
+	m.setPage(p)
 	return true
 }
 

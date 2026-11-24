@@ -46,6 +46,9 @@ func (m *model) showSlide(i, step int) {
 		p = p.upTo(p.Steps[m.step])
 	}
 	m.setPage(p)
+	if m.opt.OnSlide != nil {
+		m.opt.OnSlide(m.slide)
+	}
 }
 
 // showStep shows another step of the slide on screen, keeping the scroll

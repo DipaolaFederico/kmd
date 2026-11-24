@@ -18,6 +18,10 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - `--slides` shows a footer instead of the status bar: the slide number and
   the `title` and `author` from the front matter. `footer:` in the front
   matter sets its text and `footer: false` (or `off`) hides it.
+- `--notes` shows, in a second terminal, the speaker notes of the slide a
+  `--slides` presentation of the same file has on screen, and the title of
+  the next one, following it as it moves. Notes go in
+  `<!-- notes: … -->` comments, which never show on the slide.
 
 ### Fixed
 

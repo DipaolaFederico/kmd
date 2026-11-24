@@ -278,6 +278,40 @@ Syntax highlighting is table driven: a language is data, not code.
    `docs/kmd.1` (SYNTAX HIGHLIGHTING); `go test ./internal/render` checks
    them, the fence names, and that tokenizing stays linear on hostile input.
 
+## Experimental features
+
+The local AI assistant ([docs/experimental/ai.md](docs/experimental/ai.md))
+is experimental: it lives on `main`, but only builds made with the `kmdai`
+build tag contain it, so the released binary, its "no network requests"
+promise and the `make perf` budget are unchanged.
+
+- Its code lives in `internal/ai` and in files of other `internal/` packages
+  with a `//go:build kmdai` constraint (and a `!kmdai` counterpart when the
+  default build needs a stub); never in the public `render` package.
+  `TestDefaultBuildHasNoAI` fails if the default build links `internal/ai`
+  or `net`.
+- `make build-ai` and `make test-ai` (the tag-sensitive gates: vet,
+  staticcheck, dead code, race tests, coverage, govulncheck and gosec, with
+  `GOTAGS=kmdai`). CI runs them on every pull request that touches the code,
+  the 1.0 ones included, so a change elsewhere that breaks the experimental
+  code fails in its own pull request, where the fix is small.
+- **Pull request titles use `chore(ai): …`.** A `feat` that does not change
+  the released binary publishes nothing by itself, but it still counts as a
+  `feat` since the last release, so the next unrelated `fix` would come out
+  as a minor release. `chore` asks for no release and needs no changelog
+  entry.
+- The changelog gets a single `Experimental:` line, added by hand when the
+  summary in the viewer is usable (#49), not one entry per pull request.
+- A change to shared code that the AI needs (a viewer refactor, the
+  sanitiser…) goes in its own `refactor` or `fix` pull request that stands
+  on its own, never inside an AI pull request.
+- The viewer reaches the AI through a minimal interface that is `nil` in the
+  default build, added in its own pull request after the presentations work
+  (#20) is merged and before the summary in the viewer (#49).
+- The README, man page, `--help` and completions do not mention the feature
+  until it graduates (#53): one `feat` pull request per graduating part,
+  which removes the tag and publishes a minor release.
+
 ## Local CI
 
 ```sh
@@ -297,7 +331,8 @@ make hooks   # run `make ci` before every git push
 | performance | `scripts/perf.sh` (whole process, 200 runs)          | p50 and exec-adjusted p95 < 10 ms (`PERF_MAX_MS`) |
 
 Extras: `make spec` (conformance), `make fuzz` (7 fuzzers), `make bench`,
-`make rpm`.
+`make rpm`, `make build-ai` and `make test-ai` (see
+[Experimental features](#experimental-features)).
 
 Lint and security tools are installed at pinned versions into `.tools/` (the
 first run needs network access). They are never linked into the binary.
@@ -315,6 +350,7 @@ first run needs network access). They are never linked into the binary.
 | `internal/term`    | terminal size and raw mode via ioctl                 |
 | `internal/view`    | interactive viewer: links, search, live reload       |
 | `internal/cli`     | flags, config, pager, `--follow`, `--html`           |
+| `internal/ai`      | experimental local AI, only with `-tags kmdai`       |
 | `render/`          | public Go package: the stable rendering API          |
 | `internal/bridge`  | public options → internal ones, shared with the CLI  |
 | `main.go`          | entry point: terminal and cell size, GC tuning       |

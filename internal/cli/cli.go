@@ -286,6 +286,7 @@ type settings struct {
 	maxWidth   int    // cap for the automatic width
 	mouse      bool   // the viewer reports clicks and the wheel
 	alwaysView bool   // --view / view = always: viewer even for short documents
+	ai         aiSettings
 }
 
 // builtinPager names the interactive viewer in KMD_PAGER / pager.
@@ -440,6 +441,7 @@ func resolve(o options, cfg config, env Env) (settings, error) {
 	}
 	s.mouse = cfg.Mouse == nil || *cfg.Mouse
 	s.alwaysView = o.view || cfg.View == "always" && !o.noPager
+	s.ai = resolveAI(cfg, env)
 	return s, nil
 }
 

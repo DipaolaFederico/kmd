@@ -30,6 +30,11 @@ type config struct {
 	Diagrams   *bool
 	Mouse      *bool
 	View       string
+	// Experimental AI (docs/experimental/ai.md): read by every build so one
+	// config file serves both, used only by builds made with -tags kmdai.
+	AI        *bool
+	AIURL     string
+	AIKeyFile string
 }
 
 // configPath returns $KMD_CONFIG, or $XDG_CONFIG_HOME/kmd/config, or ~/.config/kmd/config.
@@ -37,11 +42,19 @@ func configPath(getenv func(string) string) string {
 	if p := getenv("KMD_CONFIG"); p != "" {
 		return p
 	}
+	if d := configDir(getenv); d != "" {
+		return filepath.Join(d, "config")
+	}
+	return ""
+}
+
+// configDir returns $XDG_CONFIG_HOME/kmd, or ~/.config/kmd ("" without HOME).
+func configDir(getenv func(string) string) string {
 	if x := getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "kmd", "config")
+		return filepath.Join(x, "kmd")
 	}
 	if h := getenv("HOME"); h != "" {
-		return filepath.Join(h, ".config", "kmd", "config")
+		return filepath.Join(h, ".config", "kmd")
 	}
 	return ""
 }
@@ -160,6 +173,16 @@ func (c *config) set(k, v string) error {
 		c.View = v
 		if v != "auto" && v != "always" {
 			err = fmt.Errorf("invalid view %q (auto | always)", v)
+		}
+	case "ai":
+		c.AI, err = parseBool(v)
+	case "ai-url":
+		c.AIURL = v
+	case "ai-key-file":
+		c.AIKeyFile = v
+		if !filepath.IsAbs(v) {
+			// relative to what? never the folder kmd happens to run in
+			err = fmt.Errorf("ai-key-file %q is not an absolute path", v)
 		}
 	default:
 		return fmt.Errorf("unknown setting %q", k)

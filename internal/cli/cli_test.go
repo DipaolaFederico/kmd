@@ -309,7 +309,7 @@ func TestConfigFile(t *testing.T) {
 		t.Errorf("auto light: %s", r.out)
 	}
 	// invalid config
-	for _, bad := range []string{"nokey", "width = x", "color = sometimes", "math = maybe", "unknown = 1", "images = fax"} {
+	for _, bad := range []string{"nokey", "width = x", "color = sometimes", "math = maybe", "unknown = 1", "images = fax", "ai = maybe", "ai-key-file = ai-key"} {
 		if err := os.WriteFile(filepath.Join(cfgDir, "config"), []byte(bad), 0o600); err != nil {
 			t.Fatal(err)
 		}

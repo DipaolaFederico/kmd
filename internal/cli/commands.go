@@ -67,8 +67,9 @@ func swatch(bg, fg render.Color, text string) string {
 	return s + text + "\x1b[0m"
 }
 
+var onOff = map[bool]string{true: "on", false: "off"}
+
 func showConfig(env Env, cfg config, s settings) int {
-	onOff := map[bool]string{true: "on", false: "off"}
 	eff := map[string]string{
 		"theme":      s.themeNm,
 		"width":      strconv.Itoa(s.opts.Width),
@@ -85,6 +86,7 @@ func showConfig(env Env, cfg config, s settings) int {
 	if s.themeSrc != "" {
 		eff["theme"] += " (auto: " + s.themeSrc + ")"
 	}
+	s.ai.describe(eff)
 	path := firstNonEmpty(cfg.path, "(no HOME)")
 	fmt.Fprintf(env.Stdout, "Config file:  %s\nTheme dirs:   %s\n\nEffective settings:\n%s\nTemplate (copy to the config file and uncomment):\n\n%s",
 		path, strings.Join(render.ThemeDirs(env.Getenv), ", "), cfg.describe(eff), configTemplate)

@@ -11,13 +11,10 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ### Added
 
-- `--slides` reveals a slide in steps at every `<!-- pause -->` line:
-  forward shows the next part and back hides it. A list without blank
-  lines between its items carries on after a pause without a gap when it
-  keeps the same marker, so its items can appear one at a time.
-- `--slides` shows a footer instead of the status bar: the slide number and
-  the `title` and `author` from the front matter. `footer:` in the front
-  matter sets its text and `footer: false` (or `off`) hides it.
+- `--slides` shows a footer instead of the status bar, which no longer
+  shows the step: the slide number and the `title` and `author` from the
+  front matter. `footer:` in the front matter sets its text and
+  `footer: false` (or `off`) hides it.
 - `--notes` shows, in a second terminal, the speaker notes of the slide a
   `--slides` presentation of the same file has on screen, and the title of
   the next one, following it as it moves. Notes go in
@@ -34,6 +31,16 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 - The viewer's bottom line no longer overflows the screen when it shows
   emoji followed by a variation selector (in a link target or a footer).
+
+## [0.15.0] - 2026-11-24
+
+### Added
+
+- `--slides` reveals a slide in steps at every `<!-- pause -->` line:
+  forward shows the next part, back hides it, and the status bar shows the
+  step. A list without blank lines between its items carries on after a
+  pause without a gap when it keeps the same marker, so its items can
+  appear one at a time.
 
 ## [0.14.0] - 2026-11-23
 
@@ -182,7 +189,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - `--follow`, `--toc`, `--html` (safe by default), shell completions and a
   man page.
 
-[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/DipaolaFederico/kmd/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/DipaolaFederico/kmd/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/DipaolaFederico/kmd/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/DipaolaFederico/kmd/compare/v0.11.0...v0.12.0

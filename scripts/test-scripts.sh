@@ -201,6 +201,10 @@ eq "complexity: no main branch to compare with (shallow clone?): not checked|rc=
 eq rc=1 "$(STRICT=1 cx_run '' '45 a New a.go:3:1\n' | tail -1)" "complexity: no base, STRICT"
 unset STUB
 
+# make dist and git archive leave out the README images (.gitattributes)
+eq "" "$(git ls-files --cached --others --exclude-standard -- docs/images ':(exclude,attr:export-ignore)')" \
+  "dist: docs/images is export-ignore"
+
 if [ "$fails" -gt 0 ]; then
   echo "$fails script test(s) failed"
   exit 1

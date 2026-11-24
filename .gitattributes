@@ -1,0 +1,4 @@
+# The README images, their tapes and samples are for the web page only:
+# they stay out of `git archive` (GitHub's source archives, Packit's RPM
+# sources) and of `make dist`.
+/docs/images/** export-ignore

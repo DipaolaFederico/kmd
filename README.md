@@ -11,7 +11,7 @@
 [![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20macOS%20%7C%20FreeBSD%20%7C%20Windows-lightgrey)](https://github.com/DipaolaFederico/kmd/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Installation](#-installation) · [Usage](#-usage) · [Viewer](#-viewer) · [Themes](#-themes) · [Configuration](#%EF%B8%8F-configuration) · [Remote documents](#-remote-documents) · [Security](#-security)
+[Gallery](#-gallery) · [Installation](#-installation) · [Usage](#-usage) · [Viewer](#-viewer) · [Themes](#-themes) · [Configuration](#%EF%B8%8F-configuration) · [Remote documents](#-remote-documents) · [Security](#-security)
 
 </div>
 
@@ -25,7 +25,7 @@ untrusted input.
   <img src="docs/images/screenshot.png" alt="kmd rendering docs/images/demo.md with the tokyo-night theme" width="720">
 </p>
 
-<p align="center"><sub><code>kmd docs/images/demo.md</code> with the <code>tokyo-night</code> theme</sub></p>
+<p align="center"><sub><code>kmd -t tokyo-night docs/images/demo.md</code></sub></p>
 
 ## ✨ Features
 
@@ -44,6 +44,36 @@ untrusted input.
 | 🔄 | **Live preview** | `-f` re-renders the file every time it is saved |
 | 🎤 | **Presentations** | `--slides` shows a document one slide at a time |
 | 🌐 | **HTML export** | standalone page with the theme colors; raw HTML and unsafe URLs removed by default |
+
+## 📸 Gallery
+
+Each picture shows the command that made it, run on the documents in
+[docs/images](docs/images) (`make docs-images` regenerates them all).
+
+<p align="center">
+  <img src="docs/images/viewer.gif" alt="The kmd viewer: a link is selected with Tab and opened, Backspace returns, the table of contents jumps to a section and a search highlights its matches" width="720">
+  <br><sub><code>kmd docs/images/guide/README.md</code>, then <code>Tab</code> <code>Enter</code> to follow a link, <code>Backspace</code> back, <code>t</code> contents, <code>/</code> search</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/diagrams.png" alt="A Mermaid flowchart, a sequence diagram and a Gantt chart drawn with box-drawing characters"><br><sub><code>kmd -P docs/images/diagrams.md</code>: Mermaid flowchart, sequence diagram, Gantt chart</sub></td>
+    <td width="50%"><img src="docs/images/math.png" alt="Inline and display LaTeX formulas rendered as Unicode: an integral, a sum, a fraction and a matrix"><br><sub><code>kmd -P docs/images/math.md</code>: LaTeX as Unicode</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/alerts.png" alt="The five GitHub alert types, each with its own color and icon, above an aligned table"><br><sub><code>kmd -P docs/images/alerts.md</code>: alerts and an aligned table</sub></td>
+    <td><img src="docs/images/images.png" alt="A picture of the Mandelbrot set drawn with Unicode blocks below a heading and a paragraph"><br><sub><code>kmd -P -i blocks docs/images/images.md</code>: an image in Unicode blocks</sub></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/light.png" alt="The demo document with the github-light theme on a light terminal"><br><sub><code>kmd -t github-light docs/images/demo.md</code>: a light theme</sub></td>
+    <td><img src="docs/images/slides.png" alt="A slide titled Why another previewer with three bullet points and a footer with the deck title, author and slide 2 of 3"><br><sub><code>kmd --slides docs/images/slides.md</code>: a presentation</sub></td>
+  </tr>
+</table>
+
+<p align="center">
+  <img src="docs/images/follow.gif" alt="Live preview: as lines are added to notes.md, kmd redraws it with new task list items, a note and a table" width="720">
+  <br><sub><code>kmd -f notes.md</code> while another program edits <code>notes.md</code></sub>
+</p>
 
 ## 📦 Installation
 

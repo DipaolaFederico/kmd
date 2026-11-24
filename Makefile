@@ -4,8 +4,8 @@ GO          ?= go
 BIN         := bin/kmd
 BIN_AI      := bin/kmd-ai
 PREFIX      ?= $(HOME)/.local
-VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS     := -s -w -X github.com/DipaolaFederico/kmd/internal/cli.Version=$(VERSION)
+VERSION     ?= $(shell scripts/build-version.sh 2>/dev/null || echo dev)
+LDFLAGS      = -s -w -X github.com/DipaolaFederico/kmd/internal/cli.Version=$(VERSION)
 
 # Build tags for the tag-sensitive gates (make test-ai sets kmdai). Passed
 # as -tags: GOFLAGS is ignored by deadcode -test and by gosec.

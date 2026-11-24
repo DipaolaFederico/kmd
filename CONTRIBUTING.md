@@ -229,6 +229,11 @@ build-provenance attestation; its notes list the merged pull requests.
   `chore(release): vX.Y.Z`, with the same files: review and merge it
   (merging it publishes nothing). If one is still open at the next release,
   the new one replaces it and includes its versions.
+- Since the tagged commit never reaches `main` (the pull request is
+  squashed), `git describe` on `main` names an old release. Local builds
+  (`make build`, `make install`) take their version from the spec instead
+  (`scripts/build-version.sh`): `v0.14.0-3-gabc1234` is three commits after
+  0.14.0.
 
 ### The public Go package
 

@@ -6,6 +6,8 @@
 // container tree, then an inline phase using delimiter and bracket stacks.
 package md
 
+import "strings"
+
 // NodeType identifies a node in the document tree.
 type NodeType uint8
 
@@ -291,6 +293,20 @@ func Section(doc *Node, match func(heading *Node) bool) *Node {
 		c = next
 	}
 	return out
+}
+
+// IsPause reports whether n is a <!-- pause --> comment on its own, which
+// reveals the rest of a slide in a later step.
+func IsPause(n *Node) bool {
+	if n.Type != HTMLBlock {
+		return false
+	}
+	s, ok := strings.CutPrefix(strings.TrimSpace(n.Literal), "<!--")
+	if !ok {
+		return false
+	}
+	s, ok = strings.CutSuffix(s, "-->")
+	return ok && strings.TrimSpace(s) == "pause"
 }
 
 // Slides splits doc into slides, moving its blocks into one new document

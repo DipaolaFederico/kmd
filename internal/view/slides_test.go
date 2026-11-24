@@ -126,3 +126,83 @@ func TestSlidesRefuseFolders(t *testing.T) {
 		t.Error("load without a loader")
 	}
 }
+
+func TestSlideSteps(t *testing.T) {
+	tall := make([]string, 30)
+	tall[29] = "end"
+	deck := func(cols, rows int) ([]*Page, error) {
+		return []*Page{
+			{Lines: []string{"", "title", "", "[a]", "", "[b]"}, Steps: []int{2, 4},
+				Links:    []render.Link{{Href: "#a", Spans: []render.Span{{Line: 3, Width: 3}}}, {Href: "#b", Spans: []render.Span{{Line: 5, Width: 3}}}},
+				Anchors:  map[string]int{"title": 1, "b": 5},
+				Headings: []render.Heading{{Text: "title", Line: 1}, {Text: "b", Line: 5}},
+				Code:     []render.CodeBlock{{Start: 3, End: 3}, {Start: 5, End: 5}}},
+			{Lines: tall, Steps: []int{2}},
+		}, nil
+	}
+	m, err := newModel(Options{Slides: deck}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	cut := func(lines, links, anchors, headings, code int) bool {
+		return len(h.page.Lines) == lines && len(h.page.Links) == links && len(h.page.Anchors) == anchors &&
+			len(h.page.Headings) == headings && len(h.page.Code) == code
+	}
+	if !cut(2, 0, 1, 1, 0) || !strings.Contains(h.screen(), "slide 1/2 · step 1/3") {
+		t.Fatalf("first step: %q", h.page.Lines)
+	}
+	h.keys("right")
+	if h.step != 1 || !cut(4, 1, 1, 1, 1) {
+		t.Errorf("second step: %d %q", h.step, h.page.Lines)
+	}
+	h.keys(" ")
+	if h.step != 2 || !cut(6, 2, 2, 2, 2) || !strings.Contains(h.screen(), "step 3/3") {
+		t.Errorf("last step: %d", h.step)
+	}
+	h.keys("right") // next slide, at its first step
+	if h.slide != 1 || h.step != 0 || len(h.page.Lines) != 2 {
+		t.Errorf("next slide: %d/%d", h.slide, h.step)
+	}
+	h.keys("enter") // nothing selected: the next step, brought into view
+	if h.step != 1 || h.top == 0 || h.top > 2 {
+		t.Errorf("reveal: step %d top %d", h.step, h.top)
+	}
+	h.keys("left") // back a step keeps the position, clamped
+	if h.step != 0 || h.top != 0 {
+		t.Errorf("back a step: %d top %d", h.step, h.top)
+	}
+	h.keys("left") // back to the previous slide, whole
+	if h.slide != 0 || h.step != 2 {
+		t.Errorf("previous slide: %d/%d", h.slide, h.step)
+	}
+	h.keys("G")
+	if h.slide != 1 || h.step != 1 {
+		t.Errorf("G: %d/%d", h.slide, h.step)
+	}
+	h.keys("right")
+	if h.msg != "last slide" {
+		t.Errorf("past the end: %q", h.msg)
+	}
+	h.keys("g")
+	if h.slide != 0 || h.step != 0 {
+		t.Errorf("g: %d/%d", h.slide, h.step)
+	}
+	h.keys("left")
+	if h.msg != "first slide" {
+		t.Errorf("before the first: %q", h.msg)
+	}
+	// g on the slide on screen goes back to its top
+	h.keys("G")
+	h.top = 5
+	h.keys("G")
+	if h.top != 0 {
+		t.Errorf("G on the last slide keeps top %d", h.top)
+	}
+	// a reload (resize, edit) keeps the slide and the step
+	h.keys("g", "right")
+	h.reload()
+	if h.slide != 0 || h.step != 1 || len(h.page.Lines) != 4 {
+		t.Errorf("reload: %d/%d", h.slide, h.step)
+	}
+}

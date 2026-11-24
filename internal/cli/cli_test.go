@@ -909,6 +909,32 @@ func TestSlidesMode(t *testing.T) {
 	}
 }
 
+func TestSlidePauses(t *testing.T) {
+	p := writeFile(t, "deck.md", "# One\n\n<!-- pause -->\n\nrevealed\n")
+	var got view.Options
+	r := run(t, func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 30
+		e.View = func(o view.Options) error { got = o; return nil }
+	}, "--slides", p)
+	if r.code != 0 {
+		t.Fatalf("slides: %+v", r)
+	}
+	pages, err := got.Slides(100, 30)
+	if err != nil || len(pages) != 1 || len(pages[0].Steps) != 1 {
+		t.Fatalf("steps: %v %v", pages, err)
+	}
+	// the step ends after the title and moves down with the centered slide
+	page := pages[0]
+	shown := stripTest(strings.Join(page.Lines[:page.Steps[0]], "\n"))
+	if page.Steps[0] <= page.Headings[0].Line || strings.Contains(shown, "revealed") {
+		t.Errorf("first step: %q", shown)
+	}
+	top, _ := got.Slides(100, 3) // too short to move down
+	if page.Steps[0]-top[0].Steps[0] != page.Headings[0].Line-top[0].Headings[0].Line || page.Headings[0].Line == top[0].Headings[0].Line {
+		t.Errorf("step not moved with the slide: %d %d", page.Steps[0], top[0].Steps[0])
+	}
+}
+
 func TestFolderOpensPicker(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "notes.md"), []byte("# Notes\n"), 0o600); err != nil {

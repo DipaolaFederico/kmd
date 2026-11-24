@@ -268,6 +268,12 @@ the first and last slide; `j` `k` scroll a slide taller than the screen.
 Links to web pages and files open as in the viewer. With `-f`, the slides
 are re-rendered every time the file is saved.
 
+A `<!-- pause -->` line reveals a slide in steps: forward shows the next
+part, back hides it again, and the status bar counts the steps. Pauses go
+between blocks (outside lists and quotes); a list without blank lines
+between its items carries on after a pause without a gap when it keeps
+the same marker, so its items can appear one by one.
+
 ```markdown
 # Release 2.0
 
@@ -278,6 +284,7 @@ Highlights of the quarter
 ## New features
 
 - Section jumps in the viewer
+<!-- pause -->
 - Presentations
 ```
 

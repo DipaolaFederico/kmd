@@ -231,9 +231,6 @@ func Render(doc *md.Node, o Options) Result {
 	}
 	b.WriteByte('\n')
 	res := Result{Text: b.String(), Graphics: r.graphics, Pauses: pauses}
-	if r.links != nil {
-		res.Images = r.links.images // painted rows: never dropped
-	}
 	if anchors != nil {
 		res.Anchors, res.Headings = anchors.lines, headings
 	}
@@ -243,9 +240,11 @@ func Render(doc *md.Node, o Options) Result {
 	return res
 }
 
-// fill sets the code blocks and links of res to those that were painted:
-// a block or a link can be laid out and then dropped.
+// fill sets the navigation data of res: the placed images, and the code
+// blocks and links that were painted (a block or a link can be laid out
+// and then dropped).
 func (n *nav) fill(res *Result) {
+	res.Images = n.images // placed while painting: never dropped
 	for _, c := range n.code {
 		if c.Start >= 0 {
 			res.Code = append(res.Code, c)

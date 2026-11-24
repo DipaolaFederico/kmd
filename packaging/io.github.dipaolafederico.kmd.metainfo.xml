@@ -27,7 +27,7 @@
   <screenshots>
     <screenshot type="default">
       <caption>A document rendered with the tokyo-night theme</caption>
-      <image type="source" width="785" height="805">https://raw.githubusercontent.com/DipaolaFederico/kmd/main/docs/images/screenshot.png</image>
+      <image type="source" width="960" height="840">https://raw.githubusercontent.com/DipaolaFederico/kmd/main/docs/images/screenshot.png</image>
     </screenshot>
   </screenshots>
   <developer id="io.github.dipaolafederico">

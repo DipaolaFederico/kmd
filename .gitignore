@@ -2,6 +2,8 @@
 /.tools/
 coverage.out
 /dist/
+# output of the screenshot-only tapes (scripts/docs-images.sh)
+/docs/images/.out/
 
 # local Claude Code instructions and settings
 CLAUDE.md

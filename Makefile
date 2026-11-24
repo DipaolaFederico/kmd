@@ -36,7 +36,7 @@ APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
 .PHONY: ci fmt fmt-check lint vet staticcheck complexity dupl deadcode scripts-test test spec cover api api-update security vuln gosec \
-        build perf build-ai test-ai fuzz bench install uninstall tools hooks clean packaging dist srpm rpm
+        build perf build-ai test-ai fuzz bench install uninstall tools hooks clean packaging dist srpm rpm docs-images
 
 ci: fmt-check lint scripts-test test cover security build packaging perf
 	@printf '\n\033[1;32m✔ local CI passed\033[0m\n'
@@ -171,10 +171,11 @@ packaging: build
 	@STRICT=$(STRICT) ./scripts/check-packages.sh $(BIN)
 
 # Source tarball with the layout of a GitHub release archive (kmd-X.Y.Z/).
-# Uses the files git tracks or would track (works before the first commit).
+# Uses the files git tracks or would track (works before the first commit),
+# except those .gitattributes marks export-ignore, as `git archive` does.
 dist:
 	@mkdir -p dist
-	git ls-files -z --cached --others --exclude-standard | \
+	git ls-files -z --cached --others --exclude-standard -- . ':(exclude,attr:export-ignore)' | \
 	  tar --null -T - --transform 's,^,kmd-$(VERSION_RPM)/,' --sort=name --owner=0 --group=0 \
 	      --mtime='2026-01-01' -czf dist/kmd-$(VERSION_RPM).tar.gz
 	@echo "dist/kmd-$(VERSION_RPM).tar.gz"
@@ -185,6 +186,12 @@ srpm rpm: dist
 	cp dist/kmd-$(VERSION_RPM).tar.gz dist/rpmbuild/SOURCES/
 	rpmbuild --define "_topdir $(CURDIR)/dist/rpmbuild" $(if $(filter srpm,$@),-bs,-ba) packaging/kmd.spec
 	-command -v rpmlint >/dev/null && rpmlint -r packaging/kmd.rpmlintrc packaging/kmd.spec dist/rpmbuild/SRPMS/*.rpm dist/rpmbuild/RPMS/*/*.rpm
+
+## README images (CONTRIBUTING.md, "README images") ------------------------
+# Needs documentation-only tools (listed there), never build dependencies.
+# TAPES=docs/images/tapes/viewer.tape regenerates only that image.
+docs-images: build
+	@./scripts/docs-images.sh $(BIN) $(TAPES)
 
 ## Install ------------------------------------------------------------------
 install: build

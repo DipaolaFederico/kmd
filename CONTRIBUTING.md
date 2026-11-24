@@ -77,7 +77,9 @@ workflows) skip lint, tests and build in CI automatically.
   numbers (`make bench`, `make perf`).
 - **Documentation**: user-visible changes update `README.md`, the man page
   (`docs/kmd.1`), `kmd --help` and the shell completions
-  (`internal/cli/commands.go`) as needed.
+  (`internal/cli/commands.go`) as needed. A change to what kmd draws
+  regenerates the README images it affects (see
+  [README images](#readme-images)).
 - **Changelog**: a `feat`, `fix`, `perf` or `revert` adds an entry to
   `CHANGELOG.md` (see [Changelog](#changelog)).
 - **Style**: `gofmt -s`, clear names, comments that explain *why*. Code,
@@ -342,6 +344,35 @@ Extras: `make spec` (conformance), `make fuzz` (7 fuzzers), `make bench`,
 Lint and security tools are installed at pinned versions into `.tools/` (the
 first run needs network access). They are never linked into the binary.
 
+## README images
+
+The pictures in the README's gallery are made by scripts, never by hand:
+each image in `docs/images/` has a [VHS](https://github.com/charmbracelet/vhs)
+tape in `docs/images/tapes/` that runs kmd on a sample document next to it
+(`docs/images/*.md`, `docs/images/guide/`). `docs/images/settings.tape`
+holds what they share: window size, font and terminal colors.
+
+```sh
+make docs-images                                      # every image
+make docs-images TAPES=docs/images/tapes/viewer.tape  # just one
+```
+
+`scripts/docs-images.sh` runs kmd in a clean environment with an empty
+configuration (your settings and themes never show), reduces screenshots
+to 256 colors and checks the budget: each image ≤ 500 KiB, all of them
+≤ 4 MiB. It needs `vhs`, `ttyd`, `ffmpeg`, a Chromium and the JetBrains
+Mono font (on Fedora: `sudo dnf install vhs ttyd ffmpeg-free chromium
+jetbrains-mono-fonts-all google-noto-color-emoji-fonts`). They are documentation
+tools only: the build, the tests and the releases never use them, and
+`.gitattributes` keeps `docs/images/` out of the source archives
+(`git archive`, `make dist`), so no package carries the images.
+
+Sample documents are written for kmd, and the one picture they show is
+generated (`mandelbrot.png` comes from ffmpeg, made by the script when
+missing): no third-party content. When adding an image, add its tape and
+sample, and show the command in the README next to the picture, with alt
+text.
+
 ## Project layout
 
 | Path               | What lives there                                     |
@@ -359,7 +390,7 @@ first run needs network access). They are never linked into the binary.
 | `render/`          | public Go package: the stable rendering API          |
 | `internal/bridge`  | public options → internal ones, shared with the CLI  |
 | `main.go`          | entry point: terminal and cell size, GC tuning       |
-| `docs/`            | man page, packaging guide, README screenshot         |
+| `docs/`            | man page, packaging guide, README images and their tapes |
 | `scripts/`         | perf gate, release and packaging helpers, their tests |
 | `packaging/`       | Fedora RPM spec and AppStream metadata               |
 | `flake.nix`        | Nix flake (`nix run github:DipaolaFederico/kmd`)     |

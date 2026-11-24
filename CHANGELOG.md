@@ -9,6 +9,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-24
+
 ### Added
 
 - `--slides` shows a footer instead of the status bar, which no longer
@@ -189,7 +191,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - `--follow`, `--toc`, `--html` (safe by default), shell completions and a
   man page.
 
-[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/DipaolaFederico/kmd/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/DipaolaFederico/kmd/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/DipaolaFederico/kmd/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/DipaolaFederico/kmd/compare/v0.12.0...v0.13.0

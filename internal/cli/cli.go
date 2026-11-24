@@ -139,7 +139,8 @@ Output modes:
       --unsafe-html        with --html: keep raw HTML and all URLs (trusted input only)
   -f, --follow             live preview: re-render when the file changes
       --slides             present the document as slides (split at --- or
-                           at level 1-2 headings); with -f, live
+                           at level 1-2 headings, revealed in steps at
+                           <!-- pause -->); with -f, live
 
 Themes and configuration:
       --list-themes        list bundled and user themes

@@ -41,6 +41,12 @@ type Options struct {
 	// Budget, when set, is shared by several Render calls that make up
 	// one document (the slides of a presentation); nil: a new one.
 	Budget *Budget
+
+	// Pauses makes a top-level <!-- pause --> comment split the document
+	// into steps (a slide revealed bit by bit): Result.Pauses gets the
+	// lines shown before each one, and a tight list that goes on after a
+	// pause with the same marker is not set apart from the list before it.
+	Pauses bool
 }
 
 // Budget holds the per-document limits: a short hostile document must not
@@ -74,6 +80,9 @@ type Result struct {
 	Anchors  map[string]int
 	Headings []Heading   // top-level headings in order (Navigate)
 	Code     []CodeBlock // code blocks in order (Navigate)
+	// Pauses holds, with Options.Pauses, the number of lines of Text
+	// shown at each step but the last, which shows all of it; increasing.
+	Pauses []int
 }
 
 // Heading is a top-level heading of the rendered document.
@@ -134,8 +143,10 @@ func Render(doc *md.Node, o Options) Result {
 	}
 	var b strings.Builder
 	b.WriteByte('\n')
+	row := 1 // lines written (nav.row only exists with Navigate)
 	blank := func() {
 		b.WriteByte('\n')
+		row++
 		if p.nav != nil {
 			p.nav.row++
 		}
@@ -148,27 +159,34 @@ func Render(doc *md.Node, o Options) Result {
 			}
 			b.WriteString(margin)
 			p.line(&b, l, len(margin))
+			row++
 		}
 	}
 	// Top-level blocks are painted as soon as they are laid out, so memory
 	// holds the tree and the output, never every styled line at once.
-	first := true
+	var prev *md.Node // the last block painted
+	paused := false   // a pause came after it
 	var headings []Heading
+	var pauses []int
 	for c := doc.FirstChild; c != nil; c = c.Next {
 		if c.Type == md.FootnoteDef {
+			continue
+		}
+		if o.Pauses && md.IsPause(c) {
+			paused = true
 			continue
 		}
 		lines := r.block(c, width)
 		if len(lines) == 0 {
 			continue
 		}
-		if !first {
-			blank()
-			if c.Type == md.Heading && c.Level <= 2 {
-				blank()
-			}
+		if paused { // a pause only counts when something follows it
+			pauses = append(pauses, row)
 		}
-		first = false
+		for range gap(prev, c, paused) {
+			blank()
+		}
+		prev, paused = c, false
 		if anchors != nil && c.Type == md.Heading {
 			text := md.PlainText(c)
 			anchors.add(text, r.links.row)
@@ -190,23 +208,51 @@ func Render(doc *md.Node, o Options) Result {
 		}
 	}
 	b.WriteByte('\n')
-	res := Result{Text: b.String(), Graphics: r.graphics}
+	res := Result{Text: b.String(), Graphics: r.graphics, Pauses: pauses}
 	if anchors != nil {
 		res.Anchors, res.Headings = anchors.lines, headings
 	}
 	if r.links != nil {
-		for _, c := range r.links.code {
-			if c.Start >= 0 { // a block can be laid out and then dropped
-				res.Code = append(res.Code, c)
-			}
-		}
-		for _, l := range r.links.links {
-			if len(l.Spans) > 0 { // a link can be laid out and then dropped
-				res.Links = append(res.Links, l)
-			}
-		}
+		r.links.fill(&res)
 	}
 	return res
+}
+
+// fill sets the code blocks and links of res to those that were painted:
+// a block or a link can be laid out and then dropped.
+func (n *nav) fill(res *Result) {
+	for _, c := range n.code {
+		if c.Start >= 0 {
+			res.Code = append(res.Code, c)
+		}
+	}
+	for _, l := range n.links {
+		if len(l.Spans) > 0 {
+			res.Links = append(res.Links, l)
+		}
+	}
+}
+
+// gap is the number of blank lines between top-level blocks prev and c
+// (prev nil: c comes first): two before a section heading, none when c
+// continues a tight list interrupted by a pause.
+func gap(prev, c *md.Node, paused bool) int {
+	switch {
+	case prev == nil:
+		return 0
+	case c.Type == md.Heading && c.Level <= 2:
+		return 2
+	case paused && continuesList(prev, c):
+		return 0
+	}
+	return 1
+}
+
+// continuesList reports whether list c reads as the rest of list prev:
+// both tight, with the same kind of marker.
+func continuesList(prev, c *md.Node) bool {
+	return prev.Type == md.List && c.Type == md.List && prev.Tight && c.Tight &&
+		prev.Ordered == c.Ordered && prev.BulletChar == c.BulletChar && prev.Delim == c.Delim
 }
 
 // RenderString parses Markdown (with all GFM extensions) and renders it.

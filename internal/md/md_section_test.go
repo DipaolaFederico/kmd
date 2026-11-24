@@ -106,3 +106,15 @@ func TestSlidesLimits(t *testing.T) {
 		return func() { _ = Slides(Parse(src, GFM), n+1) }
 	})
 }
+
+func TestIsPause(t *testing.T) {
+	for src, want := range map[string]bool{
+		"<!-- pause -->": true, "<!--pause-->": true, "  <!--  pause\t-->  ": true,
+		"<!-- pause later -->": false, "<!-- notes -->": false, "<!-->": false, "pause": false,
+	} {
+		doc := Parse(src+"\n", GFM)
+		if got := doc.FirstChild != nil && IsPause(doc.FirstChild); got != want {
+			t.Errorf("%q: %v", src, got)
+		}
+	}
+}

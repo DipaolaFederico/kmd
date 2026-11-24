@@ -9,6 +9,14 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- `--slides` reveals a slide in steps at every `<!-- pause -->` line:
+  forward shows the next part, back hides it, and the status bar shows the
+  step. A list without blank lines between its items carries on after a
+  pause without a gap when it keeps the same marker, so its items can
+  appear one at a time.
+
 ## [0.14.0] - 2026-11-23
 
 ### Added

@@ -23,6 +23,10 @@ type Page struct {
 	Anchors  map[string]int
 	Headings []render.Heading // the outline, in document order
 	Code     []render.CodeBlock
+
+	// Steps holds, for a slide revealed bit by bit (<!-- pause -->), the
+	// number of Lines shown at each step but the last, which shows all.
+	Steps []int
 }
 
 // Loader renders the document at path for a terminal cols columns wide.
@@ -103,6 +107,7 @@ type model struct {
 
 	slides []*Page // presentation mode
 	slide  int
+	step   int // of the slide on screen; len(Steps) when fully shown
 
 	outline    bool // the outline (t) is open
 	ocur, otop int  // its selected heading and first visible row
@@ -162,7 +167,7 @@ const maxMatches = 10000
 func newModel(opt Options, cols, rows int) (*model, error) {
 	m := &model{opt: opt, cols: cols, rows: rows, sel: -1, path: opt.Start, bg: make(chan func(*model), 16)}
 	if opt.Slides != nil {
-		return m, m.loadSlides(0)
+		return m, m.loadSlides(0, 0)
 	}
 	p := opt.First
 	if p == nil || opt.FirstCols != cols {
@@ -315,7 +320,7 @@ func (m *model) goBack(i int) {
 func (m *model) reload() {
 	if m.slides != nil {
 		top := m.top
-		if err := m.loadSlides(m.slide); err != nil {
+		if err := m.loadSlides(m.slide, m.step); err != nil {
 			m.msg = errText(err)
 			return
 		}

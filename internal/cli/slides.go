@@ -32,13 +32,16 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 		// one budget for the whole deck: images, diagrams and formulas
 		// are limited per document, not per slide
 		vs.opts.Budget = &render.Budget{}
+		vs.opts.Pauses = true
 		parts := md.Slides(doc, maxSlides)
 		pages := make([]*view.Page, 0, len(parts))
 		for _, p := range parts {
 			r := render.Render(p, vs.opts)
 			res := output{text: r.Text, anchors: map[string]int{}}
 			res.addNav(r, 0)
-			pages = append(pages, centered(pageOf(res), cols, rows, vs.opts.Width))
+			page := pageOf(res)
+			page.Steps = r.Pauses
+			pages = append(pages, centered(page, cols, rows, vs.opts.Width))
 		}
 		return pages, nil
 	}
@@ -73,7 +76,8 @@ func runSlides(env Env, o options, s settings, watch bool) error {
 
 // centered places a slide in the middle of a cols × rows terminal: lines
 // are indented to center the render width, and a slide shorter than the
-// screen (minus the status bar) is moved down to its middle.
+// screen (minus the status bar) is moved down to its middle. Its steps
+// stay where the whole slide puts them, so revealing one moves nothing.
 func centered(p *view.Page, cols, rows, width int) *view.Page {
 	left := max((cols-width)/2, 0)
 	top := 0
@@ -110,6 +114,9 @@ func centered(p *view.Page, cols, rows, width int) *view.Page {
 	for i := range p.Code {
 		p.Code[i].Start += top
 		p.Code[i].End += top
+	}
+	for i := range p.Steps {
+		p.Steps[i] += top
 	}
 	return p
 }

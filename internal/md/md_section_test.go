@@ -128,3 +128,11 @@ func TestNotes(t *testing.T) {
 		t.Errorf("no notes: %q", got)
 	}
 }
+
+func TestStripDirectives(t *testing.T) {
+	doc := Parse("a\n\n<!-- pause -->\n\n<!-- notes: n -->\n\n<!-- other -->\n\nb\n", GFM)
+	StripDirectives(doc)
+	if got := strings.TrimSpace(HTML(doc, HTMLOptions{Unsafe: true})); got != "<p>a</p>\n<!-- other -->\n<p>b</p>" {
+		t.Errorf("stripped: %q", got)
+	}
+}

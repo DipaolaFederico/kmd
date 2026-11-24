@@ -319,6 +319,19 @@ func IsPause(n *Node) bool {
 	return ok && s == "pause" && strings.HasSuffix(strings.TrimSpace(n.Literal), "-->")
 }
 
+// StripDirectives removes a slide's top-level <!-- pause --> and
+// <!-- notes: … --> comments: they are for the presenter, and an export
+// must not carry them even where HTML comments are kept.
+func StripDirectives(slide *Node) {
+	for c := slide.FirstChild; c != nil; {
+		next := c.Next
+		if s, _ := comment(c); IsPause(c) || strings.HasPrefix(s, "notes:") {
+			c.unlink()
+		}
+		c = next
+	}
+}
+
 // Notes returns the speaker notes of a slide, as Markdown: the text of its
 // top-level <!-- notes: … --> comments, in order, a blank line apart.
 func Notes(slide *Node) string {

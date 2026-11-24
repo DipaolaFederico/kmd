@@ -26,6 +26,9 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   iTerm2, sixel) instead of Unicode blocks, at most as tall as the screen
   and 16 MiB of images per slide. Sixel needs a terminal that reports its
   cell size.
+- `--slides --html` exports the deck as one HTML page, with the safe
+  defaults of `--html`: 16:9 slides with their footer, one per page when
+  printed, so the browser's "Print to PDF" makes a PDF deck.
 
 ### Fixed
 

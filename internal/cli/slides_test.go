@@ -61,3 +61,42 @@ func TestSlideImagesCentered(t *testing.T) {
 		t.Errorf("placement %+v, uncentered %+v", img, base)
 	}
 }
+
+func TestExportSlides(t *testing.T) {
+	deck := writeFile(t, "deck.md", "---\ntitle: Talk <b>\nauthor: Ana\n---\n# One\n\nfirst <script>alert(1)</script> [x](javascript:alert(1))\n\n"+
+		"<!-- notes: secret notes -->\n<!-- pause -->\n\n![pic](pic.png)\n\n---\n\n## Two\n\nsecond\n")
+	r := run(t, nil, "--slides", "--html", deck) // no terminal needed
+	if r.code != 0 {
+		t.Fatalf("export: %+v", r)
+	}
+	out := r.out
+	if strings.Count(out, `<section class="slide">`) != 2 || !strings.Contains(out, "<span>1 / 2</span>") ||
+		!strings.Contains(out, "<span>Talk &lt;b&gt; · Ana</span>") || !strings.Contains(out, "<title>Talk &lt;b&gt;</title>") {
+		t.Errorf("slides, footer or title missing:\n%s", out)
+	}
+	// the safe defaults of --html: no raw HTML, no unsafe URLs, notes and
+	// pauses left out, a CSP; one slide per printed page
+	for _, bad := range []string{"<script>", "javascript:", "secret notes", "<!-- pause"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("%q in the export", bad)
+		}
+	}
+	if !strings.Contains(out, "Content-Security-Policy") || !strings.Contains(out, "break-after: page") || !strings.Contains(out, `<img src="pic.png"`) {
+		t.Errorf("page:\n%s", out)
+	}
+	// --unsafe-html keeps raw HTML and URLs, never the presenter's notes
+	if r := run(t, nil, "--slides", "--html", "--unsafe-html", deck); !strings.Contains(r.out, "javascript:") ||
+		strings.Contains(r.out, "secret notes") || strings.Contains(r.out, "<!-- pause") {
+		t.Errorf("--unsafe-html:\n%s", r.out)
+	}
+	hidden := writeFile(t, "hidden.md", "---\nfooter: off\n---\n# Only\n")
+	if r := run(t, nil, "--slides", "--html", hidden); strings.Contains(r.out, "<footer>") || !strings.Contains(r.out, "<title>Only</title>") {
+		t.Errorf("hidden footer:\n%s", r.out)
+	}
+	if r := run(t, nil, "--slides", "--html", "-s", "two", deck); strings.Count(r.out, `class="slide"`) != 1 || !strings.Contains(r.out, "<span>Talk &lt;b&gt; · Ana</span>") {
+		t.Errorf("section: %+v", r)
+	}
+	if r := run(t, nil, "--slides", "--html", deck+".missing"); r.code != 1 {
+		t.Errorf("missing: %+v", r)
+	}
+}

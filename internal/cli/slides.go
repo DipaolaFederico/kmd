@@ -2,6 +2,7 @@ package cli
 
 import (
 	"cmp"
+	"io"
 	"strings"
 	"unicode/utf8"
 
@@ -72,6 +73,30 @@ func runSlides(env Env, o options, s settings) error {
 	return view.Run(opt)
 }
 
+// exportSlides writes the deck as one HTML page (--slides --html): one
+// slide per page when printed, with the safe defaults of --html and none
+// of the presenter's pauses and notes.
+func exportSlides(env Env, o options, s settings) error {
+	name := o.files[0]
+	slides, front, base, err := readDeck(env, name, o.section, s, &stdinCache{})
+	if err != nil {
+		return err
+	}
+	hopt := htmlOptions(o, s.docOptions(name, base).BaseURL)
+	parts := make([]string, len(slides))
+	for i, sl := range slides {
+		md.StripDirectives(sl)
+		parts[i] = md.HTML(sl, hopt)
+	}
+	footer, hide := deckFooter(front)
+	title := docTitle(slides[0], name)
+	if t, _ := frontValue(front, "title"); t != "" {
+		title = t
+	}
+	_, err = io.WriteString(env.Stdout, render.SlidesPage(title, parts, footer, hide, "kmd "+version(), s.opts.Theme))
+	return err
+}
+
 // slideSettings are the render settings of slides on a cols × rows
 // terminal: the viewer's, at most slideWidth wide, and with terminal
 // graphics drawn as such, since a slide does not scroll under them — the
@@ -127,38 +152,36 @@ func renderedPage(r render.Result) *view.Page {
 // matter: its footer key, or else its title and author; a footer of false,
 // off or no hides it.
 func deckFooter(front string) (text string, hide bool) {
-	var title, author, footer string
-	set := false
-	for line := range strings.Lines(front) {
-		key, val, ok := strings.Cut(line, ":")
-		if !ok {
-			continue
+	if footer, set := frontValue(front, "footer"); set {
+		if strings.EqualFold(footer, "false") || strings.EqualFold(footer, "off") || strings.EqualFold(footer, "no") {
+			return "", true
 		}
-		switch key {
-		case "title":
-			title = footerValue(val)
-		case "author":
-			author = footerValue(val)
-		case "footer":
-			footer, set = footerValue(val), true
-		}
-	}
-	switch {
-	case set && (strings.EqualFold(footer, "false") || strings.EqualFold(footer, "off") || strings.EqualFold(footer, "no")):
-		return "", true
-	case set:
 		return footer, false
-	case title != "" && author != "":
+	}
+	title, _ := frontValue(front, "title")
+	author, _ := frontValue(front, "author")
+	if title != "" && author != "" {
 		return title + " · " + author, false
 	}
 	return title + author, false
 }
 
-// footerValue returns a one-line YAML value as footer text: unquoted (no
+// frontValue returns the value of key in the front matter, as text (see
+// frontText); set is false without the key.
+func frontValue(front, key string) (text string, set bool) {
+	for line := range strings.Lines(front) {
+		if k, v, ok := strings.Cut(line, ":"); ok && k == key {
+			return frontText(v), true
+		}
+	}
+	return "", false
+}
+
+// frontText returns a one-line YAML value as text: unquoted (no
 // escapes), without a trailing comment, cleaned for the terminal and at
-// most maxFooter runes. Block scalars, lists and nested keys are not
+// most maxFrontValue runes. Block scalars, lists and nested keys are not
 // read: a front matter is not worth a YAML parser here.
-func footerValue(v string) string {
+func frontText(v string) string {
 	v = strings.TrimSpace(v)
 	if q := v[:min(len(v), 1)]; q == `"` || q == "'" {
 		if end := strings.Index(v[1:], q); end >= 0 {
@@ -167,23 +190,23 @@ func footerValue(v string) string {
 	} else if i := strings.Index(v, " #"); i >= 0 {
 		v = v[:i]
 	}
-	if n := 4 * maxFooter; len(v) > n { // cleaning a huge value costs memory
+	if n := 4 * maxFrontValue; len(v) > n { // cleaning a huge value costs memory
 		for n > 0 && !utf8.RuneStart(v[n]) {
 			n--
 		}
 		v = v[:n]
 	}
 	v = strings.Join(strings.Fields(render.Clean(v)), " ")
-	if r := []rune(v); len(r) > maxFooter {
-		v = string(r[:maxFooter])
+	if r := []rune(v); len(r) > maxFrontValue {
+		v = string(r[:maxFrontValue])
 	}
 	return v
 }
 
-// maxFooter bounds each front matter value kept for the footer: the viewer
-// measures the footer on every redraw, and a hostile title can be
-// megabytes long.
-const maxFooter = 200
+// maxFrontValue bounds each front matter value kept, shown in the footer
+// (measured on every redraw of the viewer) and the exported page's title:
+// a hostile one can be megabytes long.
+const maxFrontValue = 200
 
 // centered places a slide in the middle of a cols × rows terminal: lines
 // are indented to center the render width, and a slide shorter than the

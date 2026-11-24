@@ -197,6 +197,7 @@ Output modes:
       --unsafe-html        with --html: keep raw HTML and every URL
   -f, --follow             live preview: re-render whenever the file changes
       --slides             present the document as slides
+      --notes              speaker notes of the slide on screen (another terminal)
 Themes and configuration:
       --list-themes        bundled and user themes (with color swatches)
       --theme-template T   print theme T as an editable file
@@ -269,15 +270,37 @@ Links to web pages and files open as in the viewer. With `-f`, the slides
 are re-rendered every time the file is saved.
 
 A `<!-- pause -->` line reveals a slide in steps: forward shows the next
-part, back hides it again, and the status bar counts the steps. Pauses go
-between blocks (outside lists and quotes); a list without blank lines
-between its items carries on after a pause without a gap when it keeps
-the same marker, so its items can appear one by one.
+part and back hides it again. Pauses go between blocks (outside lists and
+quotes); a list without blank lines between its items carries on after a
+pause without a gap when it keeps the same marker, so its items can
+appear one by one.
+
+The bottom line is a footer for the audience: the slide number on the right
+and, on the left, the `title` and `author` from the document's front
+matter. A `footer:` key there replaces that text (`footer: ""` leaves only
+the number), and `footer: false` (or `off`) hides the footer. A slide
+taller than the screen also shows how far it is scrolled.
+
+Speaker notes go in `<!-- notes: … -->` comments (Markdown, several lines
+if needed), which never show on the slide. Run `kmd --notes talk.md` in a
+second terminal: it shows the notes of the slide the presentation of the
+same file has on screen (notes are per slide, not per step), follows it
+as you move, names the next slide, and stays on the last slide shown when
+the presentation ends.
+The two talk through a small state file in a directory only you can open
+(`$XDG_RUNTIME_DIR/kmd`, or `kmd-<uid>` in the temporary directory).
 
 ```markdown
+---
+title: Release 2.0
+author: The kmd team
+---
+
 # Release 2.0
 
 Highlights of the quarter
+
+<!-- notes: Thank the team before the numbers. -->
 
 ---
 
@@ -551,6 +574,11 @@ threat model:
   the browser (their scripts would run). A click on a link that leaves kmd
   (web, mail, desktop apps) first selects it and shows its target; a second
   click or Enter opens it.
+- **Speaker notes**: `--slides` writes only the number of the slide on
+  screen, to a file in a directory that must belong to you and be closed to
+  everyone else (mode 0700; kmd refuses one that is not, or a symbolic
+  link), and removes it on exit; `--notes` reads at most 32 bytes from it
+  and otherwise reads the deck as `--slides` does.
 - **Terminal queries**: the only thing kmd ever asks the terminal is its
   background color, for `theme = auto` (see [Themes](#-themes)), on the
   controlling terminal and only from the foreground. The answer is read

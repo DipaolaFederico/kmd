@@ -2,27 +2,29 @@ package view
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 )
 
 func TestSlides(t *testing.T) {
 	calls := 0
-	deck := func(cols, rows int) ([]*Page, error) {
+	deck := func(cols, rows int) (*Deck, error) {
 		calls++
 		tall := make([]string, 50)
-		return []*Page{
+		return &Deck{Slides: []*Page{
 			{Lines: []string{"one", "[web]", "[doc]"}, Links: []render.Link{
 				{Href: "https://example.com", Spans: []render.Span{{Line: 1, Width: 5}}},
 				{Href: "file:///tmp/other.md", Spans: []render.Span{{Line: 2, Width: 5}}},
 			}},
 			{Lines: tall},
 			{Lines: []string{"three"}},
-		}, nil
+		}}, nil
 	}
 	var opened []string
 	m, err := newModel(Options{Slides: deck, Start: "deck.md", Open: func(s string) error { opened = append(opened, s); return nil }}, 60, 10)
@@ -30,7 +32,7 @@ func TestSlides(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := &harness{model: m}
-	if h.slide != 0 || h.page.Lines[0] != "one" || !strings.Contains(h.screen(), "slide 1/3") {
+	if h.slide != 0 || h.page.Lines[0] != "one" || !strings.Contains(h.screen(), "1 / 3") {
 		t.Fatalf("first slide: %d", h.slide)
 	}
 	h.keys("left")
@@ -75,17 +77,17 @@ func TestSlides(t *testing.T) {
 	if calls != 2 || h.slide != 1 || h.top != 3 {
 		t.Errorf("reload: calls %d slide %d top %d", calls, h.slide, h.top)
 	}
-	h.opt.Slides = func(int, int) ([]*Page, error) { return nil, errors.New("gone") }
+	h.opt.Slides = func(int, int) (*Deck, error) { return nil, errors.New("gone") }
 	h.reload()
 	if h.msg != "gone" || h.slide != 1 {
 		t.Errorf("reload error: %q", h.msg)
 	}
-	h.opt.Slides = func(int, int) ([]*Page, error) { return nil, nil }
+	h.opt.Slides = func(int, int) (*Deck, error) { return nil, nil }
 	h.reload()
 	if len(h.slides) != 1 || h.slide != 0 {
 		t.Errorf("no slides: %d", len(h.slides))
 	}
-	if _, err := newModel(Options{Slides: func(int, int) ([]*Page, error) { return nil, errors.New("x") }}, 60, 10); err == nil {
+	if _, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return nil, errors.New("x") }}, 60, 10); err == nil {
 		t.Error("first render error not reported")
 	}
 }
@@ -112,7 +114,7 @@ func TestSlidesRefuseFolders(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "pics.png", "README.md"), []byte("# x\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	m, err := newModel(Options{Slides: func(int, int) ([]*Page, error) { return []*Page{{Lines: []string{"a"}}}, nil }}, 60, 10)
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return &Deck{Slides: []*Page{{Lines: []string{"a"}}}}, nil }}, 60, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,15 +132,15 @@ func TestSlidesRefuseFolders(t *testing.T) {
 func TestSlideSteps(t *testing.T) {
 	tall := make([]string, 30)
 	tall[29] = "end"
-	deck := func(cols, rows int) ([]*Page, error) {
-		return []*Page{
+	deck := func(cols, rows int) (*Deck, error) {
+		return &Deck{Slides: []*Page{
 			{Lines: []string{"", "title", "", "[a]", "", "[b]"}, Steps: []int{2, 4},
 				Links:    []render.Link{{Href: "#a", Spans: []render.Span{{Line: 3, Width: 3}}}, {Href: "#b", Spans: []render.Span{{Line: 5, Width: 3}}}},
 				Anchors:  map[string]int{"title": 1, "b": 5},
 				Headings: []render.Heading{{Text: "title", Line: 1}, {Text: "b", Line: 5}},
 				Code:     []render.CodeBlock{{Start: 3, End: 3}, {Start: 5, End: 5}}},
 			{Lines: tall, Steps: []int{2}},
-		}, nil
+		}, Footer: "Talk · Ana"}, nil
 	}
 	m, err := newModel(Options{Slides: deck}, 60, 10)
 	if err != nil {
@@ -149,7 +151,7 @@ func TestSlideSteps(t *testing.T) {
 		return len(h.page.Lines) == lines && len(h.page.Links) == links && len(h.page.Anchors) == anchors &&
 			len(h.page.Headings) == headings && len(h.page.Code) == code
 	}
-	if !cut(2, 0, 1, 1, 0) || !strings.Contains(h.screen(), "slide 1/2 · step 1/3") {
+	if !cut(2, 0, 1, 1, 0) {
 		t.Fatalf("first step: %q", h.page.Lines)
 	}
 	h.keys("right")
@@ -157,7 +159,7 @@ func TestSlideSteps(t *testing.T) {
 		t.Errorf("second step: %d %q", h.step, h.page.Lines)
 	}
 	h.keys(" ")
-	if h.step != 2 || !cut(6, 2, 2, 2, 2) || !strings.Contains(h.screen(), "step 3/3") {
+	if h.step != 2 || !cut(6, 2, 2, 2, 2) {
 		t.Errorf("last step: %d", h.step)
 	}
 	h.keys("right") // next slide, at its first step
@@ -204,5 +206,122 @@ func TestSlideSteps(t *testing.T) {
 	h.reload()
 	if h.slide != 0 || h.step != 1 || len(h.page.Lines) != 4 {
 		t.Errorf("reload: %d/%d", h.slide, h.step)
+	}
+}
+
+func TestSlideFooter(t *testing.T) {
+	deck := &Deck{Slides: []*Page{{Lines: make([]string, 30)}, {Lines: []string{"b"}}}, Footer: "Talk · Ana"}
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return deck, nil }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	// for the audience: no key hints; the scroll position of a tall slide
+	if b := h.bottom(); !strings.HasPrefix(b, "Talk · Ana") || !strings.HasSuffix(b, "1 / 2  top") || strings.Contains(b, "quit") {
+		t.Errorf("footer: %q", b)
+	}
+	h.keys("right")
+	if b := h.bottom(); !strings.HasSuffix(b, " 2 / 2") {
+		t.Errorf("short slide: %q", b)
+	}
+	h.keys("right") // messages still show there
+	if b := h.bottom(); b != "last slide" {
+		t.Errorf("message: %q", b)
+	}
+	deck.NoFooter = true
+	h.reload()
+	h.msg = ""
+	if b := h.bottom(); b != "" {
+		t.Errorf("hidden footer: %q", b)
+	}
+	h.keys("/") // a prompt still shows
+	if b := h.bottom(); b != "/" {
+		t.Errorf("prompt without footer: %q", b)
+	}
+}
+
+func TestSlideHooks(t *testing.T) {
+	var shown []int
+	deck := &Deck{Slides: []*Page{{Lines: []string{"a"}, Steps: []int{0}}, {Lines: []string{"b"}}}}
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return deck, nil }, OnSlide: func(i int) { shown = append(shown, i) }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	h.keys("right", "right", "left")
+	if fmt.Sprint(shown) != "[0 0 1 0]" { // every slide shown, steps included
+		t.Errorf("OnSlide: %v", shown)
+	}
+}
+
+func TestChangedReloadsFromTop(t *testing.T) {
+	loads, changed := 0, false
+	load := func(string, int) (*Page, error) {
+		loads++
+		if loads > 2 {
+			return nil, errors.New("gone")
+		}
+		return &Page{Lines: make([]string, 50)}, nil
+	}
+	m, err := newModel(Options{Load: load, Changed: func() bool { return changed }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.top = 10
+	if m.reloadIfChanged() || loads != 1 {
+		t.Errorf("unchanged: loads %d", loads)
+	}
+	changed = true
+	if !m.reloadIfChanged() || loads != 2 || m.top != 0 {
+		t.Errorf("changed: loads %d top %d", loads, m.top)
+	}
+	if !m.reloadIfChanged() || m.msg != "gone" {
+		t.Errorf("load error: %q", m.msg)
+	}
+	if (&model{}).reloadIfChanged() {
+		t.Error("no Changed: refreshed")
+	}
+}
+
+func TestTicker(t *testing.T) {
+	m := &model{}
+	if c, stop := m.ticker(); c != nil {
+		stop()
+		t.Error("ticking with nothing to check")
+	}
+	changed := true
+	m = &model{opt: Options{Changed: func() bool { return changed }, Poll: time.Millisecond,
+		Load: func(string, int) (*Page, error) { return &Page{}, nil }}}
+	c, stop := m.ticker()
+	defer stop()
+	<-c
+	if !m.tick() {
+		t.Error("change not reported")
+	}
+	changed = false
+	if m.tick() {
+		t.Error("no change reported")
+	}
+}
+
+func TestTickLoadsOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deck.md")
+	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	m := &model{path: path, opt: Options{Watch: true, Changed: func() bool { return true },
+		Load: func(string, int) (*Page, error) { loads++; return &Page{}, nil }}}
+	m.page = &Page{}
+	m.poll()
+	if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !m.tick() || loads != 1 {
+		t.Errorf("file and slide changed: %d loads", loads)
+	}
+	m.opt.Changed = func() bool { return false }
+	if m.tick() || loads != 1 { // the file's new version was remembered
+		t.Errorf("nothing changed: %d loads", loads)
 	}
 }

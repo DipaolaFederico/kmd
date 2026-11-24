@@ -118,3 +118,13 @@ func TestIsPause(t *testing.T) {
 		}
 	}
 }
+
+func TestNotes(t *testing.T) {
+	src := "# Slide\n\n<!-- notes: say *hi* -->\n\ntext <!-- notes: inline, not a note -->\n\n<!--\nnotes:\nfirst\n\nsecond\n-->\n\n<!-- pause -->\n<!-- note: typo -->\n"
+	if got := Notes(Parse(src, GFM)); got != "say *hi*\n\nfirst\n\nsecond" {
+		t.Errorf("notes: %q", got)
+	}
+	if got := Notes(Parse("# none\n", GFM)); got != "" {
+		t.Errorf("no notes: %q", got)
+	}
+}

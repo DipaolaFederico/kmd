@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/view"
 )
 
@@ -52,7 +53,7 @@ func run(t *testing.T, mod func(*Env), args ...string) result {
 		Stdin:  strings.NewReader("# from stdin"),
 		Stdout: &out,
 		Stderr: &errOut,
-		Getenv: envMap(map[string]string{"HOME": home}),
+		Getenv: envMap(map[string]string{"HOME": home, "XDG_RUNTIME_DIR": t.TempDir()}),
 		Pager: func(c, _ string) error {
 			res.paged = c
 			return nil
@@ -857,10 +858,11 @@ func TestSlidesMode(t *testing.T) {
 	if r.code != 0 || got.Slides == nil || got.Start != p {
 		t.Fatalf("slides: %+v", r)
 	}
-	pages, err := got.Slides(100, 30)
-	if err != nil || len(pages) != 2 {
-		t.Fatalf("pages: %d %v", len(pages), err)
+	deck, err := got.Slides(100, 30)
+	if err != nil || len(deck.Slides) != 2 {
+		t.Fatalf("pages: %v %v", deck, err)
 	}
+	pages := deck.Slides
 	first := pages[0]
 	// centered: indented to the middle of a 100-column terminal, moved down
 	if !strings.HasPrefix(first.Lines[first.Headings[0].Line], strings.Repeat(" ", 5)) || first.Headings[0].Line < 5 {
@@ -877,14 +879,14 @@ func TestSlidesMode(t *testing.T) {
 		t.Errorf("second slide: %q", s)
 	}
 	// a terminal as wide as the text: nothing to center
-	if pages, _ := got.Slides(20, 3); !strings.HasPrefix(stripTest(pages[0].Lines[1]), "  ") || pages[0].Lines[0] != "" {
-		t.Errorf("narrow: %q", pages[0].Lines[:2])
+	if deck, _ := got.Slides(20, 3); !strings.HasPrefix(stripTest(deck.Slides[0].Lines[1]), "  ") || deck.Slides[0].Lines[0] != "" {
+		t.Errorf("narrow: %q", deck.Slides[0].Lines[:2])
 	}
 
 	if r := run(t, tty, "--slides", "-s", "two", p); r.code != 0 {
 		t.Errorf("section: %+v", r)
-	} else if pages, _ := got.Slides(80, 24); len(pages) != 1 {
-		t.Errorf("section slides: %d", len(pages))
+	} else if deck, _ := got.Slides(80, 24); len(deck.Slides) != 1 {
+		t.Errorf("section slides: %d", len(deck.Slides))
 	}
 	if r := run(t, nil, "--slides", p); r.code != 2 || !strings.Contains(r.errOut, "needs a terminal") {
 		t.Errorf("not a terminal: %+v", r)
@@ -919,19 +921,67 @@ func TestSlidePauses(t *testing.T) {
 	if r.code != 0 {
 		t.Fatalf("slides: %+v", r)
 	}
-	pages, err := got.Slides(100, 30)
-	if err != nil || len(pages) != 1 || len(pages[0].Steps) != 1 {
-		t.Fatalf("steps: %v %v", pages, err)
+	deck, err := got.Slides(100, 30)
+	if err != nil || len(deck.Slides) != 1 || len(deck.Slides[0].Steps) != 1 {
+		t.Fatalf("steps: %v %v", deck, err)
 	}
 	// the step ends after the title and moves down with the centered slide
-	page := pages[0]
+	page := deck.Slides[0]
 	shown := stripTest(strings.Join(page.Lines[:page.Steps[0]], "\n"))
 	if page.Steps[0] <= page.Headings[0].Line || strings.Contains(shown, "revealed") {
 		t.Errorf("first step: %q", shown)
 	}
-	top, _ := got.Slides(100, 3) // too short to move down
-	if page.Steps[0]-top[0].Steps[0] != page.Headings[0].Line-top[0].Headings[0].Line || page.Headings[0].Line == top[0].Headings[0].Line {
-		t.Errorf("step not moved with the slide: %d %d", page.Steps[0], top[0].Steps[0])
+	short, _ := got.Slides(100, 3) // too short to move down
+	top := short.Slides[0]
+	if page.Steps[0]-top.Steps[0] != page.Headings[0].Line-top.Headings[0].Line || page.Headings[0].Line == top.Headings[0].Line {
+		t.Errorf("step not moved with the slide: %d %d", page.Steps[0], top.Steps[0])
+	}
+}
+
+func TestDeckFooter(t *testing.T) {
+	long := strings.Repeat("x", 300)
+	for src, want := range map[string]string{
+		"# no front matter\n":                                     "",
+		"---\ntitle: Talk\nauthor: 'Ana'\n---\n# x\n":             "Talk · Ana",
+		"---\nauthor: Ana # me\ndate: 2026\n---\n":                "Ana",
+		"---\ntitle: \"A \x1b[31m\tB\"\nfooter: Conf 2026\n---\n": "Conf 2026",
+		"---\ntitle: \"A \x1b[31m\tB\"\n---\n":                    "A [31m B",
+		"---\ntitle: " + long + "\n---\n":                         long[:maxFooter],
+		"---\nfooter: false\n---\n":                               "<hidden>",
+		"---\nfooter: Off\n---\n":                                 "<hidden>",
+		"---\ntitle: \"A # b\" # note\n---\n":                     "A # b",
+		"---\ntitle: é" + strings.Repeat("é", 1<<20) + "\n---\n":  strings.Repeat("é", maxFooter),
+		"---\nfooter: \"\"\n---\n":                                "",
+	} {
+		front := ""
+		if c := md.Parse(src, md.GFM).FirstChild; c != nil && c.Type == md.FrontMatter {
+			front = c.Literal
+		}
+		text, hide := deckFooter(front)
+		if hide {
+			text = "<hidden>"
+		}
+		if text != want {
+			t.Errorf("%q: %q, want %q", src, text, want)
+		}
+	}
+	// the viewer gets it with the slides
+	p := writeFile(t, "deck.md", "---\ntitle: Talk\n---\n# One\n")
+	var got view.Options
+	run(t, func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 30
+		e.View = func(o view.Options) error { got = o; return nil }
+	}, "--slides", p)
+	if deck, err := got.Slides(100, 30); err != nil || deck.Footer != "Talk" {
+		t.Errorf("deck footer: %+v %v", deck, err)
+	}
+	// a section keeps the front matter's footer
+	run(t, func(e *Env) {
+		e.StdoutTTY, e.Cols, e.Rows = true, 100, 30
+		e.View = func(o view.Options) error { got = o; return nil }
+	}, "--slides", "-s", "one", p)
+	if deck, err := got.Slides(100, 30); err != nil || deck.Footer != "Talk" {
+		t.Errorf("section footer: %+v %v", deck, err)
 	}
 }
 
@@ -1029,7 +1079,7 @@ func TestBase(t *testing.T) {
 	if r := run(t, tty, "--slides", "--base", base); r.code != 0 || got.Slides == nil {
 		t.Fatalf("slides: %+v", r)
 	}
-	if pages, err := got.Slides(100, 30); err != nil || len(pages[0].Links) != 1 || pages[0].Links[0].Href != "https://example.com/docs/guide.md" {
+	if deck, err := got.Slides(100, 30); err != nil || len(deck.Slides[0].Links) != 1 || deck.Slides[0].Links[0].Href != "https://example.com/docs/guide.md" {
 		t.Errorf("slide links: %v", err)
 	}
 }

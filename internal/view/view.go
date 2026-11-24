@@ -29,6 +29,15 @@ type Page struct {
 	Steps []int
 }
 
+// Deck is a presentation rendered for one terminal size.
+type Deck struct {
+	Slides []*Page
+	// Footer is the text on the left of the bottom line, next to the slide
+	// number; NoFooter leaves that line empty.
+	Footer   string
+	NoFooter bool
+}
+
 // Loader renders the document at path for a terminal cols columns wide.
 // The empty path stands for the documents kmd was started with (which may
 // be several files or stdin).
@@ -63,9 +72,17 @@ type Options struct {
 	Copy func(text string) error
 
 	// Slides, when set, turns the viewer into a presentation: it renders
-	// the slides for a terminal cols × rows (Load is then only used to
+	// the deck for a terminal cols × rows (Load is then only used to
 	// check that Start can be read).
-	Slides func(cols, rows int) ([]*Page, error)
+	Slides func(cols, rows int) (*Deck, error)
+	// OnSlide, when set, is told the slide on screen every time a slide is
+	// shown: on each step and reload too, so the same one comes repeated
+	// (the speaker notes follow it).
+	OnSlide func(slide int)
+	// Changed, when set, is asked every Poll whether the page must be
+	// loaded again with Load, from its top (the notes of another slide);
+	// for documents, not with Slides.
+	Changed func() bool
 
 	// Root is the folder the file picker (o, S) lists when the page on
 	// screen is a document ("" = none); a folder page lists itself.
@@ -106,6 +123,7 @@ type model struct {
 	copied int // code block copied last (c), -1 = none
 
 	slides []*Page // presentation mode
+	deck   *Deck   // on screen; slides is deck.Slides, kept as the mode flag
 	slide  int
 	step   int // of the slide on screen; len(Steps) when fully shown
 
@@ -158,6 +176,50 @@ func (m *model) poll() bool {
 	m.reload()
 	m.top = top
 	m.scroll(0)
+	return true
+}
+
+// ticker returns the channel that paces the checks for changes (Watch,
+// Changed), nil when there are none, and the function that stops it.
+func (m *model) ticker() (<-chan time.Time, func()) {
+	if !m.opt.Watch && m.opt.Changed == nil {
+		return nil, func() {}
+	}
+	poll := m.opt.Poll
+	if poll <= 0 {
+		poll = 250 * time.Millisecond
+	}
+	if m.opt.Watch {
+		m.poll() // remember the current version
+	}
+	t := time.NewTicker(poll)
+	return t.C, t.Stop
+}
+
+// tick checks for changes; true means the screen must be drawn again.
+func (m *model) tick() bool {
+	if !m.reloadIfChanged() {
+		return m.opt.Watch && m.poll()
+	}
+	if m.opt.Watch { // just loaded: only remember the file's version
+		m.watched = ""
+		m.poll()
+	}
+	return true
+}
+
+// reloadIfChanged loads the page again from its top if Options.Changed
+// says so.
+func (m *model) reloadIfChanged() bool {
+	if m.opt.Changed == nil || !m.opt.Changed() {
+		return false
+	}
+	p, err := m.opt.Load(m.path, m.cols)
+	if err != nil {
+		m.msg = errText(err)
+		return true
+	}
+	m.setPage(p)
 	return true
 }
 
@@ -642,9 +704,13 @@ func stripEscapes(s string) string {
 // (link targets can be megabytes long).
 func clip(s string, n int) string {
 	s = render.Clean(s)
-	keep, w := len(s), 0 // keep: where to cut so the ellipsis fits
+	keep, w, last := len(s), 0, 0 // keep: where to cut so the ellipsis fits
 	for i, r := range s {
 		rw := styled.RuneWidth(r)
+		if r == 0xfe0f && last == 1 { // widens its base, as styled.Width counts it
+			rw = 1
+		}
+		last = rw
 		if w+rw > n-1 && keep == len(s) {
 			keep = i
 		}

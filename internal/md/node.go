@@ -295,18 +295,46 @@ func Section(doc *Node, match func(heading *Node) bool) *Node {
 	return out
 }
 
-// IsPause reports whether n is a <!-- pause --> comment on its own, which
-// reveals the rest of a slide in a later step.
-func IsPause(n *Node) bool {
+// comment returns the text inside a top-level <!-- … --> block, trimmed
+// (ok false for any other node). Text after the closing --> is not part
+// of it.
+func comment(n *Node) (text string, ok bool) {
 	if n.Type != HTMLBlock {
-		return false
+		return "", false
 	}
 	s, ok := strings.CutPrefix(strings.TrimSpace(n.Literal), "<!--")
 	if !ok {
-		return false
+		return "", false
 	}
-	s, ok = strings.CutSuffix(s, "-->")
-	return ok && strings.TrimSpace(s) == "pause"
+	if end := strings.Index(s, "-->"); end >= 0 {
+		s = s[:end]
+	}
+	return strings.TrimSpace(s), true
+}
+
+// IsPause reports whether n is a <!-- pause --> comment on its own, which
+// reveals the rest of a slide in a later step.
+func IsPause(n *Node) bool {
+	s, ok := comment(n)
+	return ok && s == "pause" && strings.HasSuffix(strings.TrimSpace(n.Literal), "-->")
+}
+
+// Notes returns the speaker notes of a slide, as Markdown: the text of its
+// top-level <!-- notes: … --> comments, in order, a blank line apart.
+func Notes(slide *Node) string {
+	var b strings.Builder
+	for c := slide.FirstChild; c != nil; c = c.Next {
+		s, _ := comment(c) // "" for other blocks
+		s, ok := strings.CutPrefix(s, "notes:")
+		if !ok {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString(strings.TrimSpace(s))
+	}
+	return b.String()
 }
 
 // Slides splits doc into slides, moving its blocks into one new document

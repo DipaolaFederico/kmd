@@ -9,6 +9,17 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Added
+
+- `--html` and `--slides --html` highlight code blocks and draw mermaid and
+  Graphviz diagrams as in the terminal, in the theme's colors, instead of
+  showing their source.
+
+### Fixed
+
+- Printed HTML exports no longer show a scroll bar under code blocks, and
+  tabs in code take four columns.
+
 ## [0.16.0] - 2026-11-24
 
 ### Added

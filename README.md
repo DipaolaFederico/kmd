@@ -155,7 +155,7 @@ kmd --view short.md           # open the viewer even if the document fits
 kmd -P README.md | less -R    # print without the viewer
 kmd --toc CHANGELOG.md        # table of contents only
 kmd -s install README.md      # only the section under the "Installation" heading
-kmd --html doc.md > doc.html  # export a standalone HTML page
+kmd --html doc.md > doc.html  # export a standalone HTML page (code highlighted, diagrams drawn)
 kmd --slides talk.md          # present: one slide per "---" (or per # / ## heading)
 kmd --slides --html talk.md > talk.html  # the deck as a page: print it to PDF
 kmd -t catppuccin-mocha doc.md
@@ -567,7 +567,9 @@ threat model:
 - **`--html` export**: safe by default, like cmark: raw HTML is omitted and
   `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs are dropped,
   and so are control characters; the page carries a restrictive
-  Content-Security-Policy (no scripts, forms or `<base>`). `--unsafe-html`
+  Content-Security-Policy (no scripts, forms or `<base>`); highlighted code
+  (the first 1 MiB per document) and diagrams are drawn with inline styles,
+  from escaped text. `--unsafe-html`
   keeps everything (trusted input only).
 - **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks (a notice is shown
   beyond), container nesting ≤ 100, inline nesting ≤ 100, tables ≤ 1,000

@@ -82,7 +82,7 @@ func exportSlides(env Env, o options, s settings) error {
 	if err != nil {
 		return err
 	}
-	hopt := htmlOptions(o, s.docOptions(name, base).BaseURL)
+	hopt := htmlOptions(o, s.docOptions(name, base), render.SlideDiagramWidth)
 	parts := make([]string, len(slides))
 	for i, sl := range slides {
 		md.StripDirectives(sl)

@@ -277,3 +277,18 @@ func TestSecurityLimits(t *testing.T) {
 		t.Error("block budget notice missing")
 	}
 }
+
+func TestHTMLCodeHook(t *testing.T) {
+	doc := Parse("```go\nx <- 1\n```\n\n```\nplain <b>\n```\n", GFM)
+	code := func(info, text string) (string, string, bool) {
+		if info != "go" {
+			return "", "", false
+		}
+		return "<i>" + strings.TrimSpace(text) + "</i>", "drawn", true
+	}
+	got := HTML(doc, HTMLOptions{Code: code})
+	if !strings.Contains(got, `<pre class="drawn"><code class="language-go"><i>x <- 1</i></code></pre>`) ||
+		!strings.Contains(got, "<pre><code>plain &lt;b&gt;\n</code></pre>") {
+		t.Errorf("hook: %s", got)
+	}
+}

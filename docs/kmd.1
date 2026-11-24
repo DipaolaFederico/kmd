@@ -91,7 +91,10 @@ the next heading of the same or a higher level. Works with \fB\-\-toc\fR,
 Export a standalone HTML page using the selected theme colors. Documents are
 treated as untrusted: raw HTML is omitted, \fBjavascript:\fR, \fBvbscript:\fR,
 \fBfile:\fR and non-image \fBdata:\fR URLs are dropped, and the page carries a
-restrictive Content-Security-Policy. With \fB\-\-slides\fR, export the deck
+restrictive Content-Security-Policy. Code blocks are highlighted (the first
+1 MiB of code of a document) and mermaid and Graphviz diagrams drawn as in
+the terminal, with inline styles and no scripts (\fB\-\-no\-diagrams\fR
+keeps their source). With \fB\-\-slides\fR, export the deck
 instead: one 16:9 slide per section with its footer, one per page when
 printed, so the browser's \fBPrint to PDF\fR makes a PDF deck (pauses
 show the whole slide; notes are left out, even with \fB\-\-unsafe\-html\fR;

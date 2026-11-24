@@ -669,7 +669,7 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 		opts := s.docOptions(name, base)
 		switch {
 		case o.html:
-			htmlParts = append(htmlParts, md.HTML(doc, htmlOptions(o, opts.BaseURL)))
+			htmlParts = append(htmlParts, md.HTML(doc, htmlOptions(o, opts, render.HTMLDiagramWidth)))
 			if title == "" {
 				title = docTitle(doc, name)
 			}
@@ -701,10 +701,17 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	return res
 }
 
-// htmlOptions are the options of the HTML export: safe unless the user
-// asked for --unsafe-html.
-func htmlOptions(o options, base *url.URL) md.HTMLOptions {
-	return md.HTMLOptions{TagFilter: true, Unsafe: o.unsafeHTML, BaseURL: base}
+// htmlOptions are the options of the HTML export of one document (or one
+// deck) rendered with ro: safe unless the user asked for --unsafe-html, code
+// highlighted and diagrams drawn width columns wide. Code carries the
+// document's budgets: make new options for each document.
+func htmlOptions(o options, ro render.Options, width int) md.HTMLOptions {
+	return md.HTMLOptions{
+		TagFilter: true,
+		Unsafe:    o.unsafeHTML,
+		BaseURL:   ro.BaseURL,
+		Code:      render.HTMLCode(ro, width),
+	}
 }
 
 // addNav appends a document's links and anchors, shifted to line offset.

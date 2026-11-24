@@ -19,6 +19,12 @@ type HTMLOptions struct {
 	// resolve against (see ResolveLink). Images are left as written: a
 	// browser would download them.
 	BaseURL *url.URL
+	// Code, when set, may supply the content of a code block's <code>
+	// element as HTML (highlighted, a diagram drawn as text), given its
+	// info string and text, and a class for its <pre> ("" for none); ok
+	// false keeps the escaped text. What it returns is written as is: it
+	// must be safe HTML and a safe class name.
+	Code func(info, text string) (html, class string, ok bool)
 }
 
 // MaxURL is the longest link target kmd resolves or emits as a hyperlink:
@@ -66,6 +72,31 @@ type htmlWriter struct {
 	opt     HTMLOptions
 	disable int // >0 while rendering image alt text
 	doc     *Node
+}
+
+// codeBlock writes a code block: its text escaped, or the HTML that
+// HTMLOptions.Code gives for it.
+func (w *htmlWriter) codeBlock(n *Node) {
+	body, class, ok := "", "", false
+	if w.opt.Code != nil {
+		body, class, ok = w.opt.Code(n.Info, n.Literal)
+	}
+	if !ok {
+		body, class = esc(n.Literal), ""
+	}
+	w.cr()
+	w.lit("<pre")
+	if class != "" {
+		w.lit(` class="` + class + `"`)
+	}
+	w.lit("><code")
+	if f := strings.Fields(n.Info); len(f) > 0 {
+		w.lit(` class="language-` + esc(f[0]) + `"`)
+	}
+	w.lit(">")
+	w.lit(body) // not concatenated: it can be megabytes
+	w.lit("</code></pre>")
+	w.cr()
 }
 
 // HTML renders a document as HTML in the reference implementation's format.
@@ -262,13 +293,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.lit("</li>")
 		w.cr()
 	case CodeBlock:
-		w.cr()
-		w.lit("<pre><code")
-		if f := strings.Fields(n.Info); len(f) > 0 {
-			w.lit(` class="language-` + esc(f[0]) + `"`)
-		}
-		w.lit(">" + esc(n.Literal) + "</code></pre>")
-		w.cr()
+		w.codeBlock(n)
 	case MathBlock:
 		w.cr()
 		w.lit(`<div class="math math-display">` + esc(n.Literal) + "</div>")

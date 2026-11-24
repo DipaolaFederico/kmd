@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"html"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/termimg"
@@ -98,5 +101,29 @@ func TestExportSlides(t *testing.T) {
 	}
 	if r := run(t, nil, "--slides", "--html", deck+".missing"); r.code != 1 {
 		t.Errorf("missing: %+v", r)
+	}
+}
+
+func TestExportHighlightsAndDraws(t *testing.T) {
+	deck := writeFile(t, "deck.md", "# Code\n\n```go\nfunc f() {}\n```\n\n---\n\n## Flow\n\n```mermaid\nflowchart LR\n  A[start] --> B[end]\n```\n")
+	for _, args := range [][]string{{"--slides", "--html", deck}, {"--html", deck}} {
+		r := run(t, nil, args...)
+		if r.code != 0 || !strings.Contains(r.out, `<code class="language-go"><span style=`) ||
+			strings.Contains(r.out, "flowchart LR") || !strings.Contains(r.out, `<pre class="diagram">`) {
+			t.Errorf("%v:\n%s", args, r.out)
+		}
+	}
+	// a slide's diagram is laid out to fit it
+	wide := writeFile(t, "wide.md", "```mermaid\nflowchart LR\n"+strings.Repeat("  A --> B[a long label number one]\n  B --> C[another long label]\n  C --> D[and a third long one]\n", 1)+"```\n")
+	r := run(t, nil, "--slides", "--html", wide)
+	pre := r.out[strings.Index(r.out, `<pre class="diagram">`):]
+	pre = regexp.MustCompile(`<[^>]*>`).ReplaceAllString(pre[:strings.Index(pre, "</pre>")], "")
+	for _, l := range strings.Split(html.UnescapeString(pre), "\n") {
+		if n := utf8.RuneCountInString(l); n > render.SlideDiagramWidth {
+			t.Errorf("diagram line of %d columns: %q", n, l)
+		}
+	}
+	if r := run(t, nil, "--html", "--no-diagrams", deck); !strings.Contains(r.out, "flowchart") {
+		t.Error("--no-diagrams drew the diagram")
 	}
 }

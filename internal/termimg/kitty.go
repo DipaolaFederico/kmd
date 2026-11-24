@@ -49,7 +49,7 @@ func renderKitty(img *Image, l layout) (Frame, error) {
 
 	lines := make([]string, l.rows)
 	lines[0] = kittySequence(string(ctrl), payload)
-	return Frame{Lines: lines, Cols: l.cols}, nil
+	return Frame{Lines: lines, Cols: l.cols, Rows: l.rows}, nil
 }
 
 // opaque reports whether every alpha byte of straight RGBA pixels is 0xff.

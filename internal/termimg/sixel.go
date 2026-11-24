@@ -25,7 +25,10 @@ func renderSixel(img *Image, l layout) (Frame, error) {
 		return Frame{}, err
 	}
 	m := resize(src, l.pxW, l.pxH)
-	return Frame{Lines: []string{string(encodeSixel(m))}, Cols: l.cols}, nil
+	// sixel paints whole bands of 6 pixels: the last one may reach a row
+	// further than the image
+	rows := max(l.rows, ((l.pxH+5)/6*6+l.cellH-1)/l.cellH)
+	return Frame{Lines: []string{string(encodeSixel(m))}, Cols: l.cols, Rows: rows}, nil
 }
 
 // quantLUT maps a channel value to a cube level for each dither threshold:

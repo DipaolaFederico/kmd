@@ -23,5 +23,5 @@ func renderITerm2(img *Image, l layout) Frame {
 	_, _ = enc.Write(img.data) // strings.Builder never fails
 	_ = enc.Close()
 	b.WriteByte('\a')
-	return Frame{Lines: []string{b.String()}, Cols: l.cols}
+	return Frame{Lines: []string{b.String()}, Cols: l.cols, Rows: l.rows}
 }

@@ -24,6 +24,9 @@ type Page struct {
 	Headings []render.Heading // the outline, in document order
 	Code     []render.CodeBlock
 
+	// Images are graphics images to draw over blank rows of Lines (slides).
+	Images []render.Placement
+
 	// Steps holds, for a slide revealed bit by bit (<!-- pause -->), the
 	// number of Lines shown at each step but the last, which shows all.
 	Steps []int
@@ -75,6 +78,9 @@ type Options struct {
 	// the deck for a terminal cols × rows (Load is then only used to
 	// check that Start can be read).
 	Slides func(cols, rows int) (*Deck, error)
+	// ClearImages removes the graphics images on screen when clearing the
+	// text does not (kitty).
+	ClearImages string
 	// OnSlide, when set, is told the slide on screen every time a slide is
 	// shown: on each step and reload too, so the same one comes repeated
 	// (the speaker notes follow it).
@@ -121,6 +127,8 @@ type model struct {
 	quit bool
 
 	copied int // code block copied last (c), -1 = none
+
+	drawn drawnImages // the graphics images on screen
 
 	slides []*Page // presentation mode
 	deck   *Deck   // on screen; slides is deck.Slides, kept as the mode flag

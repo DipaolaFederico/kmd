@@ -164,6 +164,7 @@ func (m *model) edit() {
 		if err := m.opt.Edit(m.path); err != nil {
 			m.msg = errText(err)
 		}
+		m.drawn = drawnImages{} // the editor had the screen: draw the images again
 		m.reload()
 	}
 }

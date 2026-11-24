@@ -86,6 +86,11 @@ func (p *Page) upTo(n int) *Page {
 			q.Code = append(q.Code, c)
 		}
 	}
+	for _, img := range p.Images {
+		if img.Line < n {
+			q.Images = append(q.Images, img)
+		}
+	}
 	return q
 }
 

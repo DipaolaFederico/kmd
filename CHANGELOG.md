@@ -22,6 +22,10 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   `--slides` presentation of the same file has on screen, and the title of
   the next one, following it as it moves. Notes go in
   `<!-- notes: … -->` comments, which never show on the slide.
+- `--slides` draws images with the terminal's graphics protocol (kitty,
+  iTerm2, sixel) instead of Unicode blocks, at most as tall as the screen
+  and 16 MiB of images per slide. Sixel needs a terminal that reports its
+  cell size.
 
 ### Fixed
 

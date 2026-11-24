@@ -115,6 +115,10 @@ taller than the screen. A \fB<!\-\- pause \-\->\fR line between blocks
 reveals a slide in steps: going forward shows the next part and going back
 hides it, and a list without blank lines between its items carries on
 after a pause without a gap when it keeps the same marker.
+Images on a slide are drawn with the terminal's graphics protocol
+(\fB\-\-images\fR; sixel only when the terminal reports its cell size), at
+most as tall as the screen and within the usual image limits; one that
+does not fit whole on the screen is not drawn until it does.
 The bottom line is a footer with the slide number and the \fBtitle\fR and
 \fBauthor\fR from the front matter; a \fBfooter:\fR key there sets its
 text (empty: only the number), and \fBfooter: false\fR (or \fBoff\fR) hides it.
@@ -168,7 +172,8 @@ Links to Markdown files open in the viewer itself, at the right heading when
 the link has a \fB#anchor\fR, and \fBBackspace\fR goes back; web links,
 \fBmailto:\fR links and local images or PDFs are handed to the desktop
 (\fBxdg\-open\fR, or \fBopen\fR on macOS). Images are drawn with Unicode
-blocks in the viewer, since terminal graphics cannot scroll with the text.
+blocks in the viewer, since terminal graphics cannot scroll with the text
+(except in slides, see \fB\-\-slides\fR).
 .TP
 .B Tab\fR, \fBShift\-Tab
 Select the next or previous link (or click a link with the mouse; a link

@@ -256,7 +256,8 @@ or when none is installed, it asks the terminal through OSC 52, which kitty,
 WezTerm, foot, Alacritty, iTerm2, Windows Terminal and tmux support.
 
 Inside the viewer, images are drawn with Unicode blocks, since terminal
-graphics protocols cannot scroll with the text. To use an external pager
+graphics protocols cannot scroll with the text (slides can: see
+[Presentations](#presentations)). To use an external pager
 instead, set `pager = less -R` in the configuration or `KMD_PAGER`.
 `mouse = off` leaves the mouse to the terminal for text selection.
 
@@ -274,6 +275,13 @@ part and back hides it again. Pauses go between blocks (outside lists and
 quotes); a list without blank lines between its items carries on after a
 pause without a gap when it keeps the same marker, so its items can
 appear one by one.
+
+Images on a slide are drawn with the terminal's graphics protocol (kitty,
+iTerm2 or sixel, as `--images` chooses; sixel needs a terminal that reports
+its cell size, blocks otherwise), at most as tall as the screen
+(`image-rows` in the configuration lowers that), within the per-document image limits
+(see [Security](#-security)) and at most 16 MiB of them per slide. A picture is never cut: on a slide taller
+than the screen it shows once it fits whole.
 
 The bottom line is a footer for the audience: the slide number on the right
 and, on the left, the `title` and `author` from the document's front

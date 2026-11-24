@@ -436,3 +436,17 @@ func TestRenderConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestFrameRowsAndClear(t *testing.T) {
+	img := mustLoadBytes(t, encodePNG(t, gradient(64, 64)))
+	cell := Cell{W: 8, H: 16}
+	for _, p := range []Protocol{Blocks, Kitty, ITerm2, Sixel} {
+		f, err := Render(img, p, 10, 4, cell)
+		if err != nil || f.Rows < 1 || f.Rows > 5 || (p == Blocks || p == Kitty) && f.Rows != len(f.Lines) {
+			t.Errorf("%v: rows %d lines %d %v", p, f.Rows, len(f.Lines), err)
+		}
+	}
+	if Clear(Kitty) == "" || Clear(Sixel) != "" || Clear(ITerm2) != "" {
+		t.Error("clear sequences")
+	}
+}

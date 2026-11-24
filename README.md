@@ -269,12 +269,23 @@ Links to web pages and files open as in the viewer. With `-f`, the slides
 are re-rendered every time the file is saved.
 
 A `<!-- pause -->` line reveals a slide in steps: forward shows the next
-part, back hides it again, and the status bar counts the steps. Pauses go
-between blocks (outside lists and quotes); a list without blank lines
-between its items carries on after a pause without a gap when it keeps
-the same marker, so its items can appear one by one.
+part and back hides it again. Pauses go between blocks (outside lists and
+quotes); a list without blank lines between its items carries on after a
+pause without a gap when it keeps the same marker, so its items can
+appear one by one.
+
+The bottom line is a footer for the audience: the slide number on the right
+and, on the left, the `title` and `author` from the document's front
+matter. A `footer:` key there replaces that text (`footer: ""` leaves only
+the number), and `footer: false` (or `off`) hides the footer. A slide
+taller than the screen also shows how far it is scrolled.
 
 ```markdown
+---
+title: Release 2.0
+author: The kmd team
+---
+
 # Release 2.0
 
 Highlights of the quarter

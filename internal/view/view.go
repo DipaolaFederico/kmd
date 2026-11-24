@@ -29,6 +29,15 @@ type Page struct {
 	Steps []int
 }
 
+// Deck is a presentation rendered for one terminal size.
+type Deck struct {
+	Slides []*Page
+	// Footer is the text on the left of the bottom line, next to the slide
+	// number; NoFooter leaves that line empty.
+	Footer   string
+	NoFooter bool
+}
+
 // Loader renders the document at path for a terminal cols columns wide.
 // The empty path stands for the documents kmd was started with (which may
 // be several files or stdin).
@@ -63,9 +72,9 @@ type Options struct {
 	Copy func(text string) error
 
 	// Slides, when set, turns the viewer into a presentation: it renders
-	// the slides for a terminal cols × rows (Load is then only used to
+	// the deck for a terminal cols × rows (Load is then only used to
 	// check that Start can be read).
-	Slides func(cols, rows int) ([]*Page, error)
+	Slides func(cols, rows int) (*Deck, error)
 
 	// Root is the folder the file picker (o, S) lists when the page on
 	// screen is a document ("" = none); a folder page lists itself.
@@ -106,6 +115,7 @@ type model struct {
 	copied int // code block copied last (c), -1 = none
 
 	slides []*Page // presentation mode
+	deck   *Deck   // on screen; slides is deck.Slides, kept as the mode flag
 	slide  int
 	step   int // of the slide on screen; len(Steps) when fully shown
 
@@ -642,9 +652,13 @@ func stripEscapes(s string) string {
 // (link targets can be megabytes long).
 func clip(s string, n int) string {
 	s = render.Clean(s)
-	keep, w := len(s), 0 // keep: where to cut so the ellipsis fits
+	keep, w, last := len(s), 0, 0 // keep: where to cut so the ellipsis fits
 	for i, r := range s {
 		rw := styled.RuneWidth(r)
+		if r == 0xfe0f && last == 1 { // widens its base, as styled.Width counts it
+			rw = 1
+		}
+		last = rw
 		if w+rw > n-1 && keep == len(s) {
 			keep = i
 		}

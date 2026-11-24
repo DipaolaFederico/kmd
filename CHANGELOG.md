@@ -12,10 +12,17 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 ### Added
 
 - `--slides` reveals a slide in steps at every `<!-- pause -->` line:
-  forward shows the next part, back hides it, and the status bar shows the
-  step. A list without blank lines between its items carries on after a
-  pause without a gap when it keeps the same marker, so its items can
-  appear one at a time.
+  forward shows the next part and back hides it. A list without blank
+  lines between its items carries on after a pause without a gap when it
+  keeps the same marker, so its items can appear one at a time.
+- `--slides` shows a footer instead of the status bar: the slide number and
+  the `title` and `author` from the front matter. `footer:` in the front
+  matter sets its text and `footer: false` (or `off`) hides it.
+
+### Fixed
+
+- The viewer's bottom line no longer overflows the screen when it shows
+  emoji followed by a variation selector (in a link target or a footer).
 
 ## [0.14.0] - 2026-11-23
 

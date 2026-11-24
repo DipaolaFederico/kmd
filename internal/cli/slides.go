@@ -1,11 +1,13 @@
 package cli
 
 import (
+	"cmp"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/render"
+	"github.com/DipaolaFederico/kmd/internal/termimg"
 	"github.com/DipaolaFederico/kmd/internal/view"
 )
 
@@ -20,10 +22,7 @@ func runSlides(env Env, o options, s settings) error {
 	in := &stdinCache{}
 	name := o.files[0]
 	slides := func(cols, rows int) (*view.Deck, error) {
-		vs := viewerSettings(s, max(cols, 1))
-		if s.fixedWidth == 0 {
-			vs.opts.Width = min(vs.opts.Width, slideWidth) // centered on wide screens
-		}
+		vs := slideSettings(s, cols, rows)
 		parts, front, base, err := readDeck(env, name, o.section, vs, in)
 		if err != nil {
 			return nil, err
@@ -38,7 +37,7 @@ func runSlides(env Env, o options, s settings) error {
 		for _, p := range parts {
 			r := render.Render(p, vs.opts)
 			page := renderedPage(r)
-			page.Steps = r.Pauses
+			page.Steps, page.Images = r.Pauses, r.Images
 			deck.Slides = append(deck.Slides, centered(page, cols, rows, vs.opts.Width))
 		}
 		return deck, nil
@@ -65,12 +64,39 @@ func runSlides(env Env, o options, s settings) error {
 	}
 	sel, match, bar := render.ViewerStyles(s.opts.Theme, s.opts.Color, s.opts.TrueColor)
 	opt := view.Options{Slides: slides, Start: start, Mouse: s.mouse, Watch: o.follow, Poll: env.Poll,
-		Select: sel, Match: match, Bar: bar}
+		Select: sel, Match: match, Bar: bar, ClearImages: termimg.Clear(slideImages(s))}
 	defer publishSlides(env, name, &opt)()
 	if env.View != nil {
 		return env.View(opt)
 	}
 	return view.Run(opt)
+}
+
+// slideSettings are the render settings of slides on a cols × rows
+// terminal: the viewer's, at most slideWidth wide, and with terminal
+// graphics drawn as such, since a slide does not scroll under them — the
+// viewer draws them over the page (Placements). Sixel needs the real cell
+// size to know the rows an image covers; without it, images are blocks.
+func slideSettings(s settings, cols, rows int) settings {
+	vs := viewerSettings(s, max(cols, 1))
+	if s.fixedWidth == 0 {
+		vs.opts.Width = min(vs.opts.Width, slideWidth) // centered on wide screens
+	}
+	vs.opts.Images = slideImages(s)
+	vs.opts.Placements = true
+	// an image fits on the screen: below the blank line slides start with
+	// and above the footer
+	vs.opts.ImageRows = min(cmp.Or(vs.opts.ImageRows, render.DefaultImageRows), max(rows-2, 1))
+	return vs
+}
+
+// slideImages is how slides draw images: as the user chose, except sixel
+// without the real cell size, as blocks.
+func slideImages(s settings) termimg.Protocol {
+	if s.opts.Images == termimg.Sixel && (s.opts.Cell.W <= 0 || s.opts.Cell.H <= 0) {
+		return termimg.Blocks
+	}
+	return s.opts.Images
 }
 
 // readDeck reads the deck at name and splits it into slides, the same way
@@ -202,6 +228,10 @@ func centered(p *view.Page, cols, rows, width int) *view.Page {
 	}
 	for i := range p.Steps {
 		p.Steps[i] += top
+	}
+	for i := range p.Images {
+		p.Images[i].Line += top
+		p.Images[i].Col += left
 	}
 	return p
 }

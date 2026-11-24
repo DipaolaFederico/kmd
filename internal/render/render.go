@@ -19,7 +19,7 @@ type Options struct {
 
 	Images    termimg.Protocol // how to draw images (None: alt text only)
 	Cell      termimg.Cell     // terminal cell size in pixels (0 = unknown)
-	ImageRows int              // maximum image height in rows (0 = 20)
+	ImageRows int              // maximum image height in rows (0 = DefaultImageRows)
 	BaseDir   string           // directory relative image paths resolve against
 
 	// BaseURL, when set, is the absolute http(s) URL relative links
@@ -41,6 +41,12 @@ type Options struct {
 	// Budget, when set, is shared by several Render calls that make up
 	// one document (the slides of a presentation); nil: a new one.
 	Budget *Budget
+
+	// Placements, with Navigate, leaves graphics images (kitty, iTerm2,
+	// sixel) out of Text: their rows stay blank and Result.Images says
+	// where to draw them, so that the viewer can draw them over the page
+	// and leave them alone while the text around them is drawn again.
+	Placements bool
 
 	// Pauses makes a top-level <!-- pause --> comment split the document
 	// into steps (a slide revealed bit by bit): Result.Pauses gets the
@@ -80,9 +86,18 @@ type Result struct {
 	Anchors  map[string]int
 	Headings []Heading   // top-level headings in order (Navigate)
 	Code     []CodeBlock // code blocks in order (Navigate)
+	// Images are the graphics images left out of Text (Placements).
+	Images []Placement
 	// Pauses holds, with Options.Pauses, the number of lines of Text
 	// shown at each step but the last, which shows all of it; increasing.
 	Pauses []int
+}
+
+// Placement is a graphics image to draw at Line, Col of Result.Text, over
+// Rows blank rows: Seq, with the cursor there, draws it.
+type Placement struct {
+	Line, Col, Rows int
+	Seq             string
 }
 
 // Heading is a top-level heading of the rendered document.
@@ -94,6 +109,9 @@ type Heading struct {
 
 // maxHeadings bounds the outline kept for the viewer.
 const maxHeadings = 10000
+
+// DefaultImageRows is the image height limit when Options.ImageRows is 0.
+const DefaultImageRows = 20
 
 const margin = "  "
 
@@ -109,6 +127,7 @@ type renderer struct {
 	graphics bool
 
 	*Budget
+	placed int // bytes of the images placed apart (Placements)
 
 	links  *nav   // link registry (Navigate)
 	absDir string // absolute BaseDir, resolved once for href
@@ -123,6 +142,9 @@ const (
 	// image shown at many sizes (nested quotes, list depths) is scaled from
 	// its full resolution each time. Five of the largest accepted images.
 	maxImagePixels = 200_000_000
+	// maxPlacedBytes bounds the placed images of one Render (a slide): the
+	// viewer sends them again whenever the screen under them changes.
+	maxPlacedBytes = 16 << 20
 	maxSpecials    = 100   // diagrams and display formulas per document
 	maxInlineMath  = 10000 // inline formulas rendered per document
 )
@@ -218,9 +240,11 @@ func Render(doc *md.Node, o Options) Result {
 	return res
 }
 
-// fill sets the code blocks and links of res to those that were painted:
-// a block or a link can be laid out and then dropped.
+// fill sets the navigation data of res: the placed images, and the code
+// blocks and links that were painted (a block or a link can be laid out
+// and then dropped).
 func (n *nav) fill(res *Result) {
+	res.Images = n.images // placed while painting: never dropped
 	for _, c := range n.code {
 		if c.Start >= 0 {
 			res.Code = append(res.Code, c)

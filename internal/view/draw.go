@@ -3,9 +3,11 @@ package view
 import (
 	"net/url"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
+	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
@@ -38,12 +40,31 @@ func (m *model) draw(b *strings.Builder) {
 // link.
 func (m *model) drawPage(b *strings.Builder) {
 	h := m.viewH()
+	now := drawnImages{top: m.top, cols: m.cols, rows: m.rows, imgs: m.shownImages()}
+	keep := len(now.imgs) > 0 && now.equal(m.drawn) // the images on screen are right
+	imgs := now.imgs
 	for y := range h {
+		i := m.top + y
+		if keep && covered(imgs, i) {
+			continue // clearing the row would erase a sixel or iTerm2 image
+		}
 		moveTo(b, y, 0)
-		if i := m.top + y; i < len(m.page.Lines) {
+		if i < len(m.page.Lines) {
 			b.WriteString(m.page.Lines[i])
 		}
 		b.WriteString(reset + "\x1b[K")
+	}
+	if keep {
+		m.drawn = now // the same strings from now on: compared without reading them
+	} else {
+		if len(m.drawn.imgs) > 0 {
+			b.WriteString(m.opt.ClearImages)
+		}
+		for _, p := range imgs {
+			moveTo(b, p.Line-m.top, p.Col)
+			b.WriteString(p.Seq)
+		}
+		m.drawn = now
 	}
 	for i, mt := range m.matches {
 		if mt.line >= m.top && mt.line < m.top+h {
@@ -62,6 +83,45 @@ func (m *model) drawPage(b *strings.Builder) {
 			}
 		}
 	}
+}
+
+// drawnImages are the graphics images drawn on a screen: while the next
+// screen would show the same ones at the same place, they are left there,
+// not sent again (they can be megabytes).
+type drawnImages struct {
+	top, cols, rows int
+	imgs            []render.Placement
+}
+
+func (d drawnImages) equal(o drawnImages) bool {
+	return d.top == o.top && d.cols == o.cols && d.rows == o.rows && slices.Equal(d.imgs, o.imgs)
+}
+
+// shownImages returns the graphics images of the page that fit on screen
+// whole (a picture cannot be cut), none while a panel covers the page.
+// Search matches and the selected link are never on their rows, which
+// hold no text but a list or quote marker.
+func (m *model) shownImages() []render.Placement {
+	if m.help || m.outline {
+		return nil
+	}
+	var out []render.Placement
+	for _, p := range m.page.Images {
+		if p.Line >= m.top && p.Line+p.Rows <= m.top+m.viewH() {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// covered reports whether line i lies under one of imgs.
+func covered(imgs []render.Placement, i int) bool {
+	for _, p := range imgs {
+		if i >= p.Line && i < p.Line+p.Rows {
+			return true
+		}
+	}
+	return false
 }
 
 // overlay repaints columns [col, col+w) of a screen row with style st.

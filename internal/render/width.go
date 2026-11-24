@@ -15,6 +15,9 @@ type run struct {
 	text string
 	st   Style
 	raw  bool
+	// rows > 0: an image placed apart (Options.Placements), text its
+	// sequence; uint16 fits in the padding after raw, keeping runs small
+	rows uint16
 	w    int
 }
 

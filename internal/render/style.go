@@ -174,20 +174,43 @@ func clean(s string) string {
 // Clean is clean for other packages (e.g. file names in error messages).
 func Clean(s string) string { return clean(s) }
 
+// lastMeasured returns the index of the last run of l whose column the
+// viewer needs (a link or a placed image): widths are only measured up to
+// it; -1 without navigation.
+func (p *painter) lastMeasured(l rline) int {
+	last := -1
+	if p.nav != nil {
+		for i, r := range l {
+			if r.st.Link != 0 && !r.raw || r.rows > 0 {
+				last = i
+			}
+		}
+	}
+	return last
+}
+
+// switchLink ends the OSC 8 hyperlink from (if any) and starts to (if any).
+func switchLink(b *strings.Builder, from, to string) {
+	if from != "" {
+		b.WriteString("\x1b]8;;\x1b\\")
+	}
+	if to != "" {
+		b.WriteString("\x1b]8;;" + to + "\x1b\\")
+	}
+}
+
 // line paints one line; col is the display column it starts at (for nav).
 func (p *painter) line(b *strings.Builder, l rline, col int) {
 	var cur Style
 	reset := false // terminal state unknown after raw output
 	url := ""
-	lastLink := -1 // widths are only needed up to the line's last link
-	if p.nav != nil {
-		for i, r := range l {
-			if r.st.Link != 0 && !r.raw {
-				lastLink = i
-			}
-		}
-	}
+	lastLink := p.lastMeasured(l)
 	for i, r := range l {
+		if r.rows > 0 {
+			p.nav.place(r, col)
+			col += r.w
+			continue
+		}
 		if r.raw {
 			col += r.w
 			if url != "" {
@@ -206,12 +229,7 @@ func (p *painter) line(b *strings.Builder, l rline, col int) {
 			cur, reset = r.st, false
 		}
 		if u := safeURL(r.st.URL); p.links && u != url {
-			if url != "" {
-				b.WriteString("\x1b]8;;\x1b\\")
-			}
-			if u != "" {
-				b.WriteString("\x1b]8;;" + u + "\x1b\\")
-			}
+			switchLink(b, url, u)
 			url = u
 		}
 		text := clean(r.text)

@@ -325,3 +325,83 @@ func TestTickLoadsOnce(t *testing.T) {
 		t.Errorf("nothing changed: %d loads", loads)
 	}
 }
+
+func TestSlideImages(t *testing.T) {
+	lines := make([]string, 30)
+	lines[3] = "text above"
+	img := render.Placement{Line: 4, Col: 2, Rows: 3, Seq: "<IMG>"}
+	low := render.Placement{Line: 20, Col: 0, Rows: 3, Seq: "<LOW>"}
+	deck := &Deck{Slides: []*Page{
+		{Lines: lines, Images: []render.Placement{img, low}, Steps: []int{4}},
+		{Lines: []string{"no images"}},
+	}}
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return deck, nil }, ClearImages: "<CLEAR>"}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	at := func(p render.Placement) string { // the image drawn where it is on screen
+		var b strings.Builder
+		moveTo(&b, p.Line-h.top, p.Col)
+		return b.String() + p.Seq
+	}
+	row := func(line int) string { // the row of a line written
+		var b strings.Builder
+		moveTo(&b, line-h.top, 0)
+		return b.String()
+	}
+	if s := h.screen(); strings.Contains(s, "<IMG>") || strings.Contains(s, "<CLEAR>") {
+		t.Errorf("the step before the image: %q", s)
+	}
+	h.keys("right")
+	if s := h.screen(); !strings.Contains(s, at(img)) || strings.Contains(s, "<LOW>") {
+		t.Errorf("first draw: %q", s)
+	}
+	// nothing changed: the image and its rows are left alone, other rows not
+	if s := h.screen(); strings.Contains(s, "<IMG>") || strings.Contains(s, "<CLEAR>") ||
+		strings.Contains(s, row(img.Line)) || !strings.Contains(s, row(img.Line+img.Rows)) {
+		t.Errorf("redraw: %q", s)
+	}
+	h.keys("?") // a panel over the page: the images go
+	if s := h.screen(); strings.Contains(s, "<IMG>") || !strings.Contains(s, "<CLEAR>") {
+		t.Errorf("help: %q", s)
+	}
+	h.keys("esc")
+	if s := h.screen(); !strings.Contains(s, at(img)) {
+		t.Errorf("after help: %q", s)
+	}
+	h.keys("k") // scrolled: drawn again where it now is
+	if s := h.screen(); !strings.Contains(s, at(img)) {
+		t.Errorf("scrolled: %q", s)
+	}
+	for range 15 { // a picture is drawn only when it fits whole
+		h.keys("j")
+	}
+	if s := h.screen(); !strings.Contains(s, at(low)) || strings.Contains(s, "<IMG>") {
+		t.Errorf("low image at top %d: %q", h.top, s)
+	}
+	h.keys("right")
+	if s := h.screen(); strings.Contains(s, "<LOW>") || !strings.Contains(s, "<CLEAR>") {
+		t.Errorf("next slide: %q", s)
+	}
+	if s := h.screen(); strings.Contains(s, "<CLEAR>") {
+		t.Errorf("cleared again with nothing drawn: %q", s)
+	}
+}
+
+func TestStepKeepsImages(t *testing.T) {
+	img := render.Placement{Line: 2, Col: 0, Rows: 3, Seq: "<IMG>"}
+	deck := &Deck{Slides: []*Page{{Lines: make([]string, 9), Images: []render.Placement{img}, Steps: []int{7}}}}
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return deck, nil }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	if !strings.Contains(h.screen(), "<IMG>") {
+		t.Fatal("image not drawn")
+	}
+	h.keys("right") // the next step reveals text below: the image is not sent again
+	if s := h.screen(); h.step != 1 || strings.Contains(s, "<IMG>") {
+		t.Errorf("step %d: %q", h.step, s)
+	}
+}

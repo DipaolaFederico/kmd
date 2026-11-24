@@ -34,7 +34,8 @@ type tty struct {
 	f       *os.File
 	restore func() error
 	mouse   bool
-	err     error // the terminal could not be set up again (after the editor)
+	err     error  // the terminal could not be set up again (after the editor)
+	clear   string // removes graphics images the screen switch may keep (kitty)
 }
 
 func (t *tty) enter() error {
@@ -65,7 +66,7 @@ func (t *tty) suspend(sigs chan os.Signal) error {
 }
 
 func (t *tty) leave() {
-	s := leaveScreen
+	s := t.clear + leaveScreen
 	if t.mouse {
 		s = mouseOff + s
 	}
@@ -88,7 +89,7 @@ func Run(opt Options) error {
 	if !ok || rows < 3 || cols < 20 {
 		return errors.New("terminal too small")
 	}
-	t := &tty{f: f, mouse: opt.Mouse}
+	t := &tty{f: f, mouse: opt.Mouse, clear: opt.ClearImages}
 	if opt.Edit == nil {
 		opt.Edit = func(path string) error {
 			t.leave()
@@ -183,6 +184,7 @@ func Run(opt Options) error {
 					if err := t.suspend(sigs); err != nil {
 						return err
 					}
+					m.drawn = drawnImages{} // a new screen: draw the images again
 					continue
 				}
 				m.handle(k)
@@ -195,6 +197,7 @@ func Run(opt Options) error {
 				if err := t.suspend(sigs); err != nil {
 					return err
 				}
+				m.drawn = drawnImages{} // a new screen: draw the images again
 				redraw = true
 				continue
 			}

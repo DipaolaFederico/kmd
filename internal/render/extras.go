@@ -144,28 +144,56 @@ func (r *renderer) imageParagraph(p *md.Node, width int) ([]rline, bool) {
 	}
 	rows := r.opt.ImageRows
 	if rows <= 0 {
-		rows = 20
+		rows = DefaultImageRows
 	}
 	var out []rline
-	graphics := false
+	graphics, placed := false, r.placed
 	for i, n := range imgs {
 		res, ok := r.loadImage(n.Dest, width, rows)
 		if !ok {
 			return nil, false
 		}
+		if r.placing() {
+			if placed += frameBytes(res.frame); placed > maxPlacedBytes {
+				return nil, false
+			}
+		}
 		if i > 0 {
 			out = append(out, nil)
 		}
-		for _, l := range res.frame.Lines {
-			out = append(out, rline{{text: l, raw: true, w: res.frame.Cols}})
-		}
+		out = append(out, r.frameLines(res.frame)...)
 		if alt := md.PlainText(n); alt != "" {
 			out = append(out, rline{{text: alt, st: Style{Fg: r.th.Muted, Attr: Italic}}})
 		}
 		graphics = graphics || r.opt.Images != termimg.Blocks
 	}
 	r.graphics = r.graphics || graphics // only once every image succeeded
+	r.placed = placed
 	return out, true
+}
+
+// placing reports whether graphics images are placed apart rather than
+// written into the text (Options.Placements, which needs Navigate).
+func (r *renderer) placing() bool {
+	return r.opt.Placements && r.links != nil && r.opt.Images != termimg.Blocks
+}
+
+// frameLines lays out an image's frame: its lines in the text, or, when
+// placing, blank rows to draw it over later. A graphics frame's sequence is
+// all in Lines[0] (kitty's other lines only reserve rows), shared by every
+// reference to the image.
+func (r *renderer) frameLines(f termimg.Frame) []rline {
+	if r.placing() {
+		rows := min(f.Rows, 1<<16-1)
+		out := make([]rline, rows)
+		out[0] = rline{{text: f.Lines[0], raw: true, rows: uint16(rows), w: f.Cols}} // #nosec G115 -- clamped above
+		return out
+	}
+	out := make([]rline, 0, len(f.Lines))
+	for _, l := range f.Lines {
+		out = append(out, rline{{text: l, raw: true, w: f.Cols}})
+	}
+	return out
 }
 
 type imageResult struct {
@@ -178,6 +206,9 @@ type imageResult struct {
 func (r *renderer) loadImage(src string, width, rows int) (imageResult, bool) {
 	key := src + "\x00" + strconv.Itoa(width) + "x" + strconv.Itoa(rows)
 	if res, ok := r.images[key]; ok {
+		if r.placing() { // not copied into the text: only the first counts
+			return res, res.ok
+		}
 		if r.imgBytes+frameBytes(res.frame) > maxImageBytes {
 			return imageResult{}, false
 		}

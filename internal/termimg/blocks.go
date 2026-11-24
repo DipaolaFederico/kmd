@@ -86,7 +86,7 @@ func encodeBlocks(m *image.NRGBA) Frame {
 		buf = append(buf, "\x1b[0m"...)
 		lines[row] = string(buf)
 	}
-	return Frame{Lines: lines, Cols: w}
+	return Frame{Lines: lines, Cols: w, Rows: len(lines)}
 }
 
 // appendSGR appends a 24-bit color selection (base 38 = fg, 48 = bg), or the

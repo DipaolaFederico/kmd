@@ -89,6 +89,17 @@ const (
 type Frame struct {
 	Lines []string
 	Cols  int
+	Rows  int // terminal rows the image covers (more than len(Lines) for ITerm2 and Sixel)
+}
+
+// Clear returns the sequence that removes every image p has drawn on the
+// screen when clearing the text does not ("" when it does): kitty keeps
+// its images apart from the text.
+func Clear(p Protocol) string {
+	if p == Kitty {
+		return "\x1b_Ga=d,d=A,q=2\x1b\\" // A: free the image data too
+	}
+	return ""
 }
 
 // Errors returned by Load and Render.

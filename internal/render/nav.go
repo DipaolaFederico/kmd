@@ -38,9 +38,16 @@ type CodeBlock struct {
 
 // nav collects link positions while lines are painted.
 type nav struct {
-	row   int
-	links []Link
-	code  []CodeBlock
+	row    int
+	links  []Link
+	code   []CodeBlock
+	images []Placement
+}
+
+// place records the image of run r (Options.Placements) at column col of
+// the current row.
+func (n *nav) place(r run, col int) {
+	n.images = append(n.images, Placement{Line: n.row, Col: col, Rows: int(r.rows), Seq: r.text})
 }
 
 // span records that columns [col, col+w) of the current row belong to link

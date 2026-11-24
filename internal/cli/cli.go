@@ -91,6 +91,7 @@ type options struct {
 	follow       bool
 	view         bool
 	slides       bool
+	notes        bool
 	listThemes   bool
 	template     string
 	section      string
@@ -141,6 +142,8 @@ Output modes:
       --slides             present the document as slides (split at --- or
                            at level 1-2 headings, revealed in steps at
                            <!-- pause -->); with -f, live
+      --notes              in another terminal: the speaker notes
+                           (<!-- notes: ... -->) of the slide on screen
 
 Themes and configuration:
       --list-themes        list bundled and user themes
@@ -203,6 +206,7 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	boolean(&o.follow, "f", "follow")
 	boolean(&o.view, "view")
 	boolean(&o.slides, "slides")
+	boolean(&o.notes, "notes")
 	boolean(&o.listThemes, "list-themes")
 	boolean(&o.showConfig, "config")
 	boolean(&o.version, "v", "version")
@@ -243,13 +247,20 @@ func parseArgs(args []string, stderr io.Writer) (options, error) {
 	if o.base, err = parseBase(baseURL, o.explicitFlag["base"], o.files); err != nil {
 		return o, err
 	}
-	if o.follow && len(o.files) != 1 {
-		return o, errors.New("--follow needs exactly one file")
+	return o, o.checkModes()
+}
+
+// checkModes rejects modes used with files or flags they do not support.
+func (o options) checkModes() error {
+	switch {
+	case o.follow && len(o.files) != 1:
+		return errors.New("--follow needs exactly one file")
+	case o.slides && (len(o.files) > 1 || o.html || o.toc):
+		return errors.New("--slides shows one document, without --html or --toc")
+	case o.notes && (len(o.files) != 1 || o.files[0] == "-" || o.slides || o.html || o.toc):
+		return errors.New("--notes needs one file and cannot be combined with --slides, --html or --toc")
 	}
-	if o.slides && (len(o.files) > 1 || o.html || o.toc) {
-		return o, errors.New("--slides shows one document, without --html or --toc")
-	}
-	return o, nil
+	return nil
 }
 
 // parseBase validates --base (nil when not given): an absolute http(s) URL
@@ -554,16 +565,8 @@ func Run(env Env) int {
 		o.files = []string{"-"}
 	}
 	resolveDirs(o.files)
-	if o.slides {
-		if !env.StdoutTTY || !view.Supported {
-			fmt.Fprintf(env.Stderr, "kmd: %v\n", errSlidesTTY)
-			return 2
-		}
-		if err := runSlides(env, o, s, o.follow); err != nil {
-			fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
-			return 1
-		}
-		return 0
+	if o.slides || o.notes {
+		return present(env, o, s)
 	}
 	viewable := !o.html && !o.toc && env.StdoutTTY && (s.pager == builtinPager || s.alwaysView)
 	if o.follow {
@@ -746,6 +749,24 @@ func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Nod
 		base = filepath.Dir(name)
 	}
 	return doc, base, nil
+}
+
+// present runs a presentation (--slides) or its notes window (--notes) and
+// returns the exit status.
+func present(env Env, o options, s settings) int {
+	run, mode := runSlides, "--slides"
+	if o.notes {
+		run, mode = runNotes, "--notes"
+	}
+	if !env.StdoutTTY || !view.Supported {
+		fmt.Fprintf(env.Stderr, "kmd: %s needs a terminal\n", mode)
+		return 2
+	}
+	if err := run(env, o, s); err != nil {
+		fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
+		return 1
+	}
+	return 0
 }
 
 // sectionOf returns the section of doc (read from name) under the heading

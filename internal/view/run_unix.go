@@ -140,17 +140,8 @@ func Run(opt Options) error {
 	}()
 	defer close(want)
 
-	var tick <-chan time.Time
-	if opt.Watch {
-		poll := opt.Poll
-		if poll <= 0 {
-			poll = 250 * time.Millisecond
-		}
-		m.poll() // remember the current version
-		t := time.NewTicker(poll)
-		defer t.Stop()
-		tick = t.C
-	}
+	tick, stop := m.ticker()
+	defer stop()
 
 	var out strings.Builder
 	var settle <-chan time.Time // pending resize: re-render once it settles
@@ -173,7 +164,7 @@ func Run(opt Options) error {
 			m.applyBackground(f)
 			redraw = m.picking // results of the picker's work: only it shows them
 		case <-tick:
-			redraw = m.poll()
+			redraw = m.tick()
 		case <-settle:
 			settle = nil
 			if c, r, ok := term.Size(f.Fd()); ok && (c != m.cols || r != m.rows) {

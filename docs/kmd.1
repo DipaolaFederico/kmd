@@ -118,9 +118,22 @@ after a pause without a gap when it keeps the same marker.
 The bottom line is a footer with the slide number and the \fBtitle\fR and
 \fBauthor\fR from the front matter; a \fBfooter:\fR key there sets its
 text (empty: only the number), and \fBfooter: false\fR (or \fBoff\fR) hides it.
+Speaker notes go in \fB<!\-\- notes: ... \-\->\fR comments, never shown on
+the slide; see \fB\-\-notes\fR.
 Web links and files open as in the viewer; linked
 Markdown documents do not. Works with \fB\-f\fR (the slides are re\-rendered
 when the file changes) and \fB\-s\fR. Needs a terminal.
+.TP
+.B \-\-notes
+In a second terminal, show the speaker notes of the slide that
+\fBkmd \-\-slides\fR, run on the same file, has on screen (notes are per
+slide, not per step), and the title of the next slide. They follow the
+presentation as it moves and are rendered again when the file changes;
+when the presentation ends they stay on its last slide. The two share the
+slide number through a state file in \fI$XDG_RUNTIME_DIR/kmd\fR, or
+\fIkmd\-<uid>\fR in the temporary directory, which must belong to the user
+with mode 0700. Works with \fB\-s\fR (give the same section as the
+presentation). Needs a terminal.
 .SS Themes and configuration
 .TP
 .B \-\-list\-themes
@@ -345,6 +358,10 @@ Used by the \fBauto\fR theme to detect light terminals (see \fBTHEMES\fR).
 .TP
 .B COLORTERM
 \fBtruecolor\fR or \fB24bit\fR enables 24-bit colors.
+.TP
+.B XDG_RUNTIME_DIR
+Where \fB\-\-slides\fR and \fB\-\-notes\fR keep their state file (in
+\fIkmd\fR below it).
 .SH EXIT STATUS
 0 on success, 1 if a file could not be read or written, 2 on usage errors.
 .SH REMOTE DOCUMENTS
@@ -377,7 +394,10 @@ network requests and remote images are never downloaded (see
 link in the viewer, and only local images, PDFs and other data files (never
 programs) are handed to the desktop. The only query sent to the terminal
 asks for its background color (see \fBTHEMES\fR); its answer is read for
-about a second at most and 256 bytes and parsed strictly. Inputs are limited to 16 MiB and 250,000 blocks, images to
+about a second at most and 256 bytes and parsed strictly. The only file
+kmd writes is the slide number for \fB\-\-notes\fR, in a directory that
+must belong to the user with mode 0700; \fB\-\-notes\fR reads at most 32
+bytes from it, and otherwise reads the deck as \fB\-\-slides\fR does. Inputs are limited to 16 MiB and 250,000 blocks, images to
 20 MiB and 40 megapixels (at most 50 per document), and the number of
 diagrams and display formulas per document is bounded, as are the bytes
 reference links may copy from their definitions (1 MiB plus the document's

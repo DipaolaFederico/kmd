@@ -53,7 +53,7 @@ func run(t *testing.T, mod func(*Env), args ...string) result {
 		Stdin:  strings.NewReader("# from stdin"),
 		Stdout: &out,
 		Stderr: &errOut,
-		Getenv: envMap(map[string]string{"HOME": home}),
+		Getenv: envMap(map[string]string{"HOME": home, "XDG_RUNTIME_DIR": t.TempDir()}),
 		Pager: func(c, _ string) error {
 			res.paged = c
 			return nil
@@ -953,7 +953,11 @@ func TestDeckFooter(t *testing.T) {
 		"---\ntitle: é" + strings.Repeat("é", 1<<20) + "\n---\n":  strings.Repeat("é", maxFooter),
 		"---\nfooter: \"\"\n---\n":                                "",
 	} {
-		text, hide := deckFooter(md.Parse(src, md.GFM))
+		front := ""
+		if c := md.Parse(src, md.GFM).FirstChild; c != nil && c.Type == md.FrontMatter {
+			front = c.Literal
+		}
+		text, hide := deckFooter(front)
 		if hide {
 			text = "<hidden>"
 		}

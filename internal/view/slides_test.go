@@ -2,10 +2,12 @@ package view
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 )
@@ -235,5 +237,91 @@ func TestSlideFooter(t *testing.T) {
 	h.keys("/") // a prompt still shows
 	if b := h.bottom(); b != "/" {
 		t.Errorf("prompt without footer: %q", b)
+	}
+}
+
+func TestSlideHooks(t *testing.T) {
+	var shown []int
+	deck := &Deck{Slides: []*Page{{Lines: []string{"a"}, Steps: []int{0}}, {Lines: []string{"b"}}}}
+	m, err := newModel(Options{Slides: func(int, int) (*Deck, error) { return deck, nil }, OnSlide: func(i int) { shown = append(shown, i) }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &harness{model: m}
+	h.keys("right", "right", "left")
+	if fmt.Sprint(shown) != "[0 0 1 0]" { // every slide shown, steps included
+		t.Errorf("OnSlide: %v", shown)
+	}
+}
+
+func TestChangedReloadsFromTop(t *testing.T) {
+	loads, changed := 0, false
+	load := func(string, int) (*Page, error) {
+		loads++
+		if loads > 2 {
+			return nil, errors.New("gone")
+		}
+		return &Page{Lines: make([]string, 50)}, nil
+	}
+	m, err := newModel(Options{Load: load, Changed: func() bool { return changed }}, 60, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.top = 10
+	if m.reloadIfChanged() || loads != 1 {
+		t.Errorf("unchanged: loads %d", loads)
+	}
+	changed = true
+	if !m.reloadIfChanged() || loads != 2 || m.top != 0 {
+		t.Errorf("changed: loads %d top %d", loads, m.top)
+	}
+	if !m.reloadIfChanged() || m.msg != "gone" {
+		t.Errorf("load error: %q", m.msg)
+	}
+	if (&model{}).reloadIfChanged() {
+		t.Error("no Changed: refreshed")
+	}
+}
+
+func TestTicker(t *testing.T) {
+	m := &model{}
+	if c, stop := m.ticker(); c != nil {
+		stop()
+		t.Error("ticking with nothing to check")
+	}
+	changed := true
+	m = &model{opt: Options{Changed: func() bool { return changed }, Poll: time.Millisecond,
+		Load: func(string, int) (*Page, error) { return &Page{}, nil }}}
+	c, stop := m.ticker()
+	defer stop()
+	<-c
+	if !m.tick() {
+		t.Error("change not reported")
+	}
+	changed = false
+	if m.tick() {
+		t.Error("no change reported")
+	}
+}
+
+func TestTickLoadsOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deck.md")
+	if err := os.WriteFile(path, []byte("a"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	m := &model{path: path, opt: Options{Watch: true, Changed: func() bool { return true },
+		Load: func(string, int) (*Page, error) { loads++; return &Page{}, nil }}}
+	m.page = &Page{}
+	m.poll()
+	if err := os.WriteFile(path, []byte("changed"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !m.tick() || loads != 1 {
+		t.Errorf("file and slide changed: %d loads", loads)
+	}
+	m.opt.Changed = func() bool { return false }
+	if m.tick() || loads != 1 { // the file's new version was remembered
+		t.Errorf("nothing changed: %d loads", loads)
 	}
 }

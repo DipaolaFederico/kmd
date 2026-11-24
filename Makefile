@@ -120,6 +120,7 @@ fuzz:
 	$(GO) test -run='^$$' -fuzz=FuzzDisplay -fuzztime=$(FUZZ_TIME) ./internal/tex/
 	$(GO) test -run='^$$' -fuzz=FuzzDataURI -fuzztime=$(FUZZ_TIME) ./internal/termimg/
 	$(GO) test -run='^$$' -fuzz=FuzzBackground -fuzztime=$(FUZZ_TIME) ./internal/term/
+	$(GO) test -tags kmdai -run='^$$' -fuzz=FuzzResponse -fuzztime=$(FUZZ_TIME) ./internal/ai/
 
 bench:
 	$(GO) test -run='^$$' -bench=. -benchmem ./internal/render/

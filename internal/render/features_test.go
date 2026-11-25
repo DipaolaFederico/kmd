@@ -227,6 +227,15 @@ func TestThemes(t *testing.T) {
 	if d := ThemeDirs(func(k string) string { return map[string]string{"HOME": "/h"}[k] }); d[0] != "/h/.config/kmd/themes" {
 		t.Errorf("ThemeDirs = %v", d)
 	}
+	// relative values would read themes from the current folder: ignored
+	rel := map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "/h"}
+	if d := ThemeDirs(func(k string) string { return rel[k] }); d[0] != "/h/.config/kmd/themes" {
+		t.Errorf("relative XDG_CONFIG_HOME: ThemeDirs = %v", d)
+	}
+	rel["HOME"] = "~"
+	if d := ThemeDirs(func(k string) string { return rel[k] }); len(d) != 1 || d[0] != "/usr/share/kmd/themes" {
+		t.Errorf("relative HOME: ThemeDirs = %v", d)
+	}
 }
 
 // Regression tests for issues found in the performance/quality review.

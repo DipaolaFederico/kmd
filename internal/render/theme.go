@@ -183,13 +183,26 @@ func ParseColor(s string) (Color, error) {
 // Hex formats c as #rrggbb.
 func (c Color) Hex() string { return fmt.Sprintf("#%06x", uint32(c)&0xffffff) }
 
+// ConfigHome returns the user's configuration folder: $XDG_CONFIG_HOME,
+// or ~/.config ("" without either). Relative values are ignored, as the
+// XDG Base Directory specification asks: they would name a folder under
+// the current one, which may be a cloned repository shipping a config
+// (whose pager kmd runs) or themes, as an unexpanded "~/.config" does.
+func ConfigHome(getenv func(string) string) string {
+	if x := getenv("XDG_CONFIG_HOME"); filepath.IsAbs(x) {
+		return x
+	}
+	if h := getenv("HOME"); filepath.IsAbs(h) {
+		return filepath.Join(h, ".config")
+	}
+	return ""
+}
+
 // ThemeDirs returns the directories searched for user themes.
 func ThemeDirs(getenv func(string) string) []string {
 	var dirs []string
-	if x := getenv("XDG_CONFIG_HOME"); x != "" {
-		dirs = append(dirs, filepath.Join(x, "kmd", "themes"))
-	} else if h := getenv("HOME"); h != "" {
-		dirs = append(dirs, filepath.Join(h, ".config", "kmd", "themes"))
+	if c := ConfigHome(getenv); c != "" {
+		dirs = append(dirs, filepath.Join(c, "kmd", "themes"))
 	}
 	return append(dirs, "/usr/share/kmd/themes")
 }

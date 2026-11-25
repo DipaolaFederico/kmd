@@ -381,13 +381,51 @@ func TestConfigFile(t *testing.T) {
 			t.Errorf("bad config %q accepted", bad)
 		}
 	}
-	if configPath(envMap(map[string]string{"KMD_CONFIG": "/c"})) != "/c" ||
-		configPath(envMap(map[string]string{"XDG_CONFIG_HOME": "/x"})) != "/x/kmd/config" ||
-		configPath(envMap(nil)) != "" {
-		t.Error("configPath")
-	}
 	if _, err := loadConfig(t.TempDir()); err == nil {
 		t.Error("directory as config accepted")
+	}
+}
+
+// A relative XDG_CONFIG_HOME, HOME or KMD_CONFIG (an unexpanded "~/.config"
+// in environment.d, say) would load the config, and run its pager, from
+// the folder kmd runs in: it is ignored, or refused for KMD_CONFIG.
+func TestConfigPathRelative(t *testing.T) {
+	abs := t.TempDir()
+	for _, tc := range []struct {
+		env  map[string]string
+		want string
+	}{
+		{map[string]string{"KMD_CONFIG": filepath.Join(abs, "c")}, filepath.Join(abs, "c")},
+		{map[string]string{"XDG_CONFIG_HOME": abs}, filepath.Join(abs, "kmd", "config")},
+		{map[string]string{"HOME": abs}, filepath.Join(abs, ".config", "kmd", "config")},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": abs}, filepath.Join(abs, ".config", "kmd", "config")},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "~"}, ""},
+		{nil, ""},
+	} {
+		if got, err := configPath(envMap(tc.env)); err != nil || got != tc.want {
+			t.Errorf("configPath(%v) = %q, %v; want %q", tc.env, got, err, tc.want)
+		}
+	}
+	if _, err := configPath(envMap(map[string]string{"KMD_CONFIG": "kmd.conf"})); err == nil {
+		t.Error("relative KMD_CONFIG accepted")
+	}
+
+	// end to end: a config with a pager in ./~/.config/kmd is not used
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	if err := os.MkdirAll(filepath.Join(cwd, "~", ".config", "kmd"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwd, "~", ".config", "kmd", "config"), []byte("theme = nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := run(t, func(e *Env) { e.Getenv = envMap(map[string]string{"XDG_CONFIG_HOME": "~/.config"}) }, "--config")
+	if r.code != 0 || strings.Contains(r.out, "~/.config") {
+		t.Errorf("relative XDG_CONFIG_HOME used: %d %q %q", r.code, r.out, r.errOut)
+	}
+	r = run(t, func(e *Env) { e.Getenv = envMap(map[string]string{"KMD_CONFIG": "~/.config/kmd/config"}) }, "--config")
+	if r.code != 2 || !strings.Contains(r.errOut, "absolute") {
+		t.Errorf("relative KMD_CONFIG: %d %q", r.code, r.errOut)
 	}
 }
 

@@ -557,7 +557,7 @@ func Run(env Env) int {
 		return 0
 	}
 
-	cfg, err := loadConfig(configPath(env.Getenv))
+	cfg, err := readConfig(env.Getenv)
 	if err != nil {
 		printErr(env.Stderr, err)
 		return 2

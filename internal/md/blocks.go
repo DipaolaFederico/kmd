@@ -39,9 +39,11 @@ const MaxBlocks = 250000
 
 // Table limits keep a short document from expanding into millions of
 // (padding) cells: at most maxTableCols columns and maxTableCells cells.
+// A cell costs two nodes (the cell and its text, 640 bytes) and its
+// layout: 2¹⁸ cells keep the tree of a table-only document near 170 MB.
 const (
 	maxTableCols  = 1000
-	maxTableCells = 1 << 19
+	maxTableCells = 1 << 18
 )
 
 // Parse parses Markdown source into a document tree using opt extensions.

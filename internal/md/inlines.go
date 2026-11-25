@@ -57,6 +57,7 @@ func refBudget(n int) int { return 1<<20 + n }
 // hundreds of bytes and hostile text makes one every two or three bytes
 // ("*a", "a\n", "[a](b)"): gigabytes for a 16 MiB document. Past the limit
 // the rest of each block is plain text and a notice paragraph is appended.
+// Table cells count too: each is a node, made before the inlines are.
 const MaxInlines = 500000
 
 // nodeBudget counts the inline nodes a document may still create.
@@ -64,6 +65,13 @@ type nodeBudget struct {
 	left int
 	cut  bool // some markup was left as text because the budget ran out
 }
+
+// splitLinkNodes is what a link found in text costs: the link, its label
+// and the text node left beside it.
+const splitLinkNodes = 3
+
+// take charges n nodes to the budget.
+func (b *nodeBudget) take(n int) { b.left -= n }
 
 // spent reports whether the budget is used up, noting that the caller
 // leaves markup as text because of it.
@@ -78,7 +86,7 @@ func (b *nodeBudget) spent() bool {
 func text(s string) *Node { return &Node{Type: Text, Literal: s} }
 
 func (p *blockParser) processInlines() {
-	nodes := &nodeBudget{left: MaxInlines}
+	nodes := &nodeBudget{left: MaxInlines - p.cells}
 	ip := &inlineParser{refs: p.refs, footnotes: p.footnotes, opt: &p.opt, refBudget: &p.refBudget, nodes: nodes}
 	Walk(p.doc, func(n *Node, entering bool) bool {
 		if entering && (n.Type == Paragraph || n.Type == Heading || n.Type == TableCell) {
@@ -121,7 +129,7 @@ func (p *inlineParser) parse(block *Node, content string) {
 
 // add appends n to the block, charging it to the document's budget.
 func (p *inlineParser) add(n *Node) {
-	p.nodes.left--
+	p.nodes.take(1)
 	p.block.AppendChild(n)
 }
 
@@ -148,7 +156,7 @@ func (p *inlineParser) addText(s string, noExt bool) {
 func (p *inlineParser) autolink(dest, label string) {
 	l := &Node{Type: Link, Dest: dest, noExt: true}
 	l.AppendChild(text(label))
-	p.nodes.left--
+	p.nodes.take(1) // the label; add charges the link
 	p.add(l)
 }
 
@@ -491,7 +499,7 @@ func (p *inlineParser) processEmphasis(bottom *delimiter) {
 			typ = Strong
 		}
 		emph := &Node{Type: typ}
-		p.nodes.left--
+		p.nodes.take(1)
 		for tmp := oi.Next; tmp != nil && tmp != ci; {
 			next := tmp.Next
 			emph.AppendChild(tmp)
@@ -681,7 +689,7 @@ func (p *inlineParser) closeBracket() {
 			for p.delims != nil && p.delims != opener.prevDelim {
 				p.removeDelim(p.delims)
 			}
-			p.nodes.left--
+			p.nodes.take(1)
 			opener.node.insertAfter(&Node{Type: FootnoteRef, Label: label})
 			opener.node.unlink()
 			p.brackets = opener.prev
@@ -937,15 +945,9 @@ func emailAutolinks(block *Node, nodes *nodeBudget) {
 		case Link, Image:
 			continue
 		case Text:
-			if n.Next != nil && n.Next.Type == Text { // merge adjacent text
-				var b strings.Builder
-				b.WriteString(n.Literal)
-				for n.Next != nil && n.Next.Type == Text {
-					b.WriteString(n.Next.Literal)
-					n.Next.unlink()
-				}
-				n.Literal = b.String()
-			}
+			// mergeText joined adjacent text, except across a noExt mark:
+			// an escaped or encoded character never joins an address
+			// ("a\@b.com", or a file name escaped as Markdown)
 			if strings.IndexByte(n.Literal, '@') >= 0 {
 				n = linkEmails(n, nodes)
 			}
@@ -981,7 +983,7 @@ func linkEmails(t *Node, nodes *nodeBudget) *Node {
 			if nodes.spent() {
 				break
 			}
-			nodes.left -= 3 // the link, its text and the text after it
+			nodes.take(splitLinkNodes)
 			end = at + autolinkDelim(s[at:], end-at)
 			addr := s[st:end]
 			l := &Node{Type: Link, Dest: "mailto:" + addr}

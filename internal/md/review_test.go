@@ -112,10 +112,21 @@ func TestInlineBudget(t *testing.T) {
 	if doc := Parse(strings.Repeat("*a* ", 1000), GFM); strings.Contains(PlainText(doc), "ignored") {
 		t.Error("notice on a small document")
 	}
+	// table cells count too: a table at the cell limit leaves little for
+	// the text after it (both made 330 MB of tree in a 16 MiB document)
+	src := "|a|b|\n|-|-|\n" + strings.Repeat("|x|y|\n", MaxInlines/5) + "\n" + strings.Repeat("a\n", MaxInlines)
+	doc := Parse(src, GFM)
+	all, _ := inlineNodes(doc)
+	if rows := MaxInlines/5 + 1; all-rows > MaxInlines+10 {
+		t.Errorf("table and text: %d nodes besides the rows, limit %d", all-rows, MaxInlines)
+	}
+	if !strings.Contains(PlainText(doc.LastChild), "inline markup ignored") {
+		t.Error("table and text: no notice")
+	}
 }
 
 // TestLinearFixesKeepBehaviour: the bounds that keep hostile inlines linear
-// (security review #72) do not change what ordinary documents produce.
+// (#72) do not change what ordinary documents produce.
 func TestLinearFixesKeepBehaviour(t *testing.T) {
 	html := func(src string) string { return HTML(Parse(src, GFM), HTMLOptions{}) }
 	domain := func(n int) string { return "www." + strings.Repeat("a", n-8) + ".com" }
@@ -133,6 +144,11 @@ func TestLinearFixesKeepBehaviour(t *testing.T) {
 		{"opener after a link", "[a](b) [c](d)", `<a href="d">c</a>`, ""},
 		{"emphasis after a removed opener", "*a **b* _c_ **d**", `*a *<em>b</em> <em>c</em> <strong>d</strong>`, ""},
 		{"table after paragraph lines", "x\ny\n| a | b |\n|---|---|\n| 1 | 2 |", "<p>x\ny</p>\n<table>", ""},
+		{"e-mail", "write to a@b.example", `<a href="mailto:a@b.example">`, ""},
+		// #72 SR-24: a file name escaped as Markdown stays text
+		{"escaped @", `a\@evil.example.md`, "", "<a "},
+		{"encoded @", "a&#64;evil.example", "", "<a "},
+		{"e-mail by an emoji", ":rocket: a@b.example", `🚀 <a href="mailto:a@b.example">`, ""},
 	} {
 		out := html(c.src)
 		if c.want != "" && !strings.Contains(out, c.want) {

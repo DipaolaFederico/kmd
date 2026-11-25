@@ -18,7 +18,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   16 MiB before). Long links, and links made of zero-width characters, no
   longer slow rendering down either.
 - A document makes at most 500,000 inline elements (text, emphasis, links,
-  code spans, line breaks…); past that the rest is plain text and a notice
+  code spans, line breaks…, table cells included) and 262,144 table cells
+  (524,288 before); past that the rest is plain text and a notice
   is shown. Runs of `]`, `!`, `<`, `&` and escaped characters no longer
   cost hundreds of bytes each: 1 MiB of `]` took 460 MB of memory, now 20 MB.
 - Hostile documents can no longer make kmd use gigabytes of memory or
@@ -26,8 +27,9 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   about a million styled pieces (64 MiB) and the rendered text stops at
   64 MiB per document, each with a notice; wrapped text no longer costs
   dozens of bytes of memory per word.
-- Tables too wide for the screen no longer repeat long headers in every
-  record: their labels are cut to 32 columns. Narrowing the columns of a
+- Tables too wide for the screen show each row's own cells, with labels
+  cut to 32 columns and 128 bytes, instead of repeating long headers in
+  every record and printing a line per missing cell. Narrowing the columns of a
   very wide table, and rows with fewer cells than the header, no longer
   cost time or memory out of proportion to the table.
 - Display formulas shown as source no longer take seconds when they hold

@@ -616,11 +616,12 @@ threat model:
 - **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks and ≤ 500,000
   inline elements (emphasis, links, code spans, line breaks…; a notice is
   shown beyond, and the rest is plain text), container nesting ≤ 100,
-  inline nesting ≤ 100, tables ≤ 1,000
-  columns and 524,288 cells (labels of tables shown as records ≤ 32
-  columns), ≤ 100 diagrams/display formulas per document, each top-level
+  inline nesting ≤ 100, tables ≤ 1,000 columns and 262,144 cells (cells
+  count towards the 500,000 inline elements; labels of tables shown as
+  records ≤ 32 columns and 128 bytes), ≤ 100 diagrams/display formulas per document, each top-level
   block laid out in ≤ about a million styled pieces (64 MiB) and ≤ 64 MiB of
-  rendered text per document (a notice is shown beyond),
+  rendered text per document (a notice is shown beyond; a hostile 16 MiB
+  document peaks at about 0.5 GB of memory),
   reference links copy ≤ 1 MiB + the document's size from their definitions
   (`[x]: <huge URL>` used thousands of times), source pixels scaled for
   images ≤ 200 megapixels per document, emoji shortcodes ≤ 40 bytes, wiki links ≤ 1 KiB (and only to relative

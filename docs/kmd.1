@@ -427,14 +427,14 @@ about a second at most and 256 bytes and parsed strictly. The only file
 kmd writes is the slide number for \fB\-\-notes\fR, in a directory that
 must belong to the user with mode 0700; \fB\-\-notes\fR reads at most 32
 bytes from it, and otherwise reads the deck as \fB\-\-slides\fR does. Inputs are limited to 16 MiB, 250,000 blocks and 500,000 inline
-elements, images to
+elements (table cells included, at most 262,144 per document), images to
 20 MiB and 40 megapixels (at most 50 and 64 MiB read per document, each file
 read once; network and device paths are refused), and the number of
 diagrams and display formulas per document is bounded, as are the bytes
 reference links may copy from their definitions (1 MiB plus the document's
 size). A top-level block is laid out in at most about a million styled
 pieces (64 MiB) and a document renders at most 64 MiB of text; a notice
-replaces the rest. Tables shown as records cut their labels to 32 columns.
+replaces the rest. Tables shown as records cut their labels to 32 columns and 128 bytes.
 The
 .B \-\-html
 export drops control characters, bidi overrides, invisible format characters

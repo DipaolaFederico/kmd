@@ -176,7 +176,8 @@ func (s *session) loop(tick <-chan time.Time) error {
 		}
 		s.request()
 		redraw = false
-		more, err := true, error(nil)
+		more := true
+		var err error
 		select {
 		case fn := <-s.m.bg:
 			s.m.applyBackground(fn)
@@ -187,8 +188,11 @@ func (s *session) loop(tick <-chan time.Time) error {
 			s.settle = nil
 			redraw = s.resize()
 		case b, ok := <-s.input:
+			if !ok {
+				return nil // the terminal is gone
+			}
 			s.pending, redraw = false, true
-			more, err = ok, s.handleInput(b)
+			err = s.handleInput(b)
 		case sig := <-s.sigs:
 			redraw, more, err = s.signal(sig)
 		}
@@ -337,7 +341,7 @@ func (s *session) await(done <-chan struct{}) bool {
 // quitKey reports whether keys hold one that quits.
 func quitKey(keys []key) bool {
 	for _, k := range keys {
-		if k.name == "ctrl-c" || k.name == "char" && (k.r == 'q' || k.r == 'Q') {
+		if isQuit(k.binding()) {
 			return true
 		}
 	}

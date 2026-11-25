@@ -93,6 +93,10 @@ func TestRunKeysDuringLoad(t *testing.T) {
 	_, _ = master.WriteString("?") // dropped: the help does not open
 	resize(t, master, 60, 20)
 	_ = syscall.Kill(os.Getpid(), syscall.SIGWINCH)
+	// let the signal reach the load's wait (session.late) before the load
+	// ends: without session.late it is then lost and the test fails; if it
+	// came later the loop would handle it and the test would prove less,
+	// but not fail
 	time.Sleep(50 * time.Millisecond)
 	close(release)
 	scr.waitFor(t, "Tab links") // the status bar, not the help

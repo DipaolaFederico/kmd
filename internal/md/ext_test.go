@@ -160,6 +160,14 @@ func TestPathological(t *testing.T) {
 		{"unclosed + emoji", 30000, rep("[[a :x: "), false},
 		{"wiki links", 30000, rep("[[a|:x:]] "), false},
 		{"wiki in emphasis", 30000, rep("*[[a_b]]* "), false},
+		// security review #72
+		{"nested footnote openers", 20000, func(n int) string { return strings.Repeat("[^", n) + strings.Repeat("]", n) }, false},
+		{"emphasis bottoms", 20000, rep("*a**b* _a"), false},
+		{"strike bottoms", 20000, rep("~b~~*c"), false},
+		{"www underscores", 20000, rep("www.a_"), false},
+		{"image openers + links", 20000, rep("![[]()"), false},
+		{"table-like lines", 20000, rep("a\n-|-|-\n"), false},
+		{"autolink parentheses", 50000, func(n int) string { return "http://a.b/" + strings.Repeat(")", n) }, false},
 	}
 	for _, c := range cases {
 		in := c.gen(c.n)

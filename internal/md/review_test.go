@@ -74,3 +74,33 @@ func TestHTMLDropsHiddenCharacters(t *testing.T) {
 		t.Errorf("--unsafe-html must keep bidi controls:\n%q", unsafe)
 	}
 }
+
+// TestLinearFixesKeepBehaviour: the bounds that keep hostile inlines linear
+// (security review #72) do not change what ordinary documents produce.
+func TestLinearFixesKeepBehaviour(t *testing.T) {
+	html := func(src string) string { return HTML(Parse(src, GFM), HTMLOptions{}) }
+	domain := func(n int) string { return "www." + strings.Repeat("a", n-8) + ".com" }
+	label := strings.Repeat("a", maxLabel)
+	for _, c := range []struct{ name, src, want, not string }{
+		{"longest domain", domain(maxDomain), `<a href="http://` + domain(maxDomain) + `"`, ""},
+		{"domain too long", domain(maxDomain + 1), "", "<a "},
+		{"trailing parentheses", "http://a.b/(x))) end", `<a href="http://a.b/(x)">http://a.b/(x)</a>)) end`, ""},
+		{"balanced parentheses", "www.a.b/(x)(y))", `<a href="http://www.a.b/(x)(y)">www.a.b/(x)(y)</a>)`, ""},
+		{"footnote", "x[^1]\n\n[^1]: n", `<sup class="footnote-ref">`, ""},
+		{"footnote label too long", "x[^a" + label + "]\n\n[^a" + label + "]: n", "", "footnote-ref"},
+		{"reference label at the limit", "[" + label + "]\n\n[" + label + "]: /u", `<a href="/u">`, ""},
+		{"no link in a link", "[a [b](c) d](e)", `[a <a href="c">b</a> d](e)`, ""},
+		{"image around a link", "![a [b](c) d](e)", `<img src="e" alt="a b d" />`, ""},
+		{"opener after a link", "[a](b) [c](d)", `<a href="d">c</a>`, ""},
+		{"emphasis after a removed opener", "*a **b* _c_ **d**", `*a *<em>b</em> <em>c</em> <strong>d</strong>`, ""},
+		{"table after paragraph lines", "x\ny\n| a | b |\n|---|---|\n| 1 | 2 |", "<p>x\ny</p>\n<table>", ""},
+	} {
+		out := html(c.src)
+		if c.want != "" && !strings.Contains(out, c.want) {
+			t.Errorf("%s: %q lacks %q", c.name, out, c.want)
+		}
+		if c.not != "" && strings.Contains(out, c.not) {
+			t.Errorf("%s: %q has %q", c.name, out, c.not)
+		}
+	}
+}

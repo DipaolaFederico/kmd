@@ -1,6 +1,7 @@
 package md
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 )
@@ -827,15 +828,17 @@ func (p *blockParser) tableStart(para *Node, delim string) bool {
 	if !ok || len(aligns) > maxTableCols || p.cells+2*len(aligns) > maxTableCells {
 		return false
 	}
-	content := strings.TrimSuffix(string(para.content), "\n")
-	head := content
-	before := ""
-	if nl := strings.LastIndexByte(content, '\n'); nl >= 0 {
-		head, before = content[nl+1:], content[:nl+1]
-	}
+	// Only the paragraph's last line is copied before the column counts
+	// match: a long paragraph alternating text and delimiter-like lines
+	// never becomes a table, and copying all of it at each such line was
+	// quadratic.
+	content := bytes.TrimSuffix(para.content, []byte("\n"))
+	nl := bytes.LastIndexByte(content, '\n')
+	head := string(content[nl+1:])
 	if len(splitCells(head)) != len(aligns) || (strings.IndexByte(head, '|') < 0 && len(aligns) > 1) {
 		return false
 	}
+	before := string(content[:nl+1])
 	p.closeUnmatched()
 	parent := para.Parent
 	t := &Node{Type: Table, open: true, startLine: p.lineNumber - 1, Aligns: aligns}

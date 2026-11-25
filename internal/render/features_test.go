@@ -170,18 +170,6 @@ func TestThemes(t *testing.T) {
 	if names := UserThemes(dirs); len(names) != 2 {
 		t.Errorf("UserThemes = %v", names)
 	}
-	// names a shell or the terminal would interpret are never listed
-	for _, hostile := range []string{"$(touch PWNED).theme", "`id`.theme", "a b.theme", "esc\x1b]0;T\a.theme", "-rf.theme", ".theme", "x:y.theme"} {
-		if err := os.WriteFile(filepath.Join(dirs[0], hostile), []byte(custom), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(dirs[0], "my-theme_2.1.theme"), []byte(custom), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if names := strings.Join(UserThemes(dirs), " "); names != "child mine my-theme_2.1" {
-		t.Errorf("UserThemes with hostile names = %q", names)
-	}
 	// explicit path
 	if _, err := LoadTheme(filepath.Join(dirs[0], "mine.theme"), nil); err != nil {
 		t.Error(err)
@@ -221,20 +209,38 @@ func TestThemes(t *testing.T) {
 	if c, err := ParseColor("#ABCDEF"); err != nil || c.Hex() != "#abcdef" {
 		t.Error("ParseColor")
 	}
-	if d := ThemeDirs(func(k string) string { return map[string]string{"XDG_CONFIG_HOME": "/x"}[k] }); d[0] != "/x/kmd/themes" {
-		t.Errorf("ThemeDirs = %v", d)
+}
+
+// TestUserThemesHostileNames: theme names a shell or the terminal would
+// interpret are never listed (SR-11).
+func TestUserThemesHostileNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"$(touch PWNED).theme", "`id`.theme", "a b.theme", "esc\x1b]0;T\a.theme", "-rf.theme", ".theme", "x:y.theme", "mine.theme", "my-theme_2.1.theme"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("inherit = nord\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if d := ThemeDirs(func(k string) string { return map[string]string{"HOME": "/h"}[k] }); d[0] != "/h/.config/kmd/themes" {
-		t.Errorf("ThemeDirs = %v", d)
+	if names := strings.Join(UserThemes([]string{dir}), " "); names != "mine my-theme_2.1" {
+		t.Errorf("UserThemes with hostile names = %q", names)
 	}
-	// relative values would read themes from the current folder: ignored
-	rel := map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "/h"}
-	if d := ThemeDirs(func(k string) string { return rel[k] }); d[0] != "/h/.config/kmd/themes" {
-		t.Errorf("relative XDG_CONFIG_HOME: ThemeDirs = %v", d)
-	}
-	rel["HOME"] = "~"
-	if d := ThemeDirs(func(k string) string { return rel[k] }); len(d) != 1 || d[0] != "/usr/share/kmd/themes" {
-		t.Errorf("relative HOME: ThemeDirs = %v", d)
+}
+
+// TestThemeDirs: theme folders come from XDG_CONFIG_HOME or HOME, and only
+// from absolute values: relative ones would read themes from the current
+// folder (SR-20).
+func TestThemeDirs(t *testing.T) {
+	for _, c := range []struct {
+		env  map[string]string
+		want string
+	}{
+		{map[string]string{"XDG_CONFIG_HOME": "/x"}, "/x/kmd/themes"},
+		{map[string]string{"HOME": "/h"}, "/h/.config/kmd/themes"},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "/h"}, "/h/.config/kmd/themes"},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "~"}, "/usr/share/kmd/themes"},
+	} {
+		if d := ThemeDirs(func(k string) string { return c.env[k] }); d[0] != c.want {
+			t.Errorf("%v: ThemeDirs = %v, want %s first", c.env, d, c.want)
+		}
 	}
 }
 

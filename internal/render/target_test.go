@@ -130,29 +130,34 @@ func TestLinkSpanText(t *testing.T) {
 
 // A long target is validated once per link, not once per painted run (a
 // word each), and not at all without hyperlinks (SR-26): rendering a long
-// link costs about the same with a 2 KiB target as with a short one
-// (validating it per run made it 15 times slower).
+// link costs about the same with a 2 KiB target as with a short one.
+// maxURL bounds the cost
+// per run, so the regression is a constant factor that only time shows,
+// not a growth testlimit.Linear could catch: short and long targets are
+// timed alternately, keeping the best of several runs of each. Emphasis
+// keeps every word a run of its own, and wide lines keep the cost of
+// writing the target on each line small: validating per run is about 6×
+// slower there, against a limit of 3×.
 func TestLongTargetValidatedOnce(t *testing.T) {
-	render := func(urlLen int, links bool) time.Duration {
-		doc := md.Parse("["+strings.Repeat("a ", 100_000)+"x](http://e.x/"+strings.Repeat("a", urlLen)+")\n", md.GFM)
-		best := time.Hour
-		for range 3 {
-			start := time.Now()
-			res := Render(doc, Options{Width: 80, Color: true, Hyperlinks: links})
-			best = min(best, time.Since(start))
-			if links != (len(osc8Targets(res.Text)) > 0) {
-				t.Fatalf("hyperlinks %v: targets %d", links, len(osc8Targets(res.Text)))
+	text := strings.Repeat("a *b* ", 50_000)
+	for _, links := range []bool{false, true} {
+		docs := [2]*md.Node{}
+		for i, n := range []int{10, maxURL - 20} {
+			docs[i] = md.Parse("["+text+"x](http://e.x/"+strings.Repeat("a", n)+")\n", md.GFM)
+		}
+		best := [2]time.Duration{time.Hour, time.Hour}
+		for range 5 {
+			for i, doc := range docs {
+				start := time.Now()
+				res := Render(doc, Options{Width: 1000, Color: true, Hyperlinks: links})
+				best[i] = min(best[i], time.Since(start))
+				if links != (len(osc8Targets(res.Text)) > 0) {
+					t.Fatalf("hyperlinks %v: %d targets", links, len(osc8Targets(res.Text)))
+				}
 			}
 		}
-		return best
-	}
-	short, long := render(10, false), render(maxURL-20, false)
-	if long > testlimit.Scale()*2*time.Second || long > 3*short {
-		t.Errorf("without hyperlinks: %v with a long target, %v with a short one", long, short)
-	}
-	// with hyperlinks the target is written on every line of the link
-	short, long = render(10, true), render(maxURL-20, true)
-	if long > testlimit.Scale()*2*time.Second || long > 6*short {
-		t.Errorf("with hyperlinks: %v with a long target, %v with a short one", long, short)
+		if short, long := best[0], best[1]; long > testlimit.Scale()*2*time.Second || long > 3*short {
+			t.Errorf("hyperlinks %v: %v with a long target, %v with a short one", links, long, short)
+		}
 	}
 }

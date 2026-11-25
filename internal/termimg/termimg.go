@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"image"
 	"strings"
-	"sync"
 )
 
 // Protocol selects how images are drawn.
@@ -113,17 +112,13 @@ var (
 	ErrNilImage    = errors.New("termimg: nil image")
 )
 
-// Image is a validated image ready to render. Its pixels are decoded lazily,
-// at most once, and only when a protocol needs them. An Image is safe for
+// Image is a validated image ready to render. Its pixels are decoded only
+// when a protocol needs them, and not kept. An Image is safe for
 // concurrent use.
 type Image struct {
 	data   []byte // original encoded bytes
 	format string // "png", "jpeg" or "gif"
 	w, h   int    // pixel size from the header
-
-	once   sync.Once
-	pixels image.Image
-	err    error
 }
 
 // Format returns the image format: "png", "jpeg" or "gif".
@@ -132,13 +127,12 @@ func (img *Image) Format() string { return img.format }
 // Size returns the image dimensions in pixels.
 func (img *Image) Size() (w, h int) { return img.w, img.h }
 
-// decode decodes the pixels once. Dimensions were validated by Load, so the
-// allocation is bounded.
+// decode decodes the pixels. Dimensions were validated by Load, so the
+// allocation is bounded; it is not kept: a bitmap (up to 160 MB) would
+// otherwise stay in memory as long as the Image, while each one is
+// usually drawn once. Callers bound how many pixels they render.
 func (img *Image) decode() (image.Image, error) {
-	img.once.Do(func() {
-		img.pixels, img.err = decodeBytes(img.data, img.format)
-	})
-	return img.pixels, img.err
+	return decodeBytes(img.data, img.format)
 }
 
 // Render returns the lines to print for img fitted within maxCols columns and
@@ -156,7 +150,7 @@ func Render(img *Image, p Protocol, maxCols, maxRows int, cell Cell) (Frame, err
 	case Kitty:
 		return renderKitty(img, fit(img.w, img.h, maxCols, maxRows, cell))
 	case ITerm2:
-		return renderITerm2(img, fit(img.w, img.h, maxCols, maxRows, cell)), nil
+		return renderITerm2(img, fit(img.w, img.h, maxCols, maxRows, cell))
 	case Sixel:
 		return renderSixel(img, fit(img.w, img.h, maxCols, maxRows, cell))
 	case None:

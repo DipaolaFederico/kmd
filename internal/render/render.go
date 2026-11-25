@@ -57,10 +57,11 @@ type Options struct {
 
 // Budget holds the per-document limits: a short hostile document must not
 // be able to trigger unbounded image decoding, diagram layout or math
-// layout. Images are decoded once per budget. The zero value is ready.
+// layout. Image files are read once per budget. The zero value is ready.
 type Budget struct {
-	images    map[string]imageResult    // frames by source and size
+	images    map[frameKey]imageResult  // frames by image and size
 	loaded    map[string]*termimg.Image // loaded images by source (nil: failed)
+	loader    termimg.Loader            // reads each file once, ≤ 64 MiB in all
 	imgBytes  int
 	imgPixels int // source pixels rendered (decoded and scaled)
 	specials  int

@@ -13,7 +13,7 @@ func FuzzDataURI(f *testing.F) {
 	f.Add("data:,")
 	f.Add("data:image/png;base64,%41%41==")
 	f.Fuzz(func(t *testing.T, s string) {
-		img, err := Load("data:"+s, "")
+		img, err := new(Loader).Load("data:"+s, "")
 		if err != nil {
 			return
 		}

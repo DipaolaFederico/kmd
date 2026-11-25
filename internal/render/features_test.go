@@ -367,6 +367,39 @@ func TestImageLoadedOnce(t *testing.T) {
 	}
 }
 
+// TestImageNamesShareOneImage: the names of one file (pic.png, ./pic.png,
+// ././pic.png…) are one image with one frame per size, not one each.
+func TestImageNamesShareOneImage(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir)
+	var src strings.Builder
+	for i := range 60 {
+		src.WriteString("![a](" + strings.Repeat("./", i) + "pic.png)\n\n")
+	}
+	b := &Budget{}
+	res := Render(md.Parse(src.String(), md.GFM), Options{Width: 40, Color: true, Images: termimg.Kitty, BaseDir: dir, Budget: b})
+	if len(b.images) != 1 || strings.Count(res.Text, "\x1b_G") != 60 {
+		t.Errorf("%d frames for one file, %d drawn", len(b.images), strings.Count(res.Text, "\x1b_G"))
+	}
+}
+
+// TestImageFramesWithinBudget: a frame that cannot be shown because the
+// output budget is spent is not kept either.
+func TestImageFramesWithinBudget(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir)
+	b := &Budget{imgBytes: maxImageBytes - 10}
+	res := Render(md.Parse("![a](pic.png)", md.GFM), Options{Width: 40, Color: true, Images: termimg.Kitty, BaseDir: dir, Budget: b})
+	if strings.Contains(res.Text, "\x1b_G") {
+		t.Error("image drawn past the budget")
+	}
+	for _, f := range b.images {
+		if f.ok || len(f.frame.Lines) > 0 {
+			t.Errorf("frame kept past the budget: %d lines", len(f.frame.Lines))
+		}
+	}
+}
+
 // TestThemeFileKinds: theme paths must name regular files; a device or a
 // FIFO would be read forever or block.
 func TestThemeFileKinds(t *testing.T) {

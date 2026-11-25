@@ -3,8 +3,10 @@ package termimg
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -25,40 +27,77 @@ const (
 	maxDimension    = 8192       // largest width or height in pixels
 	maxPixels       = 40_000_000 // largest width×height
 	maxPathBytes    = 4096       // longest confined image path (PATH_MAX)
+	// maxLoaderBytes bounds what one Loader (one document) reads from
+	// image files and data: URIs: those bytes stay in memory as long as
+	// their images can be drawn.
+	maxLoaderBytes = 64 << 20
 )
+
+// errBudget: the images of the document have read all a Loader allows.
+var errBudget = fmt.Errorf("%w: the document's images exceed %d MiB", ErrTooLarge, maxLoaderBytes>>20)
+
+// Loader loads the images of one document. Each file is read at most once,
+// however the document names it (a.png, ./a.png, a link to it): every name
+// gets the same *Image, found by the identity of the open file. The bytes
+// read from files and data: URIs, kept with their images, are at most
+// 64 MiB per Loader; a source past that fails with ErrTooLarge. The zero
+// value is ready. A Loader is not safe for concurrent use.
+type Loader struct {
+	read  int          // bytes read so far
+	files []loadedFile // files read, compared with os.SameFile
+}
+
+type loadedFile struct {
+	fi  fs.FileInfo // from the open descriptor
+	img *Image
+	err error
+}
 
 // Load resolves src and validates it as a PNG, JPEG or GIF image. src is a
 // path relative to baseDir, an absolute path, a file: URL or a base64 data:
-// URI. Any other URL (http:, https:, ftp:, //host, …) returns ErrRemote:
-// images are never fetched over the network.
+// URI. Any other URL (http:, https:, ftp:, //host, …) and network or device
+// paths (see networkPath) return ErrRemote: images are never fetched over
+// the network.
 //
 // Only the header is parsed here; pixels are decoded on demand by Render.
-func Load(src, baseDir string) (*Image, error) {
+func (l *Loader) Load(src, baseDir string) (*Image, error) {
 	src = strings.TrimSpace(src)
 	if src == "" {
 		return nil, fmt.Errorf("termimg: empty image source")
 	}
-	if strings.HasPrefix(src, "//") {
+	if networkPath(src) {
 		return nil, ErrRemote
 	}
 	switch scheme := strings.ToLower(urlScheme(src)); scheme {
 	case "":
-		return loadPath(src, baseDir)
+		return l.loadPath(src, baseDir)
 	case "data":
-		data, err := parseDataURI(src)
-		if err != nil {
-			return nil, err
-		}
-		return validate(data)
+		return l.loadData(src)
 	case "file":
 		u, err := url.Parse(src)
-		if err != nil || (u.Host != "" && u.Host != "localhost") || u.Path == "" {
+		if err != nil || (u.Host != "" && u.Host != "localhost") || u.Path == "" || networkPath(u.Path) {
 			return nil, ErrRemote
 		}
-		return loadFile(u.Path)
+		return l.loadFrom(osFS{}, u.Path)
 	default:
 		return nil, ErrRemote
 	}
+}
+
+// networkPath reports whether p is, on some platform, a network or device
+// path rather than a local file: two leading separators in any mix of /
+// and \ (//host/share, \\host\share, /\host, \\?\UNC\…, \\.\pipe\…), the
+// NT prefix \??\, or a Windows volume that is not a drive letter. On
+// Windows, a mere os.Stat of \\host\share opens an SMB connection to the
+// host (and offers it the user's NTLM hash). The rule does not depend on
+// the platform, but for the volume check, so it is tested everywhere.
+func networkPath(p string) bool {
+	sep := func(i int) bool { return i < len(p) && (p[i] == '/' || p[i] == '\\') }
+	if sep(0) && (sep(1) || strings.HasPrefix(p[1:], "??") && sep(3)) {
+		return true
+	}
+	v := filepath.VolumeName(p)
+	return v != "" && (len(v) != 2 || v[1] != ':')
 }
 
 // urlScheme returns the RFC 3986 scheme of s, or "" when s looks like a
@@ -82,18 +121,18 @@ func urlScheme(s string) string {
 // a relative path that stays inside dir. Absolute paths, file: URLs, ".."
 // and symbolic links leading outside dir are refused: symbolic links by
 // os.Root, the others with ErrOutside. With dir == "" only data: URIs load.
-func LoadIn(src, dir string) (*Image, error) {
+func (l *Loader) LoadIn(src, dir string) (*Image, error) {
 	src = strings.TrimSpace(src)
 	if src == "" {
 		return nil, fmt.Errorf("termimg: empty image source")
 	}
-	if strings.HasPrefix(src, "//") {
+	if networkPath(src) {
 		return nil, ErrRemote
 	}
 	switch scheme := strings.ToLower(urlScheme(src)); scheme {
 	case "":
 	case "data":
-		return Load(src, "")
+		return l.loadData(src)
 	case "file":
 		return nil, ErrOutside
 	default:
@@ -114,13 +153,13 @@ func LoadIn(src, dir string) (*Image, error) {
 		return nil, err
 	}
 	defer func() { _ = root.Close() }()
-	img, err := loadFrom(root, p)
+	img, err := l.loadFrom(root, p)
 	if errors.Is(err, fs.ErrNotExist) && strings.Contains(src, "%") {
 		if u, uerr := url.PathUnescape(src); uerr == nil && u != src {
 			if p, ok = localPath(u); !ok {
 				return nil, ErrOutside
 			}
-			img, err = loadFrom(root, p)
+			img, err = l.loadFrom(root, p)
 		}
 	}
 	return img, err
@@ -138,17 +177,37 @@ func localPath(p string) (string, bool) {
 }
 
 // loadPath resolves a (possibly relative, possibly percent-encoded) path.
-func loadPath(p, baseDir string) (*Image, error) {
-	if !filepath.IsAbs(p) {
-		p = filepath.Join(baseDir, p)
-	}
-	img, err := loadFile(p)
+func (l *Loader) loadPath(p, baseDir string) (*Image, error) {
+	img, err := l.loadFrom(osFS{}, joinBase(p, baseDir))
 	if errors.Is(err, fs.ErrNotExist) && strings.Contains(p, "%") {
 		if u, uerr := url.PathUnescape(p); uerr == nil && u != p {
-			return loadFile(u)
+			if networkPath(u) { // %5C%5Chost: checked like the source
+				return nil, ErrRemote
+			}
+			return l.loadFrom(osFS{}, joinBase(u, baseDir))
 		}
 	}
 	return img, err
+}
+
+func joinBase(p, baseDir string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(baseDir, p)
+}
+
+// loadData decodes a data: URI, counting its bytes in the Loader's budget.
+func (l *Loader) loadData(src string) (*Image, error) {
+	data, err := parseDataURI(src)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxLoaderBytes-l.read {
+		return nil, errBudget
+	}
+	l.read += len(data)
+	return validate(data)
 }
 
 // fileSystem is where image files are read from: the whole file system
@@ -168,12 +227,10 @@ func (osFS) OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error) 
 	return os.OpenFile(name, flag, perm)
 }
 
-// loadFile reads and validates an image file anywhere on the file system.
-func loadFile(path string) (*Image, error) { return loadFrom(osFS{}, path) }
-
 // loadFrom reads and validates an image file. Only regular files are opened:
-// a FIFO or device could block forever or produce unbounded data.
-func loadFrom(fsys fileSystem, path string) (*Image, error) {
+// a FIFO or device could block forever or produce unbounded data. A file
+// the Loader has read before, under any name, is not read again.
+func (l *Loader) loadFrom(fsys fileSystem, path string) (*Image, error) {
 	fi, err := fsys.Stat(path)
 	if err != nil {
 		return nil, err
@@ -200,14 +257,40 @@ func loadFrom(fsys fileSystem, path string) (*Image, error) {
 	if !fi.Mode().IsRegular() {
 		return nil, fmt.Errorf("%w: %s", ErrNotRegular, path)
 	}
-	data, err := io.ReadAll(io.LimitReader(f, maxFileBytes+1))
+	for _, seen := range l.files {
+		if os.SameFile(seen.fi, fi) {
+			return seen.img, seen.err
+		}
+	}
+	data, err := l.readFile(f, fi.Size(), path)
+	if errors.Is(err, errBudget) {
+		return nil, err // nothing was read: not remembered
+	}
+	var img *Image
+	if err == nil {
+		img, err = validate(data)
+	}
+	l.files = append(l.files, loadedFile{fi: fi, img: img, err: err})
+	return img, err
+}
+
+// readFile reads an open image file of the given size within the file
+// limit and what is left of the Loader's budget. Bytes read for a file
+// that then fails count too: the budget bounds reading, not only memory.
+func (l *Loader) readFile(f io.Reader, size int64, path string) ([]byte, error) {
+	limit := min(maxFileBytes, maxLoaderBytes-l.read)
+	if size > int64(limit) {
+		return nil, errBudget
+	}
+	data, err := io.ReadAll(io.LimitReader(f, int64(limit)+1))
+	l.read += len(data)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > maxFileBytes {
+	if len(data) > limit { // the file grew after it was checked
 		return nil, fmt.Errorf("%w: %s", ErrTooLarge, path)
 	}
-	return validate(data)
+	return data, nil
 }
 
 // parseDataURI decodes "data:[<mediatype>][;params];base64,<payload>".
@@ -282,7 +365,55 @@ func validate(data []byte) (*Image, error) {
 	if cfg.Width > maxDimension || cfg.Height > maxDimension || cfg.Width*cfg.Height > maxPixels {
 		return nil, fmt.Errorf("%w: %d×%d pixels", ErrTooLarge, cfg.Width, cfg.Height)
 	}
+	if format == "png" {
+		if err := checkPNG(data); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
+		}
+	}
 	return &Image{data: data, format: format, w: cfg.Width, h: cfg.Height}, nil
+}
+
+// checkPNG walks the chunks of a PNG without inflating them: IHDR first,
+// every length within the file, every type four letters, every CRC right,
+// and IEND last with nothing after it. kitty and iTerm2 receive PNG files
+// as they are, so a terminal's decoder only ever sees a well-formed one;
+// the walk costs a CRC over the file, far less than decoding it.
+func checkPNG(data []byte) error {
+	rest, ok := bytes.CutPrefix(data, []byte("\x89PNG\r\n\x1a\n"))
+	if !ok {
+		return errors.New("png: bad signature")
+	}
+	for first := true; len(rest) >= 12; first = false {
+		n := binary.BigEndian.Uint32(rest)
+		if int64(n) > int64(len(rest)-12) {
+			return errors.New("png: truncated chunk")
+		}
+		typ, end := string(rest[4:8]), 8+int(n)
+		if !chunkType(typ) || first != (typ == "IHDR") {
+			return fmt.Errorf("png: unexpected chunk %q", typ)
+		}
+		if crc32.ChecksumIEEE(rest[4:end]) != binary.BigEndian.Uint32(rest[end:]) {
+			return fmt.Errorf("png: bad checksum in %s", typ)
+		}
+		rest = rest[end+4:]
+		if typ == "IEND" {
+			if len(rest) > 0 {
+				return errors.New("png: data after IEND")
+			}
+			return nil
+		}
+	}
+	return errors.New("png: no IEND chunk")
+}
+
+// chunkType reports whether t is a PNG chunk type: four ASCII letters.
+func chunkType(t string) bool {
+	for i := 0; i < len(t); i++ {
+		if c := t[i] | 0x20; c < 'a' || c > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 // decodeBytes fully decodes validated image data with the decoder for its

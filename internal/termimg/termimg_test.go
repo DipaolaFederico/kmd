@@ -1,10 +1,12 @@
 package termimg
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"image"
 	"image/color"
+	"image/png"
 	"strconv"
 	"strings"
 	"sync"
@@ -318,9 +320,10 @@ func TestRenderKittyTransparentGIF(t *testing.T) {
 	}
 }
 
-func TestRenderITerm2(t *testing.T) {
-	data := encodeJPEG(t, gradient(300, 200))
-	img := mustLoadBytes(t, data)
+// iTerm2Payload renders img with iTerm2 in a 20-column box of 10×20 cells
+// and returns the file the sequence carries.
+func iTerm2Payload(t *testing.T, img *Image) []byte {
+	t.Helper()
 	f, err := Render(img, ITerm2, 20, 24, Cell{W: 10, H: 20})
 	if err != nil {
 		t.Fatal(err)
@@ -328,14 +331,36 @@ func TestRenderITerm2(t *testing.T) {
 	if len(f.Lines) != 1 || f.Cols != 20 {
 		t.Fatalf("frame %d lines %d cols", len(f.Lines), f.Cols)
 	}
-	head := "\x1b]1337;File=inline=1;size=" + itoa(len(data)) + ";width=20;height=7;preserveAspectRatio=1:"
 	l := f.Lines[0]
-	if !strings.HasPrefix(l, head) || !strings.HasSuffix(l, "\a") {
+	head, body, ok := strings.Cut(l, ";preserveAspectRatio=1:")
+	if !ok || !strings.HasPrefix(head, "\x1b]1337;File=inline=1;size=") || !strings.HasSuffix(head, ";width=20;height=7") ||
+		!strings.HasSuffix(body, "\a") {
 		t.Fatalf("bad sequence %q", l[:min(80, len(l))])
 	}
-	got, err := base64.StdEncoding.DecodeString(l[len(head) : len(l)-1])
-	if err != nil || string(got) != string(data) {
-		t.Fatalf("payload mismatch: %v", err)
+	got, err := base64.StdEncoding.DecodeString(body[:len(body)-1])
+	if err != nil || !strings.Contains(head, "size="+itoa(len(got))+";") {
+		t.Fatalf("payload: %v", err)
+	}
+	return got
+}
+
+// TestRenderITerm2: a PNG is passed through; a JPEG or GIF is never
+// handed to the terminal's decoder: kmd decodes it and sends its first
+// frame, scaled, as a PNG.
+func TestRenderITerm2(t *testing.T) {
+	data := encodePNG(t, gradient(300, 200))
+	if got := iTerm2Payload(t, mustLoadBytes(t, data)); string(got) != string(data) {
+		t.Fatal("PNG not passed through")
+	}
+	for _, data := range [][]byte{encodeJPEG(t, gradient(300, 200)), encodeGIF(t, gradient(300, 200))} {
+		got := iTerm2Payload(t, mustLoadBytes(t, data))
+		m, err := png.Decode(bytes.NewReader(got))
+		if err != nil || m.Bounds().Dx() != 200 || m.Bounds().Dy() != 133 {
+			t.Fatalf("re-encoded payload: %v %v", m.Bounds(), err)
+		}
+	}
+	if _, err := Render(mustLoadBytes(t, encodeJPEG(t, noise(64, 64, 2))[:1000]), ITerm2, 20, 24, Cell{}); err == nil {
+		t.Error("truncated JPEG sent to the terminal")
 	}
 }
 
@@ -408,7 +433,8 @@ func TestRenderMisc(t *testing.T) {
 }
 
 func TestRenderDecodeError(t *testing.T) {
-	for _, data := range [][]byte{pngHeader(10, 10), encodeJPEG(t, noise(64, 64, 2))[:1000]} {
+	badDeflate := pngChunk(pngChunk(pngHeader(10, 10), "IDAT", []byte("not deflate")), "IEND", nil)
+	for _, data := range [][]byte{badDeflate, encodeJPEG(t, noise(64, 64, 2))[:1000]} {
 		img := mustLoadBytes(t, data)
 		for _, p := range []Protocol{Blocks, Sixel} {
 			if _, err := Render(img, p, 80, 24, Cell{}); err == nil {

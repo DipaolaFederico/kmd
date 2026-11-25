@@ -650,12 +650,12 @@ func TestWrapCombining(t *testing.T) {
 }
 
 // TestWrapForeignMarks: a mark from a later span joins the previous
-// character too, a bounded number of them.
+// character too, up to maxCellBytes.
 func TestWrapForeignMarks(t *testing.T) {
 	l := styled.Line{{Text: "x"}, {Text: "\u0302y", Class: styled.Muted}, {Text: strings.Repeat("\u0301", 100)}}
 	got := wrap(l, 2)
 	if len(got) != 1 || len(got[0]) != 2 || got[0][0].Text != "x\u0302" || !strings.HasPrefix(got[0][1].Text, "y\u0301") ||
-		len(got[0][1].Text) > 1+maxForeignMarks+2 {
+		len(got[0][1].Text) > maxCellBytes+1 {
 		t.Errorf("wrap = %q", got)
 	}
 }

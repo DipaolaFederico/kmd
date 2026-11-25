@@ -136,10 +136,11 @@ type cell struct {
 	w     int
 }
 
-// maxForeignMarks bounds the zero-width runes a cell takes from a later
-// span: they cannot be sliced from the cell's own span, so they are
-// copied, and copying an unbounded run of them would be quadratic.
-const maxForeignMarks = 64
+// maxCellBytes bounds the bytes a cell grows to with zero-width runes
+// from later spans: they cannot be sliced from the cell's own span, so
+// they are copied, and copying an unbounded run of them would be
+// quadratic. Past it they are dropped.
+const maxCellBytes = 64
 
 // cellsOf splits l into characters, each with its zero-width runes
 // (combining marks).
@@ -158,7 +159,7 @@ func cellsOf(l styled.Line) []cell {
 				switch c := &cells[n-1]; {
 				case owner == k:
 					c.text = s.Text[start:i]
-				case len(c.text) < maxForeignMarks:
+				case len(c.text) < maxCellBytes:
 					c.text += t
 				}
 				continue

@@ -195,6 +195,9 @@ func ThemeDirs(getenv func(string) string) []string {
 }
 
 // UserThemes lists *.theme files found in dirs (names without extension).
+// Only plain names are listed (see themeName): the list reaches the
+// terminal and the shell completions, and a theme folder is often filled
+// by unpacking or cloning someone else's themes.
 func UserThemes(dirs []string) []string {
 	var names []string
 	for _, d := range dirs {
@@ -203,12 +206,26 @@ func UserThemes(dirs []string) []string {
 			continue
 		}
 		for _, e := range entries {
-			if n, ok := strings.CutSuffix(e.Name(), ".theme"); ok && !e.IsDir() {
+			if n, ok := strings.CutSuffix(e.Name(), ".theme"); ok && !e.IsDir() && themeName(n) {
 				names = append(names, n)
 			}
 		}
 	}
 	return names
+}
+
+// themeName reports whether n is a name UserThemes lists: an ASCII letter
+// or digit followed by letters, digits, dots, dashes and underscores. No
+// shell or terminal gives any of them a meaning (`$(touch x)`, an ESC).
+func themeName(n string) bool {
+	for i := 0; i < len(n); i++ {
+		c := n[i]
+		alnum := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+		if !alnum && (i == 0 || c != '.' && c != '-' && c != '_') {
+			return false
+		}
+	}
+	return n != ""
 }
 
 // ErrUnknownTheme is returned for a theme that is neither bundled nor on disk.

@@ -170,6 +170,18 @@ func TestThemes(t *testing.T) {
 	if names := UserThemes(dirs); len(names) != 2 {
 		t.Errorf("UserThemes = %v", names)
 	}
+	// names a shell or the terminal would interpret are never listed
+	for _, hostile := range []string{"$(touch PWNED).theme", "`id`.theme", "a b.theme", "esc\x1b]0;T\a.theme", "-rf.theme", ".theme", "x:y.theme"} {
+		if err := os.WriteFile(filepath.Join(dirs[0], hostile), []byte(custom), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dirs[0], "my-theme_2.1.theme"), []byte(custom), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if names := strings.Join(UserThemes(dirs), " "); names != "child mine my-theme_2.1" {
+		t.Errorf("UserThemes with hostile names = %q", names)
+	}
 	// explicit path
 	if _, err := LoadTheme(filepath.Join(dirs[0], "mine.theme"), nil); err != nil {
 		t.Error(err)

@@ -26,7 +26,7 @@ func listThemes(env Env, s settings) int {
 		for _, n := range names {
 			t, err := render.LoadTheme(n, dirs)
 			if err != nil {
-				fmt.Fprintf(&b, "    %-18s \x1b[2m(%v)\x1b[0m\n", n, err)
+				fmt.Fprintf(&b, "    %-18s \x1b[2m(%s)\x1b[0m\n", n, render.Clean(err.Error()))
 				continue
 			}
 			mark := "  "
@@ -47,7 +47,7 @@ func listThemes(env Env, s settings) int {
 	}
 	section("Bundled themes", render.BuiltinThemes())
 	if len(user) > 0 {
-		section("Your themes ("+strings.Join(dirs[:1], "")+")", user)
+		section("Your themes ("+render.Clean(dirs[0])+")", user)
 	}
 	b.WriteString("\n  Use: kmd -t NAME · customize: kmd --theme-template NAME > ~/.config/kmd/themes/mine.theme\n\n")
 	_, _ = io.WriteString(env.Stdout, b.String())
@@ -93,14 +93,20 @@ func showConfig(env Env, cfg config, s settings) int {
 	return 0
 }
 
+// The theme names are matched in a loop, never given to compgen -W, which
+// would expand $(…) and backquotes in them: they are file names.
 const bashCompletion = `# bash completion for kmd
 _kmd() {
-    local cur prev
+    local cur prev theme
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     case "$prev" in
         -t|--theme|--theme-template)
-            COMPREPLY=($(compgen -W "$(kmd --list-themes --color=never 2>/dev/null)" -- "$cur")); return ;;
+            COMPREPLY=()
+            while IFS= read -r theme; do
+                [[ "$theme" == "$cur"* ]] && COMPREPLY+=("$theme")
+            done < <(kmd --list-themes --color=never 2>/dev/null)
+            return ;;
         -c|--color|--hyperlinks)
             COMPREPLY=($(compgen -W "auto always never" -- "$cur")); return ;;
         -i|--images)

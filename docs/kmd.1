@@ -419,7 +419,8 @@ programs) are handed to the desktop. Clickable OSC 8 targets are only
 \fBhttp\fR(\fBs\fR) URLs without a user name, \fBmailto:\fR with only a
 subject and body, and \fBfile://\fR URLs of local Markdown and document
 files. The viewer shows the scheme and whole host of a web link before
-opening it. Reloads and linked documents are opened without blocking and
+opening it, and refuses web links with a user name or without a plainly
+written host. Reloads and linked documents are opened without blocking and
 must be regular files. The only query sent to the terminal
 asks for its background color (see \fBTHEMES\fR); its answer is read for
 about a second at most and 256 bytes and parsed strictly. The only file

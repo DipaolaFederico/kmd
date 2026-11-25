@@ -39,7 +39,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   hidden behind a NUL are no longer clickable in the terminal.
 - The viewer's status bar always shows the whole host of a selected web
   link, and links with a user name
-  (`https://github.com%2Flogin@evil.example/`) are refused.
+  (`https://github.com%2Flogin@evil.example/`) or whose host a browser
+  would read differently (`https:github.com%2F…@evil.example`) are refused.
 - `render`: with `Hyperlinks` and no `BaseDir`, relative links no longer
   reveal the process's working directory.
 - Images named several ways in one document (`a.png`, `./a.png`, symbolic or

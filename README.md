@@ -643,8 +643,9 @@ threat model:
   the browser (their scripts would run). A click on a link that leaves kmd
   (web, mail, desktop apps) first selects it and shows its target; a second
   click or Enter opens it. The target shown always has its scheme and whole
-  host (the path is shortened first); web links with a user name are
-  refused.
+  host (the path is shortened first); web links with a user name, or
+  without a plainly written host (`https:host`, `https:/…`, `https:///…`,
+  which browsers read differently), are refused.
 - **Documents**: only the first read of a document named on the command
   line may wait on a pipe (`kmd <(command)`); every reload is opened without
   blocking and must find a regular file. A document opened through a link or

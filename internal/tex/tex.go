@@ -141,9 +141,9 @@ type cell struct {
 // copied, and copying an unbounded run of them would be quadratic.
 const maxForeignMarks = 64
 
-// wrap breaks l into lines at most width columns wide, preferring breaks
-// at spaces, and pads them to a common width.
-func wrap(l styled.Line, width int) []styled.Line {
+// cellsOf splits l into characters, each with its zero-width runes
+// (combining marks).
+func cellsOf(l styled.Line) []cell {
 	var cells []cell
 	owner, start := -1, 0 // span and offset where the last cell starts
 	for k, s := range l {
@@ -152,10 +152,9 @@ func wrap(l styled.Line, width int) []styled.Line {
 			t := s.Text[i : i+size]
 			i += size
 			if n := len(cells); n > 0 && styled.RuneWidth(r) == 0 {
-				// a zero-width rune (a combining mark) joins the previous
-				// character: a longer slice of the same span costs nothing,
-				// however many follow (the verbatim fallback of a hostile
-				// formula is one span of thousands of them)
+				// a longer slice of the same span costs nothing, however
+				// many follow (the verbatim fallback of a hostile formula
+				// is one span of thousands of them)
 				switch c := &cells[n-1]; {
 				case owner == k:
 					c.text = s.Text[start:i]
@@ -168,6 +167,13 @@ func wrap(l styled.Line, width int) []styled.Line {
 			owner, start = k, i-size
 		}
 	}
+	return cells
+}
+
+// wrap breaks l into lines at most width columns wide, preferring breaks
+// at spaces, and pads them to a common width.
+func wrap(l styled.Line, width int) []styled.Line {
+	cells := cellsOf(l)
 	for i := range cells {
 		cells[i].w = styled.Width(cells[i].text)
 	}

@@ -36,6 +36,21 @@ func lineWidth(l rline) int {
 	return w
 }
 
+// elide shortens s to at most width columns (width ≥ 1), ending it with
+// "…" when something was left out.
+func elide(s string, width int) string {
+	if strWidth(s) <= width {
+		return s
+	}
+	w := 0
+	for i, r := range s {
+		if w += runeWidth(r); w > width-1 {
+			return s[:i] + "…"
+		}
+	}
+	return s
+}
+
 // cut hard-splits a line into chunks of at most width columns.
 func cut(l rline, width int) []rline {
 	if width < 1 {

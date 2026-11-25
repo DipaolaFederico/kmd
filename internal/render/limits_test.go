@@ -69,6 +69,28 @@ func TestWideTableLinear(t *testing.T) {
 	})
 }
 
+// TestStackedTableLabels: a table drawn as records repeats short labels,
+// not whole headers: 20 headers of 2,000 bytes over 1,000 empty rows
+// printed 40 MB (rows × header bytes, from a 40 KB document).
+func TestStackedTableLabels(t *testing.T) {
+	head := "|" + strings.Repeat(strings.Repeat("a", 2000)+"|", 20) + "\n|" + strings.Repeat("-|", 20) + "\n"
+	start := time.Now()
+	out := RenderString(head+strings.Repeat("|\n", 1000), Options{Width: 80})
+	if d := time.Since(start); d > testlimit.Scale()*time.Second/2 {
+		t.Errorf("took %v", d)
+	}
+	if len(out) > 2<<20 {
+		t.Errorf("%d bytes of output", len(out))
+	}
+	label := strings.Repeat("a", maxLabelWidth-1) + "…:"
+	if !strings.Contains(out, "\n  "+label+"\n") {
+		t.Errorf("no elided label %q in\n%.500s", label, out)
+	}
+	if got := RenderString("| h1 | h2 |\n|-|-|\n| x |", Options{Width: 8}); !strings.Contains(got, "h1: x") || !strings.Contains(got, "h2:") {
+		t.Errorf("short labels changed:\n%s", got)
+	}
+}
+
 // TestShortTableRows: a row with fewer cells than the header is drawn as
 // if padded with empty cells (the parser no longer makes them).
 func TestShortTableRows(t *testing.T) {

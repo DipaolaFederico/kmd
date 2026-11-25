@@ -837,6 +837,17 @@ func (r *renderer) stackedTable(cells [][][]run, width int) []rline {
 	head := cells[0]
 	label := Style{Fg: r.th.TableHead, Attr: Bold}
 	sep := rline{{text: strings.Repeat("┄", min(width, 24)), st: Style{Fg: r.th.Border}}}
+	// the labels are repeated in every record: made once, and short, or a
+	// table of long headers and many empty rows would print the headers
+	// thousands of times
+	names := make([]string, len(head))
+	for j := range head {
+		name := strings.TrimSpace(runsText(head[j]))
+		if name == "" {
+			name = "#" + strconv.Itoa(j+1)
+		}
+		names[j] = elide(name, maxLabelWidth) + ":"
+	}
 	var out []rline
 	body := cells[1:]
 	if len(body) == 0 {
@@ -847,16 +858,16 @@ func (r *renderer) stackedTable(cells [][][]run, width int) []rline {
 			out = append(out, sep)
 		}
 		for j, cell := range row {
-			name := strings.TrimSpace(runsText(head[j]))
-			if name == "" {
-				name = "#" + strconv.Itoa(j+1)
-			}
-			rs := append([]run{{text: name + ":", st: label}, {text: " "}}, cell...)
+			rs := append([]run{{text: names[j], st: label}, {text: " "}}, cell...)
 			out = append(out, wrap(rs, width)...)
 		}
 	}
 	return out
 }
+
+// maxLabelWidth bounds the header shown before each value of a table
+// drawn as records, in columns.
+const maxLabelWidth = 32
 
 // TOC renders the document outline (headings) as a numbered tree.
 func TOC(doc *md.Node, o Options) string {

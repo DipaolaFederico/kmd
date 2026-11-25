@@ -467,6 +467,10 @@ func (m *model) follow(href string) {
 	case "mailto":
 		// only the address, subject and body
 		s := render.Mailto(u)
+		if s == "" {
+			m.msg = "refused: the address hides a parameter"
+			return
+		}
 		m.external(s, clip(s, 60))
 	default:
 		m.msg = "unsupported link: " + clip(href, 50)

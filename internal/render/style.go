@@ -109,38 +109,22 @@ func (p *painter) sgr(out *strings.Builder, s Style) {
 	out.WriteString(b.String())
 }
 
-// safeURL drops URLs that could terminate an OSC 8 sequence early.
-const maxURL = md.MaxURL // the longest link target kmd emits or resolves
+// maxURL is the longest link target kmd emits or resolves.
+const maxURL = md.MaxURL
 
+// safeURL returns u when it may be an OSC 8 target, or "": valid UTF-8 of
+// reasonable length, without the characters styled.Hidden reports (a
+// control would end the sequence early, an invisible one would spoof the
+// target a terminal shows on hover) and without zero-width joiners, which
+// text needs but no URL does.
 func safeURL(u string) string {
-	if len(u) > maxURL {
+	if len(u) > maxURL || !utf8.ValidString(u) || strings.ContainsFunc(u, hiddenInURL) {
 		return ""
-	}
-	if !utf8.ValidString(u) || hasInvisible(u) {
-		return ""
-	}
-	for i := 0; i < len(u); i++ {
-		if c := u[i]; c < 0x20 || c == 0x7f || (c == 0xc2 && i+1 < len(u) && u[i+1] < 0xa0) {
-			return ""
-		}
 	}
 	return u
 }
 
-// isBidiControl reports Unicode bidi embedding/override/isolate controls,
-// which can visually reorder text (CVE-2021-42574, "Trojan Source").
-func isBidiControl(r rune) bool { return (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) }
-
-// hasInvisible reports bidi controls and zero-width/format characters that
-// have no business in a URL (spoofing the hover target).
-func hasInvisible(s string) bool {
-	for _, r := range s {
-		if isBidiControl(r) || (r >= 0x200b && r <= 0x200f) || r == 0xfeff {
-			return true
-		}
-	}
-	return false
-}
+func hiddenInURL(r rune) bool { return styled.Hidden(r) || r == 0x200c || r == 0x200d }
 
 // clean removes from document text the characters that could drive the
 // terminal (C0/C1 controls, DEL, invalid UTF-8), visually reorder it (bidi

@@ -8,6 +8,8 @@ import (
 	"unicode"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
+	"github.com/DipaolaFederico/kmd/internal/styled"
+	"github.com/DipaolaFederico/kmd/internal/termimg"
 )
 
 // Link is a hyperlink of the rendered document, located on screen so an
@@ -157,6 +159,9 @@ func (r *renderer) href(dest string) (h string, local bool) {
 			frag = f
 		}
 	}
+	if termimg.NetworkPath(p) { // \\host\share is absolute on Windows
+		return dest, false
+	}
 	if !filepath.IsAbs(p) {
 		if r.absDir == "" {
 			dir := r.opt.BaseDir
@@ -213,17 +218,23 @@ func target(h string, local bool) string {
 	return ""
 }
 
-// Mailto returns the mailto: URL u with only its subject and body: some
-// mail clients honour parameters such as attach=/path/to/secret.
+// Mailto returns the mailto: URL u with only its subject and body, since
+// some mail clients honour parameters such as attach=/path/to/secret, or
+// "" when its address hides a parameter: mailto:%3Fattach=…@x reaches a
+// client that decodes the address before splitting off the query.
 func Mailto(u *url.URL) string {
-	q := url.Values{}
+	addr, err := url.PathUnescape(u.Opaque + u.Path)
+	if err != nil || strings.ContainsAny(addr, "?&#") {
+		return ""
+	}
+	q, keep := u.Query(), url.Values{}
 	for _, k := range []string{"subject", "body"} {
-		if v := u.Query().Get(k); v != "" {
-			q.Set(k, v)
+		if v := q.Get(k); v != "" {
+			keep.Set(k, v)
 		}
 	}
 	m := *u
-	m.RawQuery = q.Encode()
+	m.RawQuery = keep.Encode()
 	return m.String()
 }
 
@@ -247,14 +258,16 @@ var DocumentExt = map[string]bool{
 // targets: a terminal opens a clicked file:// link with the desktop, which
 // would run a script or a .desktop file, or reach a remote host.
 func openable(u *url.URL) bool {
-	return (u.Host == "" || strings.EqualFold(u.Host, "localhost")) && docPath(u.Path)
+	return termimg.LocalHost(u.Host) && docPath(u.Path)
 }
 
-// docPath reports whether path names a Markdown or document file and has
-// no control characters ("evil.desktop%00.md" decodes to a name whose
-// extension is .desktop for programs that stop at the NUL).
+// docPath reports whether path names a local Markdown or document file:
+// not a network or device path (file:////host/share/a.md makes Windows
+// open an SMB connection), and without control or invisible characters
+// ("evil.desktop%00.md" decodes to a name whose extension is .desktop for
+// programs that stop at the NUL).
 func docPath(path string) bool {
-	if strings.ContainsFunc(path, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+	if termimg.NetworkPath(path) || strings.ContainsFunc(path, styled.Hidden) {
 		return false
 	}
 	ext := strings.ToLower(filepath.Ext(path))

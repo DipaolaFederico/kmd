@@ -58,6 +58,17 @@ func TestOSC8TargetPolicy(t *testing.T) {
 		"[w](https:///nohost)":                              "",
 		"[w](https://github.com%2Flogin@evil.example/x)":    "",
 		"[w](https://user:pw@example.com/)":                 "",
+		// network shares named by file: URLs or paths, either separator
+		"[a](file:////host/share/a.md)":          "",
+		"[d](file://localhost//host/share/a.md)": "",
+		"[g](file:/%2F%2Fhost/share/a.md)":       "",
+		"[b](file:///%5C%5Chost%5Cshare%5Ca.md)": "",
+		"[r](%5C%5Chost%5Cshare%5Ca.md)":         "",
+		"[r](%2F%5Chost/share/a.md)":             "",
+		"[u](file:///tmp/doc\u200b.md)":          "",
+		// a parameter hidden in the address
+		"[m](mailto:%3Fattach=/etc/passwd@x)":  "",
+		"[m](mailto:a%26attach=/etc/passwd@x)": "",
 	} {
 		res := Render(md.Parse(src, md.GFM), Options{Width: 80, Color: true, Hyperlinks: true, Images: 0, BaseDir: dir})
 		if got := strings.Join(osc8Targets(res.Text), " "); got != want {

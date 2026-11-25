@@ -56,16 +56,17 @@ type loadedFile struct {
 // Load resolves src and validates it as a PNG, JPEG or GIF image. src is a
 // path relative to baseDir, an absolute path, a file: URL or a base64 data:
 // URI. Any other URL (http:, https:, ftp:, //host, …) and network or device
-// paths (see networkPath) return ErrRemote: images are never fetched over
+// paths (see NetworkPath) return ErrRemote: images are never fetched over
 // the network.
 //
-// Only the header is parsed here; pixels are decoded on demand by Render.
+// The file's structure is checked here (see validate) without decoding its
+// pixels; Render decodes them on demand.
 func (l *Loader) Load(src, baseDir string) (*Image, error) {
 	src = strings.TrimSpace(src)
 	if src == "" {
 		return nil, fmt.Errorf("termimg: empty image source")
 	}
-	if networkPath(src) {
+	if NetworkPath(src) {
 		return nil, ErrRemote
 	}
 	switch scheme := strings.ToLower(urlScheme(src)); scheme {
@@ -75,7 +76,7 @@ func (l *Loader) Load(src, baseDir string) (*Image, error) {
 		return l.loadData(src)
 	case "file":
 		u, err := url.Parse(src)
-		if err != nil || (u.Host != "" && u.Host != "localhost") || u.Path == "" || networkPath(u.Path) {
+		if err != nil || !LocalHost(u.Host) || u.Path == "" || NetworkPath(u.Path) {
 			return nil, ErrRemote
 		}
 		return l.loadFrom(osFS{}, u.Path)
@@ -84,20 +85,26 @@ func (l *Loader) Load(src, baseDir string) (*Image, error) {
 	}
 }
 
-// networkPath reports whether p is, on some platform, a network or device
-// path rather than a local file: two leading separators in any mix of /
+// NetworkPath reports whether p is, on some platform, a network or device
+// path rather than a local file (images and OSC 8 targets name neither): two leading separators in any mix of /
 // and \ (//host/share, \\host\share, /\host, \\?\UNC\…, \\.\pipe\…), the
 // NT prefix \??\, or a Windows volume that is not a drive letter. On
 // Windows, a mere os.Stat of \\host\share opens an SMB connection to the
 // host (and offers it the user's NTLM hash). The rule does not depend on
 // the platform, but for the volume check, so it is tested everywhere.
-func networkPath(p string) bool {
+func NetworkPath(p string) bool {
 	sep := func(i int) bool { return i < len(p) && (p[i] == '/' || p[i] == '\\') }
 	if sep(0) && (sep(1) || strings.HasPrefix(p[1:], "??") && sep(3)) {
 		return true
 	}
 	v := filepath.VolumeName(p)
 	return v != "" && (len(v) != 2 || v[1] != ':')
+}
+
+// LocalHost reports whether host, the host of a file: URL, names this
+// machine: empty or localhost (any case). Another host is a network share.
+func LocalHost(host string) bool {
+	return host == "" || strings.EqualFold(host, "localhost")
 }
 
 // urlScheme returns the RFC 3986 scheme of s, or "" when s looks like a
@@ -126,7 +133,7 @@ func (l *Loader) LoadIn(src, dir string) (*Image, error) {
 	if src == "" {
 		return nil, fmt.Errorf("termimg: empty image source")
 	}
-	if networkPath(src) {
+	if NetworkPath(src) {
 		return nil, ErrRemote
 	}
 	switch scheme := strings.ToLower(urlScheme(src)); scheme {
@@ -181,7 +188,7 @@ func (l *Loader) loadPath(p, baseDir string) (*Image, error) {
 	img, err := l.loadFrom(osFS{}, joinBase(p, baseDir))
 	if errors.Is(err, fs.ErrNotExist) && strings.Contains(p, "%") {
 		if u, uerr := url.PathUnescape(p); uerr == nil && u != p {
-			if networkPath(u) { // %5C%5Chost: checked like the source
+			if NetworkPath(u) { // %5C%5Chost: checked like the source
 				return nil, ErrRemote
 			}
 			return l.loadFrom(osFS{}, joinBase(u, baseDir))

@@ -719,6 +719,10 @@ func TestFollowHardening(t *testing.T) {
 	if len(h.opened) != 1 || h.opened[0] != "mailto:a@b.c?body=x&subject=Hi" {
 		t.Errorf("mailto: %v", h.opened)
 	}
+	h.follow("mailto:%3Fattach=/home/u/.ssh/id_rsa@x")
+	if len(h.opened) != 1 || !strings.HasPrefix(h.msg, "refused") {
+		t.Errorf("mailto with a hidden parameter: %v, %q", h.opened, h.msg)
+	}
 	h.follow("https://exa\u200bmple.com")
 	if h.msg != "invalid link" {
 		t.Errorf("invisible characters: %q", h.msg)

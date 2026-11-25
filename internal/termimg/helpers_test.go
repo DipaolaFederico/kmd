@@ -84,7 +84,8 @@ func dataURI(mime string, data []byte) string {
 }
 
 // pngHeader returns a PNG signature plus a valid IHDR claiming w×h pixels
-// and no image data: enough for DecodeConfig, nothing to decode.
+// and no image data: enough for the dimension limits, which are checked
+// first, but not for validate's chunk walk (no IEND; see pngChunk).
 func pngHeader(w, h uint32) []byte {
 	ihdr := make([]byte, 13)
 	binary.BigEndian.PutUint32(ihdr[0:], w)

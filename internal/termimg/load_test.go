@@ -225,13 +225,13 @@ func TestLoadInConfined(t *testing.T) {
 func TestNetworkPath(t *testing.T) {
 	for _, p := range []string{`//host/share/a.png`, `\\host\share\a.png`, `/\host/a.png`, `\/host/a.png`,
 		`\\?\UNC\host\share\a.png`, `\\.\pipe\x`, `\\?\C:\a.png`, `\??\UNC\host\a.png`, `/??/x`} {
-		if !networkPath(p) {
-			t.Errorf("networkPath(%q) = false", p)
+		if !NetworkPath(p) {
+			t.Errorf("NetworkPath(%q) = false", p)
 		}
 	}
 	for _, p := range []string{"a.png", "/tmp/a.png", `C:\a.png`, "C:/a.png", "./a.png", `\a.png`, "?/x", "/?", ""} {
-		if networkPath(p) {
-			t.Errorf("networkPath(%q) = true", p)
+		if NetworkPath(p) {
+			t.Errorf("NetworkPath(%q) = true", p)
 		}
 	}
 }

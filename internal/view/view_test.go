@@ -670,12 +670,16 @@ func TestFollowHardening(t *testing.T) {
 	if err := os.WriteFile(secret, []byte("KEY"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "other.markdown"), []byte("# other"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	links := map[string]string{
-		"notes.md": secret,                          // symlink to a non-Markdown file
-		"alias.md": filepath.Join(dir, "one.md"),    // symlink to Markdown: fine
-		"doc.pdf":  filepath.Join(dir, "run.sh"),    // a "PDF" that is a script
-		"pic2.png": filepath.Join(dir, "README.md"), // extension mismatch
-		"loop.md":  filepath.Join(dir, "loop.md"),   // broken (self) link
+		"alias2.md": filepath.Join(dir, "other.markdown"), // Markdown to Markdown: fine
+		"notes.md":  secret,                               // symlink to a non-Markdown file
+		"alias.md":  filepath.Join(dir, "one.md"),         // symlink to Markdown: fine
+		"doc.pdf":   filepath.Join(dir, "run.sh"),         // a "PDF" that is a script
+		"pic2.png":  filepath.Join(dir, "README.md"),      // extension mismatch
+		"loop.md":   filepath.Join(dir, "loop.md"),        // broken (self) link
 	}
 	for name, target := range links {
 		if err := os.Symlink(target, filepath.Join(dir, name)); err != nil {
@@ -701,6 +705,10 @@ func TestFollowHardening(t *testing.T) {
 	}
 	if len(h.opened) != 0 {
 		t.Errorf("handed to the desktop: %v", h.opened)
+	}
+	h.follow(file("alias2.md"))
+	if h.path != filepath.Join(dir, "alias2.md") {
+		t.Errorf("symlink to another Markdown extension not opened: %q", h.msg)
 	}
 	h.follow(file("alias.md"))
 	if h.path != filepath.Join(dir, "alias.md") {

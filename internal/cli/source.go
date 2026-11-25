@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
@@ -15,21 +14,37 @@ import (
 // sources reads the documents of a run. The documents named on the
 // command line are the user's choice: their first read may block on a
 // pipe (kmd <(command), a FIFO waiting for its writer), before the viewer
-// takes the terminal; a pipe, like stdin, is read once and kept. Every
-// other read — a reload, a document reached by a link or the file picker —
-// must find a regular file or a folder: it is opened without blocking and
-// checked on the descriptor, so a FIFO swapped in for the document cannot
-// hang kmd with the terminal in raw mode.
+// takes the terminal; a pipe, like stdin, is read once and its result
+// kept. Every other read — a reload, a document reached by a link or the
+// file picker — must find a regular file or a folder: it is opened without
+// blocking and checked on the descriptor, so a FIFO swapped in for the
+// document cannot hang kmd with the terminal in raw mode.
 type sources struct {
-	named map[string]bool   // documents named on the command line
-	fresh map[string]bool   // named documents not read yet
-	once  map[string]string // stdin and pipes, which can only be read once
+	origin map[string]origin   // how each document was reached (absent: linked)
+	once   map[string]onceRead // stdin and pipes, which can only be read once
+}
+
+// origin says how a document was reached, which decides how it is opened.
+type origin uint8
+
+const (
+	linked     origin = iota // through a link or the picker
+	namedFresh               // named on the command line, not read yet
+	named                    // named on the command line, read before
+)
+
+// onceRead is a read of stdin or a pipe, kept whether or not it failed: they
+// cannot be read again, and a second read would return what the first one
+// left (the rest of a document that was too large).
+type onceRead struct {
+	src string
+	err error
 }
 
 func newSources(names ...string) *sources {
-	s := &sources{named: map[string]bool{}, fresh: map[string]bool{}, once: map[string]string{}}
+	s := &sources{origin: map[string]origin{}, once: map[string]onceRead{}}
 	for _, n := range names {
-		s.named[n], s.fresh[n] = true, true
+		s.origin[n] = namedFresh
 	}
 	return s
 }
@@ -37,12 +52,12 @@ func newSources(names ...string) *sources {
 // read reads a document ("-" is stdin); a folder reads as its listing
 // (dir true).
 func (s *sources) read(name string, stdin io.Reader) (src string, dir bool, err error) {
-	if src, ok := s.once[name]; ok {
-		return src, false, nil
+	if r, ok := s.once[name]; ok {
+		return r.src, false, r.err
 	}
 	if name == "-" {
 		src, err = readAll(stdin, name)
-		s.once[name] = src
+		s.once[name] = onceRead{src, err}
 		return src, false, err
 	}
 	f, st, err := s.open(name)
@@ -57,8 +72,9 @@ func (s *sources) read(name string, stdin io.Reader) (src string, dir bool, err 
 	case st.Mode().IsRegular() && st.Size() > maxInput:
 		return "", false, tooLarge(name)
 	}
-	if src, err = readAll(f, name); err == nil && !st.Mode().IsRegular() {
-		s.once[name] = src // a pipe named on the command line
+	src, err = readAll(f, name)
+	if !st.Mode().IsRegular() {
+		s.once[name] = onceRead{src, err} // a pipe named on the command line
 	}
 	return src, false, err
 }
@@ -66,10 +82,11 @@ func (s *sources) read(name string, stdin io.Reader) (src string, dir bool, err 
 // open opens a document: the first read of a named one as asked, any
 // other only if it is a regular file or a folder (openChecked).
 func (s *sources) open(name string) (*os.File, fs.FileInfo, error) {
-	if !s.fresh[name] {
-		return openChecked(name, !s.named[name])
+	o := s.origin[name]
+	if o != namedFresh {
+		return openChecked(name, o == linked)
 	}
-	delete(s.fresh, name)
+	s.origin[name] = named
 	// #nosec G304 -- reading the file the user asked for is the point of the tool.
 	f, err := os.Open(filepath.Clean(name))
 	if err != nil {
@@ -84,12 +101,13 @@ func (s *sources) open(name string) (*os.File, fs.FileInfo, error) {
 }
 
 // openChecked opens a document without blocking and checks, on the open
-// descriptor, that it is a regular file or a folder. A linked document (one
-// the viewer reached through a link or the picker, not named by the user)
-// must also be what its name says: a symlink to a file of another kind is
-// refused, as the viewer's followFile does when the link is followed;
-// checking again here, at the open, covers a symlink swapped in since and
-// every reload.
+// descriptor, that it is a regular file or a folder. A document named on
+// the command line may be a symlink to any file, on every reload too: the
+// user chose it. A linked document (one the viewer reached through a link
+// or the picker) must also be what its name says: a symlink to a file of
+// another kind is refused (render.SameKind, as the viewer's followFile
+// does when the link is followed); checking again here, at the open,
+// covers a symlink swapped in since and every reload.
 func openChecked(name string, linked bool) (*os.File, fs.FileInfo, error) {
 	path, flags := filepath.Clean(name), os.O_RDONLY|syscall.O_NONBLOCK
 	if linked {
@@ -110,7 +128,7 @@ func openChecked(name string, linked bool) (*os.File, fs.FileInfo, error) {
 	case err != nil:
 	case !st.IsDir() && !st.Mode().IsRegular():
 		err = fmt.Errorf("%s: not a regular file", name)
-	case linked && !st.IsDir() && !sameKind(name, path):
+	case linked && !st.IsDir() && !render.SameKind(name, path):
 		err = fmt.Errorf("%s: link points to another kind of file", name)
 	}
 	if err != nil {
@@ -118,13 +136,6 @@ func openChecked(name string, linked bool) (*os.File, fs.FileInfo, error) {
 		return nil, nil, err
 	}
 	return f, st, nil
-}
-
-// sameKind reports whether the files named a and b are of the same kind:
-// both Markdown, or with the same extension.
-func sameKind(a, b string) bool {
-	ea, eb := strings.ToLower(filepath.Ext(a)), strings.ToLower(filepath.Ext(b))
-	return ea == eb || render.MarkdownExt[ea] && render.MarkdownExt[eb]
 }
 
 // readAll reads a document of at most maxInput bytes.

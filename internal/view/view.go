@@ -532,11 +532,11 @@ func (m *model) followFile(path, frag string) {
 		m.msg = "not a regular file: " + shown
 		return
 	}
-	ext := strings.ToLower(filepath.Ext(path))
-	if rext := strings.ToLower(filepath.Ext(real)); rext != ext {
+	if !render.SameKind(path, real) {
 		m.msg = "link points elsewhere: " + shown + " → " + m.rel(real)
 		return
 	}
+	ext := strings.ToLower(filepath.Ext(path))
 	switch {
 	case render.MarkdownExt[ext]:
 		if path == m.abs(m.path) {

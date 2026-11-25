@@ -151,8 +151,13 @@ func TestErrors(t *testing.T) {
 	if r := run(t, func(e *Env) { e.Stdout = errWriter{} }, p); r.code != 1 {
 		t.Errorf("write error: %+v", r)
 	}
-	if _, _, err := newSources().read("-", strings.NewReader(strings.Repeat("a", maxInput+1))); err == nil {
-		t.Error("oversized input accepted")
+	// stdin is read once: a reload gets the first result, the error too,
+	// never the rest of an oversized document
+	s, big := newSources(), strings.NewReader(strings.Repeat("a", maxInput+2))
+	for i := range 2 {
+		if src, _, err := s.read("-", big); err == nil {
+			t.Errorf("read %d: oversized input accepted (%d bytes)", i, len(src))
+		}
 	}
 }
 

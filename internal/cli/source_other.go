@@ -2,5 +2,6 @@
 
 package cli
 
-// noFollow: Windows has no O_NOFOLLOW; EvalSymlinks already resolved the path.
+// noFollow: without O_NOFOLLOW (Windows, Plan 9…) only the EvalSymlinks
+// done before the open resolves the path.
 const noFollow = 0

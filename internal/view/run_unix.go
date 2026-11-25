@@ -119,97 +119,229 @@ func Run(opt Options) error {
 	defer t.leave()
 	defer m.stopPicker()
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGWINCH, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT,
+	s := &session{m: m, t: t, sigs: make(chan os.Signal, 1), want: make(chan struct{}), input: make(chan []byte)}
+	signal.Notify(s.sigs, syscall.SIGWINCH, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGQUIT,
 		syscall.SIGTSTP, os.Interrupt)
-	defer signal.Stop(sigs)
+	defer signal.Stop(s.sigs)
+	s.guardLoads()
 
 	// One read at a time, requested by the loop: while the editor runs no
 	// read is pending, so kmd never steals its keystrokes.
-	want, input := make(chan struct{}), make(chan []byte)
-	var keys keyParser
 	go func() {
 		buf := make([]byte, 4096)
-		for range want {
+		for range s.want {
 			n, err := f.Read(buf)
 			if err != nil {
-				close(input)
+				close(s.input)
 				return
 			}
-			input <- append([]byte(nil), buf[:n]...)
+			s.input <- append([]byte(nil), buf[:n]...)
 		}
 	}()
-	defer close(want)
+	defer close(s.want)
 
 	tick, stop := m.ticker()
 	defer stop()
+	return s.loop(tick)
+}
 
+// session is the viewer running on a terminal: the model and the events
+// that drive it.
+type session struct {
+	m     *model
+	t     *tty
+	sigs  chan os.Signal
+	want  chan struct{} // asks the reader for the next input
+	input chan []byte   // what the terminal sent
+	keys  keyParser
+
+	pending bool             // a read was asked for and has not arrived
+	settle  <-chan time.Time // pending resize: re-render once it settles
+	late    os.Signal        // a resize or stop that came during a load
+	quit    bool             // a quit key or a signal ended kmd during a load
+}
+
+// loop draws the screen and applies events until the user quits.
+func (s *session) loop(tick <-chan time.Time) error {
+	f := s.t.f
 	var out strings.Builder
-	var settle <-chan time.Time // pending resize: re-render once it settles
-	redraw, pending := true, false
-	for !m.quit {
+	redraw := true
+	for !s.m.quit && !s.quit {
 		if redraw {
 			out.Reset()
-			m.draw(&out)
+			s.m.draw(&out)
 			if _, err := f.WriteString(out.String()); err != nil {
 				return err
 			}
 		}
-		if !pending {
-			want <- struct{}{}
-			pending = true
-		}
+		s.request()
 		redraw = false
+		more, err := true, error(nil)
 		select {
-		case f := <-m.bg:
-			m.applyBackground(f)
-			redraw = m.picking // results of the picker's work: only it shows them
+		case fn := <-s.m.bg:
+			s.m.applyBackground(fn)
+			redraw = s.m.picking // results of the picker's work: only it shows them
 		case <-tick:
-			redraw = m.tick()
-		case <-settle:
-			settle = nil
-			if c, r, ok := term.Size(f.Fd()); ok && (c != m.cols || r != m.rows) {
-				m.cols, m.rows = c, max(r, 2)
-				m.reload()
-				_, _ = f.WriteString("\x1b[2J")
-				redraw = true
-			}
-		case b, ok := <-input:
-			if !ok {
-				return nil
-			}
-			pending, redraw = false, true
-			for _, k := range keys.parse(b) {
-				if k.name == "ctrl-z" {
-					if err := t.suspend(sigs); err != nil {
-						return err
-					}
-					m.drawn = drawnImages{} // a new screen: draw the images again
-					continue
-				}
-				m.handle(k)
-				if t.err != nil {
-					return t.err
-				}
-			}
-		case s := <-sigs:
-			if s == syscall.SIGTSTP { // kill -TSTP from outside
-				if err := t.suspend(sigs); err != nil {
-					return err
-				}
-				m.drawn = drawnImages{} // a new screen: draw the images again
-				redraw = true
-				continue
-			}
-			if s != syscall.SIGWINCH {
-				return nil
-			}
-			// dragging a window sends a burst of SIGWINCH: re-render (which
-			// can take a while on huge documents) once, after it settles
-			settle = time.After(80 * time.Millisecond)
+			redraw = s.m.tick()
+		case <-s.settle:
+			s.settle = nil
+			redraw = s.resize()
+		case b, ok := <-s.input:
+			s.pending, redraw = false, true
+			more, err = ok, s.handleInput(b)
+		case sig := <-s.sigs:
+			redraw, more, err = s.signal(sig)
+		}
+		if sig := s.late; more && err == nil && sig != nil {
+			s.late = nil
+			var r bool
+			r, more, err = s.signal(sig)
+			redraw = redraw || r
+		}
+		if !more || err != nil {
+			return err
 		}
 	}
 	return nil
+}
+
+// request asks the reader for the next input, unless it was asked already.
+func (s *session) request() {
+	if !s.pending {
+		s.want <- struct{}{}
+		s.pending = true
+	}
+}
+
+// resize renders the page again if the terminal's size changed.
+func (s *session) resize() bool {
+	c, r, ok := term.Size(s.t.f.Fd())
+	if !ok || c == s.m.cols && r == s.m.rows {
+		return false
+	}
+	s.m.cols, s.m.rows = c, max(r, 2)
+	s.m.reload()
+	_, _ = s.t.f.WriteString("\x1b[2J")
+	return true
+}
+
+// handleInput applies the keys the terminal sent.
+func (s *session) handleInput(b []byte) error {
+	for _, k := range s.keys.parse(b) {
+		if k.name == "ctrl-z" {
+			if err := s.t.suspend(s.sigs); err != nil {
+				return err
+			}
+			s.m.drawn = drawnImages{} // a new screen: draw the images again
+			continue
+		}
+		s.m.handle(k)
+		if s.t.err != nil {
+			return s.t.err
+		}
+		if s.quit || s.pending {
+			// a load (await) asked for the next input: drop the rest, as
+			// keys typed during a load are, so that the editor (e) never
+			// runs with a read pending that would steal its keystrokes
+			break
+		}
+	}
+	return nil
+}
+
+// signal handles a signal; more is false when the viewer must end.
+func (s *session) signal(sig os.Signal) (redraw, more bool, err error) {
+	switch sig {
+	case syscall.SIGTSTP: // kill -TSTP from outside
+		if err := s.t.suspend(s.sigs); err != nil {
+			return false, false, err
+		}
+		s.m.drawn = drawnImages{} // a new screen: draw the images again
+		return true, true, nil
+	case syscall.SIGWINCH:
+		// dragging a window sends a burst of SIGWINCH: re-render (which
+		// can take a while on huge documents) once, after it settles
+		s.settle = time.After(80 * time.Millisecond)
+		return false, true, nil
+	}
+	return false, false, nil
+}
+
+// errQuit is the error of a load abandoned because the user quit.
+var errQuit = errors.New("quit")
+
+// guardLoads makes the model's loads run off the event loop (await).
+func (s *session) guardLoads() {
+	if load := s.m.opt.Load; load != nil {
+		s.m.opt.Load = func(path string, cols int) (*Page, error) {
+			return background(s, func() (*Page, error) { return load(path, cols) })
+		}
+	}
+	if slides := s.m.opt.Slides; slides != nil {
+		s.m.opt.Slides = func(cols, rows int) (*Deck, error) {
+			return background(s, func() (*Deck, error) { return slides(cols, rows) })
+		}
+	}
+}
+
+// background runs load in a goroutine and awaits it. A panic in load is
+// raised again here, on the loop, whose deferred calls restore the
+// terminal.
+func background[T any](s *session, load func() (T, error)) (T, error) {
+	var v T
+	var err error
+	var panicked any
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer func() { panicked = recover() }()
+		v, err = load()
+	}()
+	if !s.await(done) {
+		var zero T
+		return zero, errQuit // the load goes on, unread, until kmd exits
+	}
+	if panicked != nil {
+		panic(panicked)
+	}
+	return v, err
+}
+
+// await waits until done is closed, while still answering q, Ctrl-C and
+// the signals that end kmd: a load that takes long (a huge document, a
+// file on a hung mount) never holds the terminal raw against the user's
+// will. Other keys typed meanwhile are dropped; a resize or a stop signal
+// is handled once the load is over. false means the viewer must end.
+func (s *session) await(done <-chan struct{}) bool {
+	for {
+		s.request()
+		select {
+		case <-done:
+			return true
+		case b, ok := <-s.input:
+			s.pending = false
+			if !ok || quitKey(s.keys.parse(b)) {
+				s.quit = true
+				return false
+			}
+		case sig := <-s.sigs:
+			if sig != syscall.SIGWINCH && sig != syscall.SIGTSTP {
+				s.quit = true
+				return false
+			}
+			s.late = sig
+		}
+	}
+}
+
+// quitKey reports whether keys hold one that quits.
+func quitKey(keys []key) bool {
+	for _, k := range keys {
+		if k.name == "ctrl-c" || k.name == "char" && (k.r == 'q' || k.r == 'Q') {
+			return true
+		}
+	}
+	return false
 }
 
 // runEditor opens path in $VISUAL / $EDITOR (default vi) on the terminal.

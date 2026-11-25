@@ -113,7 +113,7 @@ func wikiLink(content string, opt *Options) *Node {
 		label = heading
 	}
 	l := &Node{Type: Link, Dest: dest.String()}
-	if kids := expandText(label, opt, false); kids != nil {
+	if kids := expandText(label, opt, false, nil); kids != nil {
 		for _, k := range kids {
 			l.AppendChild(k)
 		}
@@ -154,9 +154,10 @@ func (o *Options) triggers(wiki bool) string {
 	return ""
 }
 
-// expandText rewrites shortcodes (and wiki links when wiki is set) in s. It
-// returns nil when nothing changed, else the replacement nodes.
-func expandText(s string, opt *Options, wiki bool) []*Node {
+// expandText rewrites shortcodes (and wiki links when wiki is set, charged
+// to budget) in s. It returns nil when nothing changed, else the replacement
+// nodes.
+func expandText(s string, opt *Options, wiki bool, budget *nodeBudget) []*Node {
 	set := opt.triggers(wiki && opt.WikiLinks)
 	if set == "" {
 		return nil
@@ -182,8 +183,13 @@ func expandText(s string, opt *Options, wiki bool) []*Node {
 			i = end
 			continue
 		}
+		if budget.spent() {
+			i++ // no budget left for a link: the "[" stays text
+			continue
+		}
 		l, end := wikiAt(s, i, opt)
 		if l != nil {
+			budget.left -= 3 // the link, its label and the text before it
 			if buf = append(buf, s[last:i]...); len(buf) > 0 {
 				nodes = append(nodes, text(string(buf)))
 				buf = buf[:0]
@@ -206,7 +212,7 @@ func expandText(s string, opt *Options, wiki bool) []*Node {
 // children of n. Adjacent Text nodes are joined first, since the parser
 // splits text at every '[', '_' or other potential delimiter. Its recursion
 // depth is bounded by flattenDeep.
-func shortcuts(n *Node, opt *Options, inLink bool) {
+func shortcuts(n *Node, opt *Options, inLink bool, nodes *nodeBudget) {
 	set := opt.triggers(opt.WikiLinks && !inLink)
 	for c := n.FirstChild; c != nil; {
 		switch {
@@ -218,18 +224,18 @@ func shortcuts(n *Node, opt *Options, inLink bool) {
 			}
 			next := end.Next
 			if hit {
-				rewriteRun(c, end, opt, !inLink)
+				rewriteRun(c, end, opt, !inLink, nodes)
 			}
 			c = next
 		case c.Type == Link || c.Type == Image:
 			// no links inside links; autolinks show their URL verbatim
 			if !c.noExt && c.FirstChild != nil {
-				shortcuts(c, opt, true)
+				shortcuts(c, opt, true, nodes)
 			}
 			c = c.Next
 		default:
 			if c.FirstChild != nil {
-				shortcuts(c, opt, inLink)
+				shortcuts(c, opt, inLink, nodes)
 			}
 			c = c.Next
 		}
@@ -237,7 +243,7 @@ func shortcuts(n *Node, opt *Options, inLink bool) {
 }
 
 // rewriteRun replaces the Text nodes first…last with their expansion.
-func rewriteRun(first, last *Node, opt *Options, wiki bool) {
+func rewriteRun(first, last *Node, opt *Options, wiki bool, nodes *nodeBudget) {
 	s := first.Literal
 	if first != last {
 		n := 0
@@ -257,11 +263,11 @@ func rewriteRun(first, last *Node, opt *Options, wiki bool) {
 		}
 		s = b.String()
 	}
-	nodes := expandText(s, opt, wiki)
-	if nodes == nil {
+	repl := expandText(s, opt, wiki, nodes)
+	if repl == nil {
 		return
 	}
-	for _, nd := range nodes {
+	for _, nd := range repl {
 		first.insertBefore(nd)
 	}
 	for t := first; ; {

@@ -168,6 +168,8 @@ func TestPathological(t *testing.T) {
 		{"image openers + links", 20000, rep("![[]()"), false},
 		{"table-like lines", 20000, rep("a\n-|-|-\n"), false},
 		{"autolink parentheses", 50000, func(n int) string { return "http://a.b/" + strings.Repeat(")", n) }, false},
+		{"escapes", 50000, rep(`\*`), false},
+		{"soft breaks", 50000, rep("a\n"), false},
 	}
 	for _, c := range cases {
 		in := c.gen(c.n)

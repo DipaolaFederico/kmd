@@ -1,6 +1,9 @@
 package styled
 
-import "testing"
+import (
+	"testing"
+	"unicode"
+)
 
 func TestHidden(t *testing.T) {
 	hidden := []rune{
@@ -20,6 +23,26 @@ func TestHidden(t *testing.T) {
 	for _, r := range shown {
 		if Hidden(r) {
 			t.Errorf("Hidden(%U) = true", r)
+		}
+	}
+}
+
+// TestHiddenMatchesUnicode checks Hidden on every rune against its
+// definition: Hidden writes the ranges of category Cf out for speed, and a
+// Go release with a newer Unicode version may add some.
+func TestHiddenMatchesUnicode(t *testing.T) {
+	want := func(r rune) bool {
+		switch {
+		case r < 0x20 || r >= 0x7f && r < 0xa0, r == 0x2028, r == 0x2029:
+			return true
+		case r == 0x200c || r == 0x200d:
+			return false
+		}
+		return unicode.Is(unicode.Cf, r)
+	}
+	for r := rune(0); r <= unicode.MaxRune; r++ {
+		if Hidden(r) != want(r) {
+			t.Errorf("Hidden(%U) = %v, want %v (Unicode %s)", r, Hidden(r), want(r), unicode.Version)
 		}
 	}
 }
@@ -49,5 +72,20 @@ func TestStripCleanDoesNotAllocate(t *testing.T) {
 	s := "café — 日本語 and plain ASCII text"
 	if n := testing.AllocsPerRun(100, func() { _ = Strip(s, "\t") }); n != 0 {
 		t.Errorf("Strip of clean text allocates %v times", n)
+	}
+}
+
+func BenchmarkStrip(b *testing.B) {
+	for _, tc := range []struct{ name, s string }{
+		{"ascii", "The quick brown fox jumps over the lazy dog, again and again."},
+		{"arabic", "\u0627\u0644\u0633\u0644\u0627\u0645 \u0639\u0644\u064a\u0643\u0645 \u0648\u0631\u062d\u0645\u0629 \u0627\u0644\u0644\u0647 \u0648\u0628\u0631\u0643\u0627\u062a\u0647"},
+		{"emoji", "\U0001F600 \U0001F680 \u2764\ufe0f \U0001F468\u200d\U0001F469\u200d\U0001F467 \U0001F389"},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.SetBytes(int64(len(tc.s)))
+			for b.Loop() {
+				_ = Strip(tc.s, "\t")
+			}
+		})
 	}
 }

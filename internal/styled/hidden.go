@@ -2,7 +2,6 @@ package styled
 
 import (
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -25,16 +24,40 @@ func Hidden(r rune) bool {
 	switch {
 	case r < 0x20 || r >= 0x7f && r < 0xa0:
 		return true
-	case r < 0x600: // Latin, Greek, Cyrillic…: one format character
+	case r < 0x600: // Latin, Greek, Cyrillic…
 		return r == 0xad
-	case r == 0x200c || r == 0x200d:
+	case r < 0x2000: // Arabic, Syriac, Indic, Thai, Mongolian…
+		return r <= 0x605 || r == 0x61c || r == 0x6dd || r == 0x70f ||
+			r == 0x890 || r == 0x891 || r == 0x8e2 || r == 0x180e
+	case r < 0x2070: // general punctuation
+		return r == 0x200b || r == 0x200e || r == 0x200f ||
+			r >= 0x2028 && r <= 0x202e || r >= 0x2060 && r != 0x2065
+	case r < 0xfeff: // symbols, CJK, variation selectors…
 		return false
-	case r == 0x2028 || r == 0x2029:
-		return true
-	case r >= 0x2070 && r < 0xfeff: // symbols, CJK…: no format character
-		return false
+	case r <= 0xffff:
+		return r == 0xfeff || r >= 0xfff9 && r <= 0xfffb
 	}
-	return unicode.Is(unicode.Cf, r)
+	return hiddenAstral(r)
+}
+
+// hiddenAstral is Hidden above the Basic Multilingual Plane: the format
+// characters of Kaithi, Egyptian hieroglyphs, shorthand and musical
+// notation, and the tag characters. The ranges of category Cf are written
+// out because unicode.Is is several times slower on the scripts they live
+// in; TestHiddenMatchesUnicode compares them with the unicode package of
+// the Go release, so a new Unicode version cannot add one unnoticed.
+func hiddenAstral(r rune) bool {
+	switch {
+	case r < 0x13430:
+		return r == 0x110bd || r == 0x110cd
+	case r < 0x1bca0:
+		return r <= 0x1343f
+	case r < 0x1d173:
+		return r <= 0x1bca3
+	case r < 0xe0001:
+		return r <= 0x1d17a
+	}
+	return r == 0xe0001 || r >= 0xe0020 && r <= 0xe007f
 }
 
 // Strip returns s without the characters Hidden reports, except the ASCII

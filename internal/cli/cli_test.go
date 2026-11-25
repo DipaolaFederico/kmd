@@ -210,6 +210,69 @@ func TestMultipleFilesAndModes(t *testing.T) {
 	}
 }
 
+// TestErrorsAreSanitized: every error kmd prints quotes its arguments
+// through Clean, including the errors of Go's flag and os packages, which
+// quote them raw (a file named -<ESC>]0;FLAG<BEL>.md expanded by `kmd *`).
+func TestErrorsAreSanitized(t *testing.T) {
+	home := t.TempDir()
+	cfg := filepath.Join(home, "config")
+	if err := os.WriteFile(cfg, []byte("bogus\x1b]0;CFG\a = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]struct {
+		env  map[string]string
+		args []string
+	}{
+		"undefined flag":    {nil, []string{"-\x1b]0;FLAG\a.md"}},
+		"bad flag value":    {nil, []string{"-w", "x\x1b[2J"}},
+		"missing theme":     {nil, []string{"-t=x\x1b]0;T\a.theme", "-"}},
+		"theme template":    {nil, []string{"--theme-template", "x\x1b]0;T\a"}},
+		"config file":       {map[string]string{"KMD_CONFIG": cfg}, []string{"-"}},
+		"missing --follow":  {nil, []string{"-f", "nope\x1b]0;F\a.md"}},
+		"missing document":  {nil, []string{"nope\x1b]0;D\a.md"}},
+		"bad --base":        {nil, []string{"--base", "http://u\x1b]0;B\a@h/", "-"}},
+		"bidi in file name": {nil, []string{"nope\u202e.md"}},
+	}
+	for name, tc := range cases {
+		r := run(t, func(e *Env) {
+			m := map[string]string{"HOME": home}
+			for k, v := range tc.env {
+				m[k] = v
+			}
+			e.Getenv = envMap(m)
+		}, tc.args...)
+		if r.code == 0 || r.errOut == "" || strings.ContainsAny(r.errOut, "\x1b\a\u202e") {
+			t.Errorf("%s: code %d, stderr %q", name, r.code, r.errOut)
+		}
+	}
+}
+
+// TestFileTitlesAreLiteral: with several files each gets a heading made of
+// its name, which must stay text: no link to www.evil.example.md, no block
+// injected by a newline.
+func TestFileTitlesAreLiteral(t *testing.T) {
+	dir := t.TempDir()
+	names := []string{"www.evil.example.md", "a\n\n[x](http:__evil).md", "<b>.md"}
+	var paths []string
+	for _, n := range names {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, []byte("body\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		paths = append(paths, p)
+	}
+	r := run(t, nil, append([]string{"-c", "always", "--hyperlinks", "always", "-P"}, paths...)...)
+	if r.code != 0 || strings.Contains(r.out, "\x1b]8;;") {
+		t.Errorf("a file name became a link: %q", r.out)
+	}
+	plain := stripTest(r.out)
+	for _, want := range []string{"www.evil.example.md", "a[x](http:__evil).md", "<b>.md"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("title %q not shown literally:\n%s", want, plain)
+		}
+	}
+}
+
 func TestTerminalBehaviour(t *testing.T) {
 	long := strings.Repeat("line\n\n", 50)
 	tty := func(e *Env) {

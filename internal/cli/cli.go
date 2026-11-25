@@ -517,6 +517,20 @@ func readSource(name string, stdin io.Reader) (src string, dir bool, err error) 
 	return string(data), false, nil
 }
 
+// printErr prints err as kmd's error message. Errors quote arguments, file
+// and theme names and configuration values, which can hold anything (Go's
+// flag and os errors quote them raw): Clean keeps them from driving the
+// terminal.
+func printErr(w io.Writer, err error) {
+	fmt.Fprintf(w, "kmd: %s\n", render.Clean(err.Error()))
+}
+
+// usageErr prints err, a mistake in the command line, and where to look.
+func usageErr(w io.Writer, err error) {
+	printErr(w, err)
+	_, _ = io.WriteString(w, "Try 'kmd --help'.\n")
+}
+
 // Run executes kmd and returns the process exit code.
 func Run(env Env) int {
 	o, err := parseArgs(env.Args, env.Stderr)
@@ -524,7 +538,7 @@ func Run(env Env) int {
 		return 0
 	}
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "kmd: %v\nTry 'kmd --help'.\n", err)
+		usageErr(env.Stderr, err)
 		return 2
 	}
 	switch {
@@ -536,7 +550,7 @@ func Run(env Env) int {
 	case o.template != "":
 		t, err := render.ThemeTemplate(o.template)
 		if err != nil {
-			fmt.Fprintf(env.Stderr, "kmd: %v\n", err)
+			printErr(env.Stderr, err)
 			return 2
 		}
 		_, _ = io.WriteString(env.Stdout, t)
@@ -545,12 +559,12 @@ func Run(env Env) int {
 
 	cfg, err := loadConfig(configPath(env.Getenv))
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "kmd: %v\n", err)
+		printErr(env.Stderr, err)
 		return 2
 	}
 	s, err := resolve(o, cfg, env)
 	if err != nil {
-		fmt.Fprintf(env.Stderr, "kmd: %v\nTry 'kmd --help'.\n", err)
+		usageErr(env.Stderr, err)
 		return 2
 	}
 	switch {
@@ -662,7 +676,7 @@ func renderFiles(env Env, o options, s settings, in *stdinCache) output {
 	for _, name := range o.files {
 		doc, base, err := loadDoc(env, name, o.section, s, in)
 		if err != nil {
-			fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
+			printErr(env.Stderr, err)
 			res.code = 1
 			continue
 		}
@@ -782,7 +796,7 @@ func present(env Env, o options, s settings) int {
 		return 2
 	}
 	if err := run(env, o, s); err != nil {
-		fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
+		printErr(env.Stderr, err)
 		return 1
 	}
 	return 0
@@ -834,11 +848,14 @@ func docTitle(doc *md.Node, name string) string {
 	return filepath.Base(name)
 }
 
+// fileTitle is the heading of one of several files: its name as literal
+// text, never Markdown (`www.evil.example.md` is not a link, a newline
+// does not start a block).
 func fileTitle(name string) string {
 	if name == "-" {
 		return "stdin"
 	}
-	return strings.NewReplacer("*", "\\*", "_", "\\_", "`", "\\`", "[", "\\[").Replace(filepath.Base(name))
+	return mdEscape(filepath.Base(name))
 }
 
 func systemPager(stdout, stderr io.Writer) func(string, string) error {
@@ -881,7 +898,7 @@ func follow(env Env, o options, s settings) int {
 	var lastMod time.Time
 	lastSize := int64(-1)
 	if _, err := os.Stat(name); err != nil {
-		fmt.Fprintf(env.Stderr, "kmd: %s\n", render.Clean(err.Error()))
+		printErr(env.Stderr, err)
 		return 1
 	}
 	for {

@@ -12,9 +12,9 @@ talks to it. The plan is tracked in the GitHub issues labelled
 
 ## Status
 
-The build tag, the configuration keys, the CI job and the client in
-`internal/ai` exist. Nothing in kmd calls the client yet: the first user
-is `--ai-check` (#48).
+The build tag, the configuration keys, the CI job, the client in
+`internal/ai`, the prompts and the rendering of answers exist. Nothing in
+kmd calls them yet: the first user is `--ai-check` (#48).
 
 ## Building
 
@@ -60,14 +60,29 @@ sometimes succeeds. These are the rules the coming pull requests implement
   client: no TLS, no proxies, no redirects. The destination comes from the
   configuration, never from a document.
 - **The model gets no capabilities.** Requests never contain `tools`; the
-  document is sent as delimited data after a fixed system prompt.
+  document is sent as delimited data after a fixed system prompt, and the
+  task comes last, so that requests about the same text share a prefix the
+  server can cache. Control characters are removed from the document and
+  the question, and `<document` or `</document` inside them becomes
+  `&lt;document`, so the text cannot appear to close the document.
 - **Every answer is hostile text.** It goes through kmd's Markdown pipeline,
   which removes terminal escapes and unsafe URLs exactly as for documents.
+  Its images are never drawn (only their alt text), so an answer cannot make
+  kmd read a file. An answer wrapped whole in a ```` ```markdown ```` block
+  is unwrapped and rendered.
+- **Reasoning stays on.** In #44, turning it off made answers less accurate
+  and the model easier to steer. It is shown apart from the answer: as
+  `reasoning_content` when the server streams it so, and otherwise by
+  moving `<think>…</think>` out of the answer; a block that is never closed
+  holds the rest of the stream.
 - **Bounded.** Input size, output tokens, response size, line length and
   time are all capped; `Esc` cancels.
 
   | Limit | Value |
   |-------|-------|
+  | Markdown sent (the section on screen, or the whole document when it fits) | 32 KiB, cut at a line break; the model is told it was cut |
+  | the question | 1 KiB |
+  | `max_tokens` (reasoning and answer) | 2048 |
   | connect | 5 s |
   | from sending the request to the end of the headers (or of an error response) | 5 s |
   | between two reads of the body | 60 s (llama.cpp pings every 30 s) |

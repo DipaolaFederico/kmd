@@ -28,10 +28,10 @@ type Request struct {
 
 // Delta is a piece of the streamed answer. Both fields are the model's raw
 // output, which a hostile document can steer: show them only through kmd's
-// Markdown renderer, never print them as they are.
+// Markdown renderer (RenderAnswer), never print them as they are.
 type Delta struct {
-	Content   string // the answer
-	Reasoning string // the model's thinking, for servers that stream it apart
+	Content   string // the answer, without any inline <think> block
+	Reasoning string // the model's thinking: reasoning_content and <think> blocks
 }
 
 // ErrTruncated is returned after the last piece of an answer that the
@@ -60,12 +60,24 @@ func (c *Client) Chat(ctx context.Context, req Request, on func(Delta) error) er
 	}
 	defer resp.Close()
 	truncated := false
+	var think thinkSplitter
+	emit := func(d Delta) error {
+		if d == (Delta{}) {
+			return nil
+		}
+		return on(d)
+	}
 	err = readEvents(resp.body, c.lim.maxLine, func(data []byte) error {
 		if string(data) == "[DONE]" {
 			return errDone
 		}
-		return decodeEvent(data, &truncated, on)
+		return decodeEvent(data, &truncated, func(d Delta) error { return emit(think.split(d)) })
 	})
+	if errors.Is(err, errDone) {
+		if ferr := emit(think.flush()); ferr != nil {
+			return ferr
+		}
+	}
 	switch {
 	case errors.Is(err, errDone) && truncated:
 		return ErrTruncated

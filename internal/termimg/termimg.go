@@ -150,7 +150,7 @@ func Render(img *Image, p Protocol, maxCols, maxRows int, cell Cell) (Frame, err
 	case Kitty:
 		return renderKitty(img, fit(img.w, img.h, maxCols, maxRows, cell))
 	case ITerm2:
-		return renderITerm2(img, fit(img.w, img.h, maxCols, maxRows, cell))
+		return renderITerm2(img, fit(img.w, img.h, maxCols, maxRows, cell)), nil
 	case Sixel:
 		return renderSixel(img, fit(img.w, img.h, maxCols, maxRows, cell))
 	case None:

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"image"
 	"image/color"
-	"image/png"
 	"strconv"
 	"strings"
 	"sync"
@@ -347,20 +346,24 @@ func iTerm2Payload(t *testing.T, img *Image) []byte {
 // TestRenderITerm2: a PNG is passed through; a JPEG or GIF is never
 // handed to the terminal's decoder: kmd decodes it and sends its first
 // frame, scaled, as a PNG.
+// TestRenderITerm2: PNG, JPEG and GIF files go to the terminal as they
+// are, once Load has checked their structure; bytes after the end of a
+// JPEG or GIF are left out.
 func TestRenderITerm2(t *testing.T) {
-	data := encodePNG(t, gradient(300, 200))
-	if got := iTerm2Payload(t, mustLoadBytes(t, data)); string(got) != string(data) {
-		t.Fatal("PNG not passed through")
-	}
-	for _, data := range [][]byte{encodeJPEG(t, gradient(300, 200)), encodeGIF(t, gradient(300, 200))} {
-		got := iTerm2Payload(t, mustLoadBytes(t, data))
-		m, err := png.Decode(bytes.NewReader(got))
-		if err != nil || m.Bounds().Dx() != 200 || m.Bounds().Dy() != 133 {
-			t.Fatalf("re-encoded payload: %v %v", m.Bounds(), err)
+	for _, data := range [][]byte{
+		encodePNG(t, gradient(300, 200)),
+		encodeJPEG(t, gradient(300, 200)),
+		encodeGIF(t, gradient(300, 200)),
+	} {
+		if got := iTerm2Payload(t, mustLoadBytes(t, data)); !bytes.Equal(got, data) {
+			t.Errorf("%.4q… not passed through", data)
 		}
-	}
-	if _, err := Render(mustLoadBytes(t, encodeJPEG(t, noise(64, 64, 2))[:1000]), ITerm2, 20, 24, Cell{}); err == nil {
-		t.Error("truncated JPEG sent to the terminal")
+		if format := mustLoadBytes(t, data).Format(); format != "png" {
+			trailer := append(bytes.Clone(data), "motion photo"...)
+			if got := iTerm2Payload(t, mustLoadBytes(t, trailer)); !bytes.Equal(got, data) {
+				t.Errorf("%s: bytes after the image sent", format)
+			}
+		}
 	}
 }
 
@@ -432,9 +435,14 @@ func TestRenderMisc(t *testing.T) {
 	}
 }
 
+// TestRenderDecodeError: well-formed files whose content does not decode
+// (a broken compressed stream, a bad Huffman table) fail where kmd decodes.
 func TestRenderDecodeError(t *testing.T) {
 	badDeflate := pngChunk(pngChunk(pngHeader(10, 10), "IDAT", []byte("not deflate")), "IEND", nil)
-	for _, data := range [][]byte{badDeflate, encodeJPEG(t, noise(64, 64, 2))[:1000]} {
+	badHuffman := encodeJPEG(t, noise(64, 64, 2))
+	dht := bytes.Index(badHuffman, []byte{0xff, 0xc4})
+	badHuffman[dht+5] = 0xfe // 254 one-bit codes
+	for _, data := range [][]byte{badDeflate, badHuffman} {
 		img := mustLoadBytes(t, data)
 		for _, p := range []Protocol{Blocks, Sixel} {
 			if _, err := Render(img, p, 80, 24, Cell{}); err == nil {

@@ -33,6 +33,22 @@ func BenchmarkKittyPNG1024x768(b *testing.B) {
 	benchRender(b, Kitty, Cell{W: 10, H: 20})
 }
 
+// BenchmarkITerm2JPEG1024x768: a photo goes to iTerm2 as it is, after the
+// marker walk (no decoding).
+func BenchmarkITerm2JPEG1024x768(b *testing.B) {
+	data := encodeJPEG(b, noise(1024, 768, 9))
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		img, err := validate(data)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if _, err := Render(img, ITerm2, 80, 0, Cell{W: 10, H: 20}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkEncodeOnly: scaling and encoding decoded pixels (Render decodes
 // them again each time: they are not kept).
 func BenchmarkEncodeOnly(b *testing.B) {

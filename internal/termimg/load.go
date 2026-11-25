@@ -3,10 +3,8 @@ package termimg
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"hash/crc32"
 	"image"
 	"image/gif"
 	"image/jpeg"
@@ -383,8 +381,9 @@ func stripSpace(s string) string {
 	}, s)
 }
 
-// validate sniffs data from its header only and enforces the dimension
-// limits before anything is decoded (decompression bomb protection).
+// validate sniffs data from its header and enforces the dimension limits
+// before anything is decoded (decompression bomb protection), then checks
+// the file's structure (see checkStructure).
 func validate(data []byte) (*Image, error) {
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
@@ -401,55 +400,11 @@ func validate(data []byte) (*Image, error) {
 	if cfg.Width > maxDimension || cfg.Height > maxDimension || cfg.Width*cfg.Height > maxPixels {
 		return nil, fmt.Errorf("%w: %d×%d pixels", ErrTooLarge, cfg.Width, cfg.Height)
 	}
-	if format == "png" {
-		if err := checkPNG(data); err != nil {
-			return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
-		}
+	n, err := checkStructure(data, format, cfg.Width, cfg.Height)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrUnsupported, err)
 	}
-	return &Image{data: data, format: format, w: cfg.Width, h: cfg.Height}, nil
-}
-
-// checkPNG walks the chunks of a PNG without inflating them: IHDR first,
-// every length within the file, every type four letters, every CRC right,
-// and IEND last with nothing after it. kitty and iTerm2 receive PNG files
-// as they are, so a terminal's decoder only ever sees a well-formed one;
-// the walk costs a CRC over the file, far less than decoding it.
-func checkPNG(data []byte) error {
-	rest, ok := bytes.CutPrefix(data, []byte("\x89PNG\r\n\x1a\n"))
-	if !ok {
-		return errors.New("png: bad signature")
-	}
-	for first := true; len(rest) >= 12; first = false {
-		n := binary.BigEndian.Uint32(rest)
-		if int64(n) > int64(len(rest)-12) {
-			return errors.New("png: truncated chunk")
-		}
-		typ, end := string(rest[4:8]), 8+int(n)
-		if !chunkType(typ) || first != (typ == "IHDR") {
-			return fmt.Errorf("png: unexpected chunk %q", typ)
-		}
-		if crc32.ChecksumIEEE(rest[4:end]) != binary.BigEndian.Uint32(rest[end:]) {
-			return fmt.Errorf("png: bad checksum in %s", typ)
-		}
-		rest = rest[end+4:]
-		if typ == "IEND" {
-			if len(rest) > 0 {
-				return errors.New("png: data after IEND")
-			}
-			return nil
-		}
-	}
-	return errors.New("png: no IEND chunk")
-}
-
-// chunkType reports whether t is a PNG chunk type: four ASCII letters.
-func chunkType(t string) bool {
-	for i := 0; i < len(t); i++ {
-		if c := t[i] | 0x20; c < 'a' || c > 'z' {
-			return false
-		}
-	}
-	return true
+	return &Image{data: data[:n], format: format, w: cfg.Width, h: cfg.Height}, nil
 }
 
 // decodeBytes fully decodes validated image data with the decoder for its

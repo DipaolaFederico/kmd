@@ -38,11 +38,15 @@ jobs:
     timeout-minutes: 5
     outputs:
       project: ${{ steps.diff.outputs.project }}
+      fuzz-packages: ${{ steps.fuzz.outputs.packages }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: List the packages with fuzzers (one runner each)
+        id: fuzz
+        run: echo "packages=$(make fuzz-list)" >> "$GITHUB_OUTPUT"
       - name: Does the change touch the project?
         id: diff
         env:
@@ -119,8 +123,12 @@ jobs:
             exit 1
           fi
 
-  test:
-    name: Test & coverage
+  # Coverage runs without -race, so it also runs testlimit.Linear (the
+  # quadratic check), which -race skips. The two runs, and the fuzzers of
+  # each package, get their own runners so they run side by side; "Test &
+  # coverage" (the required check) reports their combined result.
+  race:
+    name: Race tests & conformance
     needs: changes
     if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
@@ -137,12 +145,75 @@ jobs:
         run: make test
       - name: CommonMark / GFM conformance
         run: make spec | tee -a "$GITHUB_STEP_SUMMARY"
+
+  coverage:
+    name: Coverage
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
       - name: Coverage (minimum 90%)
         run: |
-          make cover | tee cover.txt
+          make cover
           { echo '### Coverage'; echo '```'; go tool cover -func=coverage.out | tail -1; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+  fuzz:
+    name: Fuzz ${{ matrix.package }}
+    needs: changes
+    if: needs.changes.outputs.project == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false # one crashing fuzzer should not hide another
+      matrix:
+        package: ${{ fromJSON(needs.changes.outputs.fuzz-packages) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # the shortest Go jobs would win the race to save the shared
+          # cache, which would then hold one package's fuzz build instead
+          # of the lint and security tools; a cold fuzz build costs about
+          # what restoring the cache does
+          cache: false
       - name: Fuzz smoke test (10s per fuzzer)
-        run: make fuzz FUZZ_TIME=10s
+        env:
+          PACKAGE: ${{ matrix.package }}
+        run: make fuzz FUZZ="$PACKAGE/%" FUZZ_TIME=10s
+
+  test-result:
+    name: Test & coverage
+    needs: [changes, race, coverage, fuzz]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # skipped only counts when Changes chose to skip the project: a gate
+      # skipped for any other reason must not pass the required check
+      - name: Race tests, coverage and fuzzing passed (or were skipped)
+        env:
+          PROJECT: ${{ needs.changes.outputs.project }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case $r in
+              success) ;;
+              skipped) [ "$PROJECT" != true ] || exit 1 ;;
+              *) exit 1 ;;
+            esac
+          done
 
   security:
     name: Security
@@ -190,12 +261,23 @@ jobs:
   # The experimental AI (docs/experimental/ai.md) is not in the released
   # binary, but every pull request builds and tests it, so a change elsewhere
   # that breaks it fails in its own pull request, where the fix is small.
+  # The gates of `make test-ai`, split across runners so they run side by
+  # side; "Experimental AI (-tags kmdai)" (the required check) reports
+  # their combined result.
   ai:
-    name: Experimental AI (-tags kmdai)
+    name: AI ${{ matrix.name }}
     needs: changes
     if: needs.changes.outputs.project == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false # report every failing gate, not just the first
+      matrix:
+        include:
+          - { name: build and lint, gates: build-ai vet staticcheck deadcode }
+          - { name: race tests, gates: test }
+          - { name: coverage, gates: cover }
+          - { name: security, gates: security }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -204,10 +286,33 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: go.mod # no go.sum: kmd has no dependencies
-      - name: Build
-        run: make build-ai
-      - name: vet, staticcheck, dead code, race tests, coverage, govulncheck and gosec
-        run: make test-ai
+      - name: ${{ matrix.name }} (-tags kmdai)
+        env:
+          GATES: ${{ matrix.gates }}
+        run: make $GATES GOTAGS=kmdai # unquoted: one make target per word
+
+  ai-result:
+    name: Experimental AI (-tags kmdai)
+    needs: [changes, ai]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # skipped only counts when Changes chose to skip the project: a gate
+      # skipped for any other reason must not pass the required check
+      - name: Every AI gate passed (or was skipped)
+        env:
+          PROJECT: ${{ needs.changes.outputs.project }}
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for r in $RESULTS; do
+            case $r in
+              success) ;;
+              skipped) [ "$PROJECT" != true ] || exit 1 ;;
+              *) exit 1 ;;
+            esac
+          done
 
   nix:
     name: Nix flake

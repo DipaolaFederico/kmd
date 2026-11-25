@@ -348,8 +348,9 @@ make hooks   # run `make ci` before every git push
 | packaging   | `groff`, `appstreamcli --pedantic`, completions, `scripts/check-packages.sh` | valid Fedora metadata; formula, PKGBUILD, Scoop/winget manifests and `.deb` (`STRICT=1` in CI) |
 | performance | `scripts/perf.sh` (whole process, 200 runs)          | p50 and exec-adjusted p95 < 10 ms (`PERF_MAX_MS`) |
 
-Extras: `make spec` (conformance), `make fuzz` (7 fuzzers), `make bench`,
-`make rpm`, `make build-ai` and `make test-ai` (see
+Extras: `make spec` (conformance), `make fuzz` (every fuzzer;
+`FUZZ=internal/md/FuzzParse` for one, `FUZZ=internal/md/%` for a package's),
+`make bench`, `make rpm`, `make build-ai` and `make test-ai` (see
 [Experimental features](#experimental-features)).
 
 Lint and security tools are installed at pinned versions into `.tools/` (the

@@ -12,8 +12,9 @@ talks to it. The plan is tracked in the GitHub issues labelled
 
 ## Status
 
-Only the scaffolding exists: the build tag, the configuration keys and the
-CI job. kmd does not contact the server yet.
+The build tag, the configuration keys, the CI job and the client in
+`internal/ai` exist. Nothing in kmd calls the client yet: the first user
+is `--ai-check` (#48).
 
 ## Building
 
@@ -64,6 +65,20 @@ sometimes succeeds. These are the rules the coming pull requests implement
   which removes terminal escapes and unsafe URLs exactly as for documents.
 - **Bounded.** Input size, output tokens, response size, line length and
   time are all capped; `Esc` cancels.
+
+  | Limit | Value |
+  |-------|-------|
+  | connect | 5 s |
+  | from sending the request to the end of the headers (or of an error response) | 5 s |
+  | between two reads of the body | 60 s (llama.cpp pings every 30 s) |
+  | whole exchange | 180 s |
+  | everything read from the server, framing included | 8 MiB, an error past it (never a silently cut answer) |
+  | a header, chunk-size or event line, or one event's data | 64 KiB |
+  | response headers, trailers | 100 lines |
+
+  An answer the server cut off at its token limit is reported as such.
+  An `ai-url` with another host, TLS, credentials, a path or a query is a
+  configuration error; a redirect is an error.
 - **Files.** The only files read are the configured key file and the images
   kmd would already read to draw them.
 
@@ -75,13 +90,23 @@ directions:
   file is for;
 - any local user can listen on the port first, when the server is not
   running, and receive the document and the key. kmd cannot tell from the
-  connection who is listening. Open point for #46: warn when `ai = on` falls
-  back to TCP, send the key only to a socket, or check the listener's owner
-  where the OS allows it.
+  connection who is listening.
 
-The key file is read only from an absolute path, and #46 will refuse it
-unless it is a small regular file readable only by its owner, holding a
-single line of printable ASCII (it goes into an HTTP header).
+kmd sends the key over TCP too. Without `XDG_RUNTIME_DIR` (macOS, for one)
+TCP is the default, and there the key is what keeps other local users off
+the server; withholding it would make the key useless where it matters
+most. A squatter learns a key to the user's own local server, while the
+document, the more valuable of the two, would reach it with or without
+the key. Checking the listener's owner is possible only on some systems
+(`/proc/net/tcp` on Linux) and racy, so kmd does not; instead
+`--ai-check` (#48) will say when the connection is TCP and recommend the
+socket.
+
+The key file is read only from an absolute path. kmd refuses it unless it
+is a regular file of at most 4 KiB that only its owner can read (`chmod
+600`; not checked on Windows), holding a single line of printable ASCII
+without spaces (it goes into an HTTP header). A missing key file means no
+key.
 
 ## Graduation
 

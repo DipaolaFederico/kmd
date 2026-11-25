@@ -167,8 +167,8 @@ Viewer (long documents):
   block · e edit · ? all keys · q quit
 
 Environment:
-  KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG, NO_COLOR,
-  COLORFGBG, XDG_CONFIG_HOME
+  KMD_THEME, KMD_PAGER (builtin | command | -), KMD_CONFIG (absolute path),
+  NO_COLOR, COLORFGBG, XDG_CONFIG_HOME
 `
 
 func parseArgs(args []string, stderr io.Writer) (options, error) {

@@ -729,34 +729,8 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 		}
 		cells = append(cells, rc)
 	}
-	avail := width - 3*ncol - 1
-	for {
-		sum, big := 0, 0
-		for j, w := range widths {
-			sum += w
-			if w > widths[big] {
-				big = j
-			}
-		}
-		if sum <= avail || widths[big] <= 4 {
-			break
-		}
-		widths[big]--
-	}
-	if sum := sumInts(widths); sum > avail {
-		if avail < 4*ncol { // too many columns for a grid: one record per row
-			return r.stackedTable(cells, width)
-		}
-		for sum > avail { // shrink the widest columns further, down to 4
-			big := 0
-			for j, w := range widths {
-				if w > widths[big] {
-					big = j
-				}
-			}
-			widths[big]--
-			sum--
-		}
+	if !fitColumns(widths, width-3*ncol-1) { // too many columns for a grid: one record per row
+		return r.stackedTable(cells, width)
 	}
 	border := Style{Fg: th.Border}
 	rule := func(l, m, rr string) rline {
@@ -808,12 +782,50 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 	return append(out, rule("╰", "┴", "╯"))
 }
 
-func sumInts(v []int) int {
-	t := 0
-	for _, x := range v {
-		t += x
+// fitColumns narrows widths to fit avail columns as taking one column at
+// a time from the widest (the first of equals) would, but never below 4,
+// and reports whether they fit. It works out the final widths level by
+// level instead of column by column: a hostile table can be millions of
+// columns too wide, times a thousand columns per step.
+func fitColumns(widths []int, avail int) bool {
+	capped := func(level int) int { // the total width with no column above level
+		t := 0
+		for _, w := range widths {
+			t += min(w, level)
+		}
+		return t
 	}
-	return t
+	widest := 0
+	for _, w := range widths {
+		widest = max(widest, w)
+	}
+	if capped(widest) <= avail {
+		return true
+	}
+	if capped(4) > avail {
+		return false
+	}
+	lo, hi := 4, widest // capped(lo) <= avail < capped(hi)
+	for hi-lo > 1 {
+		if mid := lo + (hi-lo)/2; capped(mid) <= avail {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	// columns wider than lo end at lo, but the last few keep one more
+	// column: the ones the one-at-a-time order had not reached yet
+	keep := avail - capped(lo)
+	for j := len(widths) - 1; j >= 0; j-- {
+		if widths[j] > lo {
+			widths[j] = lo
+			if keep > 0 {
+				widths[j]++
+				keep--
+			}
+		}
+	}
+	return true
 }
 
 // stackedTable renders a table too wide for a grid as "header: value"

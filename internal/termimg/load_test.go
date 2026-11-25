@@ -7,8 +7,12 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 func TestLoadFiles(t *testing.T) {
@@ -346,4 +350,45 @@ func TestLoaderBudget(t *testing.T) {
 	if l.read != maxLoaderBytes {
 		t.Errorf("read %d bytes past the budget", l.read-maxLoaderBytes)
 	}
+}
+
+// TestLoaderLookups: a document naming thousands of image files, empty or
+// not images at all, costs the Loader linear time: it stops looking files
+// up after maxLoaderFiles (before, each new file was compared with every
+// one read before it).
+func TestLoaderLookups(t *testing.T) {
+	dir := t.TempDir()
+	const files = 64 * maxLoaderFiles
+	for i := range files {
+		writeFile(t, dir, strconv.Itoa(i), nil)
+	}
+	var l Loader
+	start := time.Now()
+	for i := range files {
+		want := ErrUnsupported // empty
+		if i >= maxLoaderFiles {
+			want = ErrTooLarge
+		}
+		if _, err := l.Load(strconv.Itoa(i), dir); !errors.Is(err, want) {
+			t.Fatalf("file %d: %v, want %v", i, err, want)
+		}
+	}
+	if d := time.Since(start); d > testlimit.Scale()*2*time.Second {
+		t.Errorf("%d lookups took %v", files, d)
+	}
+	if _, err := l.Load("data:image/png;base64,"+base64.StdEncoding.EncodeToString(encodePNG(t, gradient(2, 2))), dir); err != nil {
+		t.Errorf("data: URIs read no file and still load: %v", err)
+	}
+	testlimit.Linear(t, "image lookups", files, func(n int) func() {
+		names := make([]string, n)
+		for i := range names {
+			names[i] = strconv.Itoa(i % files)
+		}
+		return func() {
+			var l Loader
+			for _, name := range names {
+				_, _ = l.Load(name, dir)
+			}
+		}
+	})
 }

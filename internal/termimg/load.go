@@ -31,20 +31,30 @@ const (
 	// image files and data: URIs: those bytes stay in memory as long as
 	// their images can be drawn.
 	maxLoaderBytes = 64 << 20
+	// maxLoaderFiles bounds the image paths one Loader looks up, failed
+	// ones included: each costs system calls and a comparison with every
+	// file read before, so thousands of empty files named by one document
+	// would cost time quadratic in their number.
+	maxLoaderFiles = 1000
 )
 
 // errBudget: the images of the document have read all a Loader allows.
 var errBudget = fmt.Errorf("%w: the document's images exceed %d MiB", ErrTooLarge, maxLoaderBytes>>20)
 
+// errTooMany: the document named more image files than a Loader looks up.
+var errTooMany = fmt.Errorf("%w: the document names more than %d image files", ErrTooLarge, maxLoaderFiles)
+
 // Loader loads the images of one document. Each file is read at most once,
 // however the document names it (a.png, ./a.png, a link to it): every name
 // gets the same *Image, found by the identity of the open file. The bytes
 // read from files and data: URIs, kept with their images, are at most
-// 64 MiB per Loader; a source past that fails with ErrTooLarge. The zero
-// value is ready. A Loader is not safe for concurrent use.
+// 64 MiB per Loader, and at most 1,000 file paths are looked up; a source
+// past either fails with ErrTooLarge. The zero value is ready. A Loader is
+// not safe for concurrent use.
 type Loader struct {
-	read  int          // bytes read so far
-	files []loadedFile // files read, compared with os.SameFile
+	read    int          // bytes read so far
+	lookups int          // file paths looked up so far
+	files   []loadedFile // files read, compared with os.SameFile
 }
 
 type loadedFile struct {
@@ -71,6 +81,9 @@ func (l *Loader) Load(src, baseDir string) (*Image, error) {
 	}
 	switch scheme := strings.ToLower(urlScheme(src)); scheme {
 	case "":
+		if err := l.lookup(); err != nil {
+			return nil, err
+		}
 		return l.loadPath(src, baseDir)
 	case "data":
 		return l.loadData(src)
@@ -78,6 +91,9 @@ func (l *Loader) Load(src, baseDir string) (*Image, error) {
 		u, err := url.Parse(src)
 		if err != nil || !LocalHost(u.Host) || u.Path == "" || NetworkPath(u.Path) {
 			return nil, ErrRemote
+		}
+		if err := l.lookup(); err != nil {
+			return nil, err
 		}
 		return l.loadFrom(osFS{}, u.Path)
 	default:
@@ -155,6 +171,9 @@ func (l *Loader) LoadIn(src, dir string) (*Image, error) {
 	if !ok {
 		return nil, ErrOutside
 	}
+	if err := l.lookup(); err != nil {
+		return nil, err
+	}
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, err
@@ -170,6 +189,16 @@ func (l *Loader) LoadIn(src, dir string) (*Image, error) {
 		}
 	}
 	return img, err
+}
+
+// lookup counts a file path about to be looked up, or fails once the
+// Loader has looked up maxLoaderFiles.
+func (l *Loader) lookup() error {
+	if l.lookups >= maxLoaderFiles {
+		return errTooMany
+	}
+	l.lookups++
+	return nil
 }
 
 // localPath cleans a slash-separated relative path and reports whether it

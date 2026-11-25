@@ -32,7 +32,6 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   cost time or memory out of proportion to the table.
 - Display formulas shown as source no longer take seconds when they hold
   thousands of combining marks.
-
 - Clickable (OSC 8) links and images only lead to web pages, e-mail
   addresses (subject and body only) and Markdown or document files on this
   computer. Other schemes (`ssh:`, `smb:`, `vscode:`, `javascript:`…), paths
@@ -43,8 +42,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   (`https://github.com%2Flogin@evil.example/`) are refused.
 - `render`: with `Hyperlinks` and no `BaseDir`, relative links no longer
   reveal the process's working directory.
-- Images named several ways in one document (`a.png`, `./a.png`, links to
-  it) are read once, and a document reads at most 64 MiB of image files and
+- Images named several ways in one document (`a.png`, `./a.png`, symbolic or
+  hard links to it) are read once, and a document reads at most 64 MiB of image files and
   `data:` URIs in all; decoded pixels are no longer kept after drawing.
 - Image paths that name network or device locations (`\\host\share`,
   `//host`, `/\host`, `\\.\pipe\…`, also inside `file:` URLs or

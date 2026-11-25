@@ -36,7 +36,7 @@ untrusted input.
 | 🔗 | **Wiki links** | `[[Page]]`, `[[Page\|label]]`, `[[Page#Heading]]` link to `Page.md` next to the document, as in Obsidian |
 | 🎨 | **Syntax highlighting** | 63 languages, from Go and Rust to Terraform, Nix and LaTeX ([list](#-syntax-highlighting)), in labeled boxes |
 | 🧭 | **Viewer** | long documents open in a built-in viewer; links between Markdown files can be followed and navigated back |
-| 🔗 | **Hyperlinks** | clickable OSC 8 links; relative links resolved to absolute `file://` URLs |
+| 🔗 | **Hyperlinks** | clickable OSC 8 links to web pages, e-mail and local Markdown or document files (relative links resolved to absolute `file://` URLs) |
 | 🖼️ | **Images** | kitty, iTerm2, sixel or Unicode blocks; local files and `data:` URIs only |
 | 📊 | **Diagrams** | Mermaid (flowchart, state, sequence, class, ER, Gantt, pie) and Graphviz DOT, drawn with box-drawing characters |
 | ∑ | **Math** | `$…$`, `$$…$$` and ` ```math ` blocks rendered as Unicode, including fractions, roots, sums and matrices |
@@ -541,7 +541,10 @@ every call applies the same sanitisation and resource limits as the command
 (see [Security](#-security)); a library caller's images are additionally
 confined to `BaseDir`: absolute paths, `file:` URLs, `..` and symlinks
 leading outside it are refused (hard links and mount points inside it are
-the caller's to trust). `LoadTheme` reads the theme files and paths it is
+the caller's to trust). With `Hyperlinks`, relative links get an
+absolute `file://` target inside `BaseDir`, which therefore appears in the
+output; without `BaseDir` they get none, so the process's working
+directory is never revealed. `LoadTheme` reads the theme files and paths it is
 given: pass it names from `Themes`, not raw user input. The functions are safe for concurrent use.
 The API follows semantic versioning from v1.0.0; the rendered output itself
 improves between releases and is not part of it.
@@ -643,9 +646,11 @@ threat model:
   host (the path is shortened first); web links with a user name are
   refused.
 - **Documents**: only the first read of a document named on the command
-  line may wait on a pipe (`kmd <(command)`); every reload, and every
-  document opened through a link or the picker, is opened without blocking
-  and must be a regular file (a symlink only to the same kind of file).
+  line may wait on a pipe (`kmd <(command)`); every reload is opened without
+  blocking and must find a regular file. A document opened through a link or
+  the picker must also be a regular file of the same kind on every reload (a
+  symlink only to the same kind of file); one named on the command line is
+  read wherever its name leads, as on the first read.
   Documents load in the background: `q`, Ctrl-C and termination signals
   always end the viewer and restore the terminal.
 - **Configuration and themes**: the config file and theme folders come only

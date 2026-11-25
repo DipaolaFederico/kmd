@@ -4,7 +4,7 @@
 %bcond check 1
 
 %global goipath         github.com/DipaolaFederico/kmd
-Version:                0.17.0
+Version:                0.17.1
 
 %gometa -L -f
 

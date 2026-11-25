@@ -35,8 +35,14 @@ func (r *renderer) charge(n int) bool {
 	return true
 }
 
-// keep returns the lines that fit the block's layout budget.
-func (r *renderer) keep(lines []rline) []rline {
+// wrap is wrap within the block's layout budget: lines past it are left
+// out, and so is the rest of the block.
+func (r *renderer) wrap(runs []run, width int) []rline {
+	if r.over {
+		return nil
+	}
+	// a line costs at least two runs, plus one per container
+	lines := wrapUpTo(runs, width, (maxBlockRuns-r.laid)/(2+r.nest)+1)
 	for i, l := range lines {
 		if !r.charge(len(l)) {
 			clear(lines[i:]) // release the runs left out
@@ -46,22 +52,13 @@ func (r *renderer) keep(lines []rline) []rline {
 	return lines
 }
 
-// wrap is wrap within the block's layout budget.
-func (r *renderer) wrap(runs []run, width int) []rline {
-	if r.over {
-		return nil
-	}
-	// a line costs at least two runs, plus one per container
-	return r.keep(wrapUpTo(runs, width, (maxBlockRuns-r.laid)/(2+r.nest)+1))
-}
-
 // finish ends the layout of a top-level block: its lines, with a notice
 // when the layout budget ran out; the budget starts again for the next.
 func (r *renderer) finish(lines []rline) []rline {
-	if r.over {
+	if r.over || r.cut {
 		lines = append(lines, rline{{text: "[kmd: the rest of this block is too large to show]", st: Style{Fg: r.th.Muted}}})
 	}
-	r.laid, r.over = 0, false
+	r.laid, r.over, r.cut = 0, false, false
 	return lines
 }
 

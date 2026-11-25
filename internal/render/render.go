@@ -144,6 +144,8 @@ type renderer struct {
 	laid int  // runs laid out so far
 	nest int  // containers around the block being laid out
 	over bool // the budget ran out: the rest of the block is left out
+	room int  // runs the inline being built may take (see inline)
+	cut  bool // an inline was cut short at room
 }
 
 const (
@@ -183,7 +185,7 @@ func Render(doc *md.Node, o Options) Result {
 		b.WriteByte('\n')
 		row++
 		if p.nav != nil {
-			p.nav.row++
+			p.nav.endRow()
 		}
 	}
 	truncated := false // the output reached maxOutput
@@ -236,11 +238,10 @@ func Render(doc *md.Node, o Options) Result {
 		}
 		paint(lines)
 	}
-	if !truncated {
-		r.footnotes(doc, width, paint)
-	}
 	if truncated {
 		b.WriteString("\n" + margin + truncatedNotice + "\n")
+	} else {
+		r.footnotes(doc, width, paint)
 	}
 	b.WriteByte('\n')
 	res := Result{Text: b.String(), Graphics: r.graphics, Pauses: pauses}
@@ -337,11 +338,21 @@ func (r *renderer) blocks(parent *md.Node, width int, tight bool) []rline {
 	return out
 }
 
-func (r *renderer) inline(n *md.Node, base Style) []run { return r.runs(n, base, nil) }
+// inline returns the runs of n's inlines, at most as many as the block's
+// layout budget has left: they are all in memory, with the lines laid
+// out so far, before any of them is laid out.
+func (r *renderer) inline(n *md.Node, base Style) []run {
+	r.room = maxBlockRuns - r.laid
+	return r.runs(n, base, nil)
+}
 
 func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 	th := r.th
 	for n := parent.FirstChild; n != nil; n = n.Next {
+		if len(out) >= r.room {
+			r.cut = true
+			return out
+		}
 		switch n.Type {
 		case md.Text:
 			out = append(out, run{text: n.Literal, st: base})
@@ -601,6 +612,19 @@ func expandTabs(l string) string {
 	return b.String()
 }
 
+// cutBytes returns the longest prefix of s of at most n bytes that ends
+// on a character boundary, and whether it is shorter than s.
+func cutBytes(s string, n int) (string, bool) {
+	if len(s) <= n {
+		return s, false
+	}
+	n = max(n, 0)
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n], true
+}
+
 func (r *renderer) codeBox(text, lang, label string, width int) []rline {
 	if r.over {
 		return nil
@@ -629,17 +653,13 @@ func (r *renderer) codeBox(text, lang, label string, width int) []rline {
 		}
 	}
 	out := []rline{top}
-	src := expandTabs(text)
+	// every token and line takes at least a byte: highlighting more than
+	// the budget has room for only to drop it would hold a run per byte
+	// of it (cut before expanding tabs too, which copies the text)
 	room := maxBlockRuns - r.laid
-	cutSrc := len(src) > room
-	if cutSrc {
-		// every token and line takes at least a byte: highlighting more
-		// than this only to drop it would hold a run per byte of it
-		for room > 0 && !utf8.RuneStart(src[room]) {
-			room--
-		}
-		src = src[:max(room, 0)]
-	}
+	src, cutSrc := cutBytes(text, room)
+	src, cutTabs := cutBytes(expandTabs(src), room)
+	cutSrc = cutSrc || cutTabs
 rows:
 	for _, l := range r.highlight(src, lang) {
 		for _, seg := range cut(l, inner) {
@@ -775,12 +795,13 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 		if row.Header {
 			base = Style{Fg: th.TableHead, Attr: Bold}
 		}
-		rc := make([][]run, ncol)
-		j := 0
-		for c := row.FirstChild; c != nil && j < ncol; c = c.Next {
-			rc[j] = r.inline(c, base)
+		// only the cells the row has: a short row is drawn padded, and
+		// a table of short rows would otherwise cost its full width each
+		var rc [][]run
+		for c := row.FirstChild; c != nil && len(rc) < ncol; c = c.Next {
+			j := len(rc)
+			rc = append(rc, r.inline(c, base))
 			widths[j] = max(widths[j], naturalWidth(rc[j]))
-			j++
 		}
 		cells = append(cells, rc)
 	}
@@ -811,8 +832,8 @@ rows:
 			h = max(h, len(wrapped[j]))
 		}
 		for k := 0; k < h; k++ {
-			line := rline{{text: "│", st: border}}
-			for j := range row {
+			line := append(make(rline, 0, 1+4*ncol), run{text: "│", st: border}) // kept: sized once
+			for j := range ncol {
 				var cl rline
 				if k < len(wrapped[j]) {
 					cl = wrapped[j][k]
@@ -896,28 +917,25 @@ func (r *renderer) stackedTable(cells [][][]run, width int) []rline {
 	head := cells[0]
 	label := Style{Fg: r.th.TableHead, Attr: Bold}
 	sep := rline{{text: strings.Repeat("┄", min(width, 24)), st: Style{Fg: r.th.Border}}}
-	// the labels are repeated in every record: made once, and short, or a
-	// table of long headers and many empty rows would print the headers
-	// thousands of times
 	names := make([]string, len(head))
 	for j := range head {
-		name := strings.TrimSpace(runsText(head[j]))
-		if name == "" {
-			name = "#" + strconv.Itoa(j+1)
-		}
-		names[j] = elide(name, maxLabelWidth) + ":"
+		names[j] = recordLabel(head[j], j)
 	}
 	var out []rline
 	body := cells[1:]
 	if len(body) == 0 {
 		body = [][][]run{make([][]run, len(head))}
 	}
+	var rs []run // reused: wrap copies what it keeps
 	for i, row := range body {
 		if i > 0 {
 			out = append(out, sep)
 		}
-		for j, cell := range row {
-			rs := append([]run{{text: names[j], st: label}, {text: " "}}, cell...)
+		// a record shows the cells its row has, not the padding of a
+		// short row: a table of empty rows would print every label of
+		// every row (thousands of lines from a few bytes of input)
+		for j, cell := range row[:min(len(row), len(names))] {
+			rs = append(append(rs[:0], run{text: names[j], st: label}, run{text: " "}), cell...)
 			out = append(out, r.wrap(rs, width)...)
 		}
 		if r.over {
@@ -927,9 +945,28 @@ func (r *renderer) stackedTable(cells [][][]run, width int) []rline {
 	return out
 }
 
-// maxLabelWidth bounds the header shown before each value of a table
-// drawn as records, in columns.
-const maxLabelWidth = 32
+// Labels of a table drawn as records are repeated in every record: they
+// are made once, and short, or a table of long headers and many rows
+// would print the headers thousands of times. maxLabelWidth bounds a
+// label's columns, maxLabelBytes its bytes (zero-width characters such
+// as combining marks take bytes but no columns).
+const (
+	maxLabelWidth = 32
+	maxLabelBytes = 128
+)
+
+// recordLabel is the label of column j in a table drawn as records: its
+// header, or its number when the header is empty.
+func recordLabel(head []run, j int) string {
+	name := strings.TrimSpace(runsText(head))
+	if name == "" {
+		name = "#" + strconv.Itoa(j+1)
+	}
+	if short, cut := cutBytes(name, maxLabelBytes); cut {
+		name = short + "…"
+	}
+	return elide(name, maxLabelWidth) + ":"
+}
 
 // TOC renders the document outline (headings) as a numbered tree.
 func TOC(doc *md.Node, o Options) string {
@@ -940,7 +977,8 @@ func TOC(doc *md.Node, o Options) string {
 	width := max(o.Width-2*len(margin), 10)
 	var counters [7]int
 	var stack []int // levels of the currently open headings
-	var lines []rline
+	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
+	var b strings.Builder
 	colors := [...]Color{r.th.H1Bg, r.th.H2, r.th.H3, r.th.H4, r.th.H5, r.th.H5}
 	for c := doc.FirstChild; c != nil; c = c.Next {
 		if c.Type != md.Heading {
@@ -965,16 +1003,18 @@ func TOC(doc *md.Node, o Options) string {
 		if lvl == 0 {
 			st.Attr = Bold
 		}
-		body := wrap(r.inline(c, st), max(width-len(indent)-strWidth(label), 1))
-		lines = append(lines, prefixed(body,
+		body := r.wrap(r.inline(c, st), max(width-len(indent)-strWidth(label), 1))
+		// each entry is painted as it is laid out, like a document's blocks
+		for _, l := range r.finish(prefixed(body,
 			run{text: indent + label, st: Style{Fg: r.th.Muted}},
-			run{text: strings.Repeat(" ", len(indent)+strWidth(label))})...)
-	}
-	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
-	var b strings.Builder
-	for _, l := range lines {
-		b.WriteString(margin)
-		p.line(&b, l, len(margin))
+			run{text: strings.Repeat(" ", len(indent)+strWidth(label))})) {
+			if b.Len() > maxOutput {
+				b.WriteString(margin + truncatedNotice + "\n")
+				return b.String()
+			}
+			b.WriteString(margin)
+			p.line(&b, l, len(margin))
+		}
 	}
 	return b.String()
 }

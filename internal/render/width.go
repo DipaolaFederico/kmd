@@ -111,23 +111,27 @@ func (w *wrapper) push(l rline) {
 	}
 }
 
+// nextWord splits t, not empty, into its first word and the rest, or
+// reports that t starts with spaces (word empty, rest after them).
+func nextWord(t string) (word, rest string) {
+	switch k := strings.IndexByte(t, ' '); {
+	case k == 0:
+		return "", strings.TrimLeft(t, " ")
+	case k > 0:
+		return t[:k], t[k:]
+	}
+	return t, ""
+}
+
 // add splits r into words and spaces.
 func (w *wrapper) add(r run) {
-	t := r.text
-	for len(t) > 0 && !w.full() {
-		k := strings.IndexByte(t, ' ')
-		if k == 0 {
+	for t := r.text; len(t) > 0 && !w.full(); {
+		var seg string
+		if seg, t = nextWord(t); seg == "" {
 			w.emit()
 			w.hasSpace = true
 			w.space = run{text: " ", st: r.st}
-			t = strings.TrimLeft(t, " ")
 			continue
-		}
-		seg := t
-		if k > 0 {
-			seg, t = t[:k], t[k:]
-		} else {
-			t = ""
 		}
 		w.word = append(w.word, run{text: seg, st: r.st})
 		w.wordW += strWidth(seg)
@@ -181,16 +185,10 @@ func naturalWidth(runs []run) int {
 			continue
 		}
 		for t := r.text; t != ""; {
-			k := strings.IndexByte(t, ' ')
-			if k == 0 {
-				space, t = true, strings.TrimLeft(t, " ")
+			var seg string
+			if seg, t = nextWord(t); seg == "" {
+				space = true
 				continue
-			}
-			seg := t
-			if k > 0 {
-				seg, t = t[:k], t[k:]
-			} else {
-				t = ""
 			}
 			if space && w > 0 { // spaces collapse to one, and none starts a line
 				w++

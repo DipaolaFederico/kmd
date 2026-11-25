@@ -63,24 +63,27 @@ sometimes succeeds. These are the rules the coming pull requests implement
   document is sent as delimited data after a fixed system prompt, and the
   task comes last, so that requests about the same text share a prefix the
   server can cache. Control characters are removed from the document and
-  the question, and `<document` or `</document` inside them becomes
-  `&lt;document`, so the text cannot appear to close the document.
+  the question first; then the `<` of `<document`, `</document` (in any
+  case) and of chat-template tokens such as `<|im_end|>` becomes `&lt;`, so
+  the text cannot appear to close the document or the user's turn.
 - **Every answer is hostile text.** It goes through kmd's Markdown pipeline,
   which removes terminal escapes and unsafe URLs exactly as for documents.
-  Its images are never drawn (only their alt text), so an answer cannot make
-  kmd read a file. An answer wrapped whole in a ```` ```markdown ```` block
-  is unwrapped and rendered.
+  So is the reasoning. Images in them are never drawn (only their alt
+  text), so an answer cannot make kmd read a file; links resolve as the
+  document's do. At most 256 KiB of an answer is rendered. An answer
+  wrapped whole in a ```` ```markdown ```` block is unwrapped and rendered.
 - **Reasoning stays on.** In #44, turning it off made answers less accurate
   and the model easier to steer. It is shown apart from the answer: as
   `reasoning_content` when the server streams it so, and otherwise by
-  moving `<think>…</think>` out of the answer; a block that is never closed
-  holds the rest of the stream.
+  moving a `<think>…</think>` block at the start of the answer out of it
+  (a later `<think>` is text); a block that is never closed holds the rest
+  of the stream.
 - **Bounded.** Input size, output tokens, response size, line length and
   time are all capped; `Esc` cancels.
 
   | Limit | Value |
   |-------|-------|
-  | Markdown sent (the section on screen, or the whole document when it fits) | 32 KiB, cut at a line break; the model is told it was cut |
+  | Markdown sent (the section on screen, or the whole document when it fits) | 32 KiB after cleaning, cut at a line break; the model is told it was cut |
   | the question | 1 KiB |
   | `max_tokens` (reasoning and answer) | 2048 |
   | connect | 5 s |

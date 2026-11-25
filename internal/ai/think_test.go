@@ -4,17 +4,11 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
-
-// contentEvent is a streamed event carrying s as answer text.
-func contentEvent(s string) string {
-	b, _ := json.Marshal(s)
-	return `{"choices":[{"delta":{"content":` + string(b) + `}}]}`
-}
 
 // splitAll feeds s to a thinkSplitter in pieces of n bytes.
 func splitAll(s string, n int) (answer, reasoning string) {
@@ -32,13 +26,18 @@ func TestThinkSplitter(t *testing.T) {
 	for _, tc := range []struct{ in, answer, reasoning string }{
 		{"Hello", "Hello", ""},
 		{"<think>plan</think>Answer", "Answer", "plan"},
-		{"A<think>x</think>B<think>y</think>C", "ABC", "xy"},
+		{"\n  <think>plan</think>\n\nAnswer", "\n\nAnswer", "plan"},
 		{"<think>never closed, then \x1b]52;c;x\x07", "", "never closed, then \x1b]52;c;x\x07"},
 		{"<think>a <think> b</think>c", "c", "a <think> b"},
-		{"x < y and <thin", "x < y and <thin", ""},
 		{"<think>a</thin", "", "a</thin"},
+		// only a leading block is reasoning: later tags are answer text
+		{"The tag <think>x</think> marks reasoning.", "The tag <think>x</think> marks reasoning.", ""},
+		{"<think>x</think>A<think>y</think>", "A<think>y</think>", "x"},
+		{"x < y and <thin", "x < y and <thin", ""},
+		{"<thin", "<thin", ""},
+		{"  ", "  ", ""},
 		{"</think>stray", "</think>stray", ""},
-		{"<<think>>", "<", ">"},
+		{"<<think>>", "<<think>>", ""},
 	} {
 		// every piece size, so tags split at every byte are covered
 		for n := 1; n <= len(tc.in); n++ {
@@ -51,7 +50,7 @@ func TestThinkSplitter(t *testing.T) {
 }
 
 func TestChatStripsThink(t *testing.T) {
-	pieces := []string{"<thi", "nk>The doc", "ument says</th", "ink>It is a", " list.<", "think>more"}
+	pieces := []string{"<thi", "nk>The doc", "ument says</th", "ink>It is a", " list.<", "think>"}
 	var events []string
 	for _, p := range pieces {
 		events = append(events, contentEvent(p))
@@ -61,7 +60,7 @@ func TestChatStripsThink(t *testing.T) {
 	}))
 	defer srv.Close()
 	answer, reasoning, err := collect(context.Background(), newClient(t, srv.URL), Request{})
-	if err != ErrTruncated || answer != "It is a list." || reasoning != "The document saysmore" {
+	if !errors.Is(err, ErrTruncated) || answer != "It is a list.<think>" || reasoning != "The document says" {
 		t.Fatalf("Chat = %q, %q, %v", answer, reasoning, err)
 	}
 }

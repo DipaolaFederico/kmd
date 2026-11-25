@@ -28,10 +28,11 @@ type Request struct {
 
 // Delta is a piece of the streamed answer. Both fields are the model's raw
 // output, which a hostile document can steer: show them only through kmd's
-// Markdown renderer (RenderAnswer), never print them as they are.
+// Markdown renderer (RenderAnswer, for the reasoning too), never print
+// them as they are.
 type Delta struct {
-	Content   string // the answer, without any inline <think> block
-	Reasoning string // the model's thinking: reasoning_content and <think> blocks
+	Content   string // the answer, without a leading <think> block
+	Reasoning string // the model's thinking: reasoning_content or a leading <think> block
 }
 
 // ErrTruncated is returned after the last piece of an answer that the
@@ -62,7 +63,7 @@ func (c *Client) Chat(ctx context.Context, req Request, on func(Delta) error) er
 	truncated := false
 	var think thinkSplitter
 	emit := func(d Delta) error {
-		if d == (Delta{}) {
+		if d == (Delta{}) { // role-only and keep-alive events, held-back tags
 			return nil
 		}
 		return on(d)
@@ -113,11 +114,7 @@ func decodeEvent(data []byte, truncated *bool, on func(Delta) error) error {
 	if ch.FinishReason == "length" {
 		*truncated = true
 	}
-	d := Delta{Content: ch.Delta.Content, Reasoning: ch.Delta.ReasoningContent}
-	if d == (Delta{}) {
-		return nil
-	}
-	return on(d)
+	return on(Delta{Content: ch.Delta.Content, Reasoning: ch.Delta.ReasoningContent})
 }
 
 // bodyError extracts {"error": …} from an error response's body.

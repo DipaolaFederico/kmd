@@ -23,11 +23,12 @@ const hostileAnswer = "\x1b]52;c;cm0gLXJmIH4=\x07 PWNED \x1b[2J\x1b[31mred\u009b
 	"# \x1b]0;title\x07Heading\n\n" +
 	"```sh\nrm -rf ~ \x1b]8;;https://evil\x1b\\x\x1b]8;;\x1b\\\n```\n\n" +
 	"[click](javascript:alert(1)) [ok](https://example.com/\x1b[0m) <file:///etc/passwd>\n\n" +
-	"![secret](pic.png) ![abs](/etc/passwd)\n"
+	"![secret](pic.png) ![abs](/etc/passwd)\n\n" +
+	"Trojan \u202eSource\u2066 \u2069\u200f done\n"
 
 // checkTerminalSafe fails unless every escape in s is one kmd itself
-// writes: SGR colours, and OSC 8 hyperlinks whose targets follow the rules
-// for a document's (no control or invisible characters).
+// writes, SGR colours and OSC 8 hyperlinks whose targets follow the rules
+// for a document's, and s has no other C0, C1 or bidi control.
 func checkTerminalSafe(t *testing.T, s string) {
 	t.Helper()
 	for i := 0; i < len(s); i++ {
@@ -55,8 +56,8 @@ func checkTerminalSafe(t *testing.T, s string) {
 		}
 	}
 	for _, r := range s {
-		if r >= 0x80 && r < 0xa0 {
-			t.Fatalf("C1 control %U", r)
+		if r >= 0x80 && r < 0xa0 || r >= 0x202a && r <= 0x202e || r >= 0x2066 && r <= 0x2069 {
+			t.Fatalf("control character %U", r)
 		}
 	}
 }
@@ -76,8 +77,10 @@ func writePNG(t *testing.T, dir string) {
 // The model's output, streamed in pieces that split every escape, never
 // gets an escape of its own to the terminal, and makes kmd read no image.
 func TestHostileAnswer(t *testing.T) {
+	// streamed twice: as a leading <think> block, then as the answer
+	stream := thinkOpen + hostileAnswer + thinkClose + hostileAnswer
 	var events []string
-	runes := []rune(hostileAnswer)
+	runes := []rune(stream)
 	for i := 0; i < len(runes); i += 3 {
 		events = append(events, contentEvent(string(runes[i:min(i+3, len(runes))])))
 	}
@@ -85,9 +88,9 @@ func TestHostileAnswer(t *testing.T) {
 		sse(w, append(events, `[DONE]`)...)
 	}))
 	defer srv.Close()
-	answer, _, err := collect(context.Background(), newClient(t, srv.URL), Request{})
-	if err != nil || answer != hostileAnswer {
-		t.Fatalf("Chat = %q, %v", answer, err)
+	answer, reasoning, err := collect(context.Background(), newClient(t, srv.URL), Request{})
+	if err != nil || answer != hostileAnswer || reasoning != hostileAnswer {
+		t.Fatalf("Chat = %q, %q, %v", answer, reasoning, err)
 	}
 	dir := t.TempDir()
 	writePNG(t, dir)
@@ -96,8 +99,10 @@ func TestHostileAnswer(t *testing.T) {
 		{Width: 60, Color: true, TrueColor: true, Hyperlinks: true, Images: termimg.Kitty, BaseDir: dir, AnyImagePath: true, Navigate: true, Placements: true},
 		{Width: 60, Color: true, Hyperlinks: true, Images: termimg.Blocks, BaseDir: dir, Math: true, Diagrams: true},
 	} {
+		checkTerminalSafe(t, RenderAnswer(reasoning, o).Text)
 		res := RenderAnswer(answer, o)
 		checkTerminalSafe(t, res.Text)
+		// ▀ is the glyph block images are drawn with
 		if res.Graphics || len(res.Images) > 0 || strings.Contains(res.Text, "▀") {
 			t.Errorf("an image was drawn with %+v:\n%s", o, res.Text)
 		}
@@ -125,5 +130,13 @@ func TestUnfence(t *testing.T) {
 	res := RenderAnswer("```markdown\n# Title\n```", render.Options{Width: 40})
 	if strings.ContainsAny(res.Text, "#`") || !strings.Contains(res.Text, "TITLE") {
 		t.Errorf("fenced answer not rendered as Markdown:\n%s", res.Text)
+	}
+}
+
+// A server that ignores max_tokens costs a bounded render.
+func TestRenderAnswerIsBounded(t *testing.T) {
+	res := RenderAnswer(strings.Repeat("word ", 1<<20), render.Options{Width: 60})
+	if len(res.Text) > 2*maxAnswer {
+		t.Errorf("rendered %d bytes of a 5 MiB answer, limit %d", len(res.Text), 2*maxAnswer)
 	}
 }

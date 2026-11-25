@@ -46,6 +46,12 @@ func sse(w http.ResponseWriter, payloads ...string) {
 	}
 }
 
+// contentEvent is a streamed event carrying s as answer text.
+func contentEvent(s string) string {
+	b, _ := json.Marshal(s)
+	return `{"choices":[{"delta":{"content":` + string(b) + `}}]}`
+}
+
 func TestChat(t *testing.T) {
 	var got struct {
 		header http.Header

@@ -4,49 +4,61 @@ package ai
 
 import "strings"
 
-// thinkSplitter moves <think>…</think> blocks out of the streamed answer
-// into the reasoning. llama.cpp streams reasoning apart, as
+// thinkSplitter moves a <think>…</think> block at the start of the streamed
+// answer into the reasoning. llama.cpp streams reasoning apart, as
 // reasoning_content, but other servers, or llama.cpp with
 // --reasoning-format none, leave it inline. Reasoning stays enabled: in
 // #44 turning it off made answers less accurate and the model easier to
-// steer. A block that is never closed holds the rest of the stream, so a
-// model cut off while thinking shows no half-thought as its answer.
+// steer. Models write the block only before the answer, so a <think> later
+// on is text (an answer about a document that mentions the tag). A block
+// that is never closed holds the rest of the stream, so a model cut off
+// while thinking shows no half-thought as its answer.
 type thinkSplitter struct {
-	in      bool   // inside a <think> block
-	pending string // the end of the last piece, if it may begin a tag
+	state   thinkState
+	pending string // text held back until it shows whether it is a tag
 }
+
+type thinkState int
+
+const (
+	thinkHead thinkState = iota // before any answer text: a block may start
+	thinkIn                     // inside the block
+	thinkDone                   // in the answer
+)
 
 const (
 	thinkOpen  = "<think>"
 	thinkClose = "</think>"
 )
 
-// split routes d's content to the answer or the reasoning. Tags split
-// across pieces are held back until the next piece shows what they are.
+// split routes d's content to the answer or the reasoning. A tag split
+// across pieces is held back until the next piece shows what it is.
 func (t *thinkSplitter) split(d Delta) Delta {
 	s := t.pending + d.Content
 	t.pending = ""
-	var answer, reasoning strings.Builder
-	for s != "" {
-		tag := thinkOpen
-		if t.in {
-			tag = thinkClose
+	if t.state == thinkHead {
+		head := strings.TrimLeft(s, " \t\r\n")
+		switch {
+		case strings.HasPrefix(head, thinkOpen):
+			s, t.state = head[len(thinkOpen):], thinkIn
+		case strings.HasPrefix(thinkOpen, head):
+			t.pending = s // whitespace, or the start of the tag: wait
+			return Delta{Reasoning: d.Reasoning}
+		default:
+			t.state = thinkDone
 		}
-		out := &answer
-		if t.in {
-			out = &reasoning
-		}
-		if i := strings.Index(s, tag); i >= 0 {
-			out.WriteString(s[:i])
-			s, t.in = s[i+len(tag):], !t.in
-			continue
-		}
-		keep := partialTag(s, tag)
-		out.WriteString(s[:len(s)-keep])
-		t.pending = s[len(s)-keep:]
-		break
 	}
-	return Delta{Content: answer.String(), Reasoning: d.Reasoning + reasoning.String()}
+	if t.state == thinkDone {
+		return Delta{Content: s, Reasoning: d.Reasoning}
+	}
+	i := strings.Index(s, thinkClose)
+	if i < 0 {
+		keep := partialTag(s, thinkClose)
+		t.pending = s[len(s)-keep:]
+		return Delta{Reasoning: d.Reasoning + s[:len(s)-keep]}
+	}
+	t.state = thinkDone
+	return Delta{Content: s[i+len(thinkClose):], Reasoning: d.Reasoning + s[:i]}
 }
 
 // flush returns what split held back once the stream has ended: the start
@@ -54,7 +66,7 @@ func (t *thinkSplitter) split(d Delta) Delta {
 func (t *thinkSplitter) flush() Delta {
 	s := t.pending
 	t.pending = ""
-	if t.in {
+	if t.state == thinkIn {
 		return Delta{Reasoning: s}
 	}
 	return Delta{Content: s}

@@ -31,6 +31,7 @@ func TestExtensions(t *testing.T) {
 		{"footnotes", "A[^1] B[^n].\n\n[^n]: Second\n[^1]: First\n    more\n\n[^unused]: x", "<p>A<sup class=\"footnote-ref\"><a href=\"#fn-1\" id=\"fnref-1\" data-footnote-ref>1</a></sup> B<sup class=\"footnote-ref\"><a href=\"#fn-N\" id=\"fnref-N\" data-footnote-ref>2</a></sup>.</p>\n<section class=\"footnotes\" data-footnotes>\n<ol>\n<li id=\"fn-1\">\n<p>First\nmore</p>\n<a href=\"#fnref-1\" class=\"footnote-backref\" data-footnote-backref>↩</a>\n</li>\n<li id=\"fn-N\">\n<p>Second</p>\n<a href=\"#fnref-N\" class=\"footnote-backref\" data-footnote-backref>↩</a>\n</li>\n</ol>\n</section>\n"},
 		{"undefined footnote", "x[^nope]", "<p>x[^nope]</p>\n"},
 		{"table after paragraph", "intro\n| a | b |\n|:-|-:|\n| 1 | 2 |", "<p>intro</p>\n<table>\n<thead>\n<tr>\n<th align=\"left\">a</th>\n<th align=\"right\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td align=\"left\">1</td>\n<td align=\"right\">2</td>\n</tr>\n</tbody>\n</table>\n"},
+		{"table short row", "| a | b |\n|-|-:|\n| 1 |", "<table>\n<thead>\n<tr>\n<th>a</th>\n<th align=\"right\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td>1</td>\n<td align=\"right\"></td>\n</tr>\n</tbody>\n</table>\n"},
 		{"table with refs", "[r]: /u\n| [a][r] |\n| :-: |", "<table>\n<thead>\n<tr>\n<th align=\"center\"><a href=\"/u\">a</a></th>\n</tr>\n</thead>\n</table>\n"},
 		{"table escaped pipe in code", "| `a\\|b` |\n|---|", "<table>\n<thead>\n<tr>\n<th><code>a|b</code></th>\n</tr>\n</thead>\n</table>\n"},
 		{"bad delimiter", "a | b\n|:-:-|---|", "<p>a | b\n|:-:-|---|</p>\n"},
@@ -250,6 +251,18 @@ func TestSecurityLimits(t *testing.T) {
 	})
 	if rows*900 > maxTableCells {
 		t.Errorf("cell budget exceeded: %d rows", rows)
+	}
+	// short rows hold only their own cells: padding them with nodes cost
+	// 320 bytes per cell, 168 MB for a 5 KB table
+	cells := 0
+	Walk(doc, func(n *Node, entering bool) bool {
+		if entering && n.Type == TableCell {
+			cells++
+		}
+		return true
+	})
+	if cells > 900+rows {
+		t.Errorf("%d cells for %d rows", cells, rows)
 	}
 	// deep inline nesting is flattened (no stack overflow in renderers)
 	deep := strings.Repeat("*a **a ", 200000) + "b" + strings.Repeat(" a** a*", 200000)

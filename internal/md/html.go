@@ -395,9 +395,10 @@ func (w *htmlWriter) table(t *Node) {
 		if row.Header {
 			cell = "th"
 		}
-		for c := row.FirstChild; c != nil; c = c.Next {
+		c := row.FirstChild
+		for _, a := range t.Aligns { // a short row is padded with empty cells
 			align := ""
-			switch c.Align {
+			switch a {
 			case AlignLeft:
 				align = ` align="left"`
 			case AlignCenter:
@@ -406,7 +407,10 @@ func (w *htmlWriter) table(t *Node) {
 				align = ` align="right"`
 			}
 			w.lit("<" + cell + align + ">")
-			w.children(c)
+			if c != nil {
+				w.children(c)
+				c = c.Next
+			}
 			w.lit("</" + cell + ">\n")
 		}
 		w.lit("</tr>\n")

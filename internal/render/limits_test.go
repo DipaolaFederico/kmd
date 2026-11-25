@@ -68,3 +68,16 @@ func TestWideTableLinear(t *testing.T) {
 		return func() { _ = Render(doc, Options{Width: 80}) }
 	})
 }
+
+// TestShortTableRows: a row with fewer cells than the header is drawn as
+// if padded with empty cells (the parser no longer makes them).
+func TestShortTableRows(t *testing.T) {
+	for _, cols := range []int{2, 30} { // a grid, and records
+		head := "|" + strings.Repeat(" h |", cols) + "\n|" + strings.Repeat("-|", cols) + "\n"
+		short := RenderString(head+"| 1 |\n", Options{Width: 80})
+		padded := RenderString(head+"| 1 |"+strings.Repeat(" |", cols-1)+"\n", Options{Width: 80})
+		if short != padded {
+			t.Errorf("%d columns: short row\n%s\npadded row\n%s", cols, short, padded)
+		}
+	}
+}

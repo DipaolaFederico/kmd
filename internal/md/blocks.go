@@ -856,16 +856,16 @@ func (p *blockParser) tableStart(para *Node, delim string) bool {
 	return true
 }
 
+// addTableRow adds a row with the cells line has, at most one per column:
+// a shorter row is padded with empty cells when it is rendered, not here,
+// where a ragged hostile table would cost a node per padding cell. The
+// padding still counts towards maxTableCells.
 func (p *blockParser) addTableRow(t *Node, line string, header bool) {
 	p.cells += len(t.Aligns)
 	row := &Node{Type: TableRow, Header: header}
 	cells := splitCells(line)
-	for i, a := range t.Aligns {
-		cell := &Node{Type: TableCell, Align: a}
-		if i < len(cells) {
-			cell.content = []byte(cells[i])
-		}
-		row.AppendChild(cell)
+	for i, c := range cells[:min(len(cells), len(t.Aligns))] {
+		row.AppendChild(&Node{Type: TableCell, Align: t.Aligns[i], content: []byte(c)})
 	}
 	t.AppendChild(row)
 }

@@ -68,9 +68,13 @@ func TestBashCompletionDoesNotExpandThemes(t *testing.T) {
 		script := `PATH="$1:$PATH"; source "$2"; COMP_WORDS=(kmd -t "$3"); COMP_CWORD=2; _kmd; printf '%s\n' "${COMPREPLY[@]}"`
 		cmd := exec.Command(bash, "--norc", "--noprofile", "-c", script, "bash", bin, comp, cur) // #nosec G204 -- fixed script, test paths
 		cmd.Dir = work
-		out, err := cmd.CombinedOutput()
+		// only stdout: bash builds without programmable completion (the Nix
+		// sandbox's) complain about the final "complete" line on stderr
+		var stderr strings.Builder
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err != nil {
-			t.Fatalf("bash: %v\n%s", err, out)
+			t.Fatalf("bash: %v\n%s%s", err, out, stderr.String())
 		}
 		return string(out)
 	}

@@ -7,8 +7,9 @@ import (
 	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
-func runeWidth(r rune) int  { return styled.RuneWidth(r) }
-func strWidth(s string) int { return styled.Width(s) }
+func runeWidth(r rune) int         { return styled.RuneWidth(r) }
+func strWidth(s string) int        { return styled.Width(s) }
+func elide(s string, n int) string { return styled.Elide(s, n) }
 
 // run is a piece of text painted with a single style. A raw run carries
 // pre-built escape sequences (images) that occupy w columns.
@@ -35,21 +36,6 @@ func lineWidth(l rline) int {
 		}
 	}
 	return w
-}
-
-// elide shortens s to at most width columns (width ≥ 1), ending it with
-// "…" when something was left out.
-func elide(s string, width int) string {
-	if strWidth(s) <= width {
-		return s
-	}
-	w := 0
-	for i, r := range s {
-		if w += runeWidth(r); w > width-1 {
-			return s[:i] + "…"
-		}
-	}
-	return s
 }
 
 // cut hard-splits a line into chunks of at most width columns.

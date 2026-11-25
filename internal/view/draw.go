@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
@@ -264,23 +263,10 @@ func webTarget(u *url.URL, n int) string {
 	if w := styled.Width(head + host); w < n {
 		return head + host + clip(rest, n-w)
 	}
-	if k := n - styled.Width(head) - 1; k > 0 {
-		return head + "…" + tail(host, k)
+	if k := n - styled.Width(head); k > 1 {
+		return head + styled.ElideLeft(host, k)
 	}
 	return clip(head+host, n)
-}
-
-// tail returns the end of s that fits in n columns.
-func tail(s string, n int) string {
-	w, i := 0, len(s)
-	for i > 0 {
-		r, size := utf8.DecodeLastRuneInString(s[:i])
-		if w += styled.RuneWidth(r); w > n {
-			break
-		}
-		i -= size
-	}
-	return s[i:]
 }
 
 // breadcrumb shows the documents visited to get here.

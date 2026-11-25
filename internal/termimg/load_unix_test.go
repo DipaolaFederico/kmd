@@ -17,7 +17,7 @@ func TestLoadFIFO(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := Load(p, "")
+		_, err := new(Loader).Load(p, "")
 		done <- err
 	}()
 	select {

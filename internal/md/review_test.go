@@ -52,3 +52,132 @@ func TestHTMLDropsControls(t *testing.T) {
 		t.Error("tabs must be kept")
 	}
 }
+
+// inlineNodes counts the nodes below doc's blocks, and the text nodes.
+func inlineNodes(doc *Node) (all, texts int) {
+	Walk(doc, func(n *Node, entering bool) bool {
+		if entering && n.Parent != nil && n.Parent.Type != Document {
+			all++
+			if n.Type == Text {
+				texts++
+			}
+		}
+		return true
+	})
+	return all, texts
+}
+
+// TestInlineText: text the parser handles one character at a time ("]",
+// escapes, unmatched delimiters) ends up in one node, not one per byte.
+func TestInlineText(t *testing.T) {
+	for _, src := range []string{
+		strings.Repeat("]", 1<<16),
+		strings.Repeat(`\*`, 1<<15),
+		strings.Repeat("! < & ", 1<<14),
+		strings.Repeat("*a ", 1<<14),
+		strings.Repeat("a_b ", 1<<14),
+	} {
+		doc := Parse(src, GFM)
+		if all, _ := inlineNodes(doc); all != 1 {
+			t.Errorf("%.12q…: %d inline nodes, want 1", src, all)
+		}
+	}
+	// text with an escape mark stays apart from text the extensions rewrite
+	doc := Parse(`\:rocket: :rocket:`, GFM)
+	if got := PlainText(doc); got != ":rocket: 🚀" {
+		t.Errorf("escaped shortcode: %q", got)
+	}
+}
+
+// TestInlineBudget: hostile text cannot make more than MaxInlines inline
+// nodes, through the parser or the wiki link and e-mail extensions; the
+// rest stays text and a notice says so.
+func TestInlineBudget(t *testing.T) {
+	for name, src := range map[string]string{
+		"emphasis":    strings.Repeat("*a ", MaxInlines),
+		"soft breaks": strings.Repeat("a\n", MaxInlines),
+		"links":       strings.Repeat("[a](b)", MaxInlines/2),
+		"wiki links":  strings.Repeat("[[a]] ", MaxInlines/4),
+		"emails":      strings.Repeat("a@b.co ", MaxInlines/2),
+	} {
+		doc := Parse(src, GFM)
+		all, _ := inlineNodes(doc)
+		if all > MaxInlines+10 {
+			t.Errorf("%s: %d inline nodes, limit %d", name, all, MaxInlines)
+		}
+		if !strings.Contains(PlainText(doc.LastChild), "inline markup ignored") {
+			t.Errorf("%s: no notice", name)
+		}
+	}
+	if doc := Parse(strings.Repeat("*a* ", 1000), GFM); strings.Contains(PlainText(doc), "ignored") {
+		t.Error("notice on a small document")
+	}
+	// table cells count too: a table at the cell limit leaves little for
+	// the text after it (both made 330 MB of tree in a 16 MiB document)
+	src := "|a|b|\n|-|-|\n" + strings.Repeat("|x|y|\n", MaxInlines/5) + "\n" + strings.Repeat("a\n", MaxInlines)
+	doc := Parse(src, GFM)
+	all, _ := inlineNodes(doc)
+	if rows := MaxInlines/5 + 1; all-rows > MaxInlines+10 {
+		t.Errorf("table and text: %d nodes besides the rows, limit %d", all-rows, MaxInlines)
+	}
+	if !strings.Contains(PlainText(doc.LastChild), "inline markup ignored") {
+		t.Error("table and text: no notice")
+	}
+}
+
+// TestLinearFixesKeepBehaviour: the bounds that keep hostile inlines linear
+// (#72) do not change what ordinary documents produce.
+func TestLinearFixesKeepBehaviour(t *testing.T) {
+	html := func(src string) string { return HTML(Parse(src, GFM), HTMLOptions{}) }
+	domain := func(n int) string { return "www." + strings.Repeat("a", n-8) + ".com" }
+	label := strings.Repeat("a", maxLabel)
+	for _, c := range []struct{ name, src, want, not string }{
+		{"longest domain", domain(maxDomain), `<a href="http://` + domain(maxDomain) + `"`, ""},
+		{"domain too long", domain(maxDomain + 1), "", "<a "},
+		{"trailing parentheses", "http://a.b/(x))) end", `<a href="http://a.b/(x)">http://a.b/(x)</a>)) end`, ""},
+		{"balanced parentheses", "www.a.b/(x)(y))", `<a href="http://www.a.b/(x)(y)">www.a.b/(x)(y)</a>)`, ""},
+		{"footnote", "x[^1]\n\n[^1]: n", `<sup class="footnote-ref">`, ""},
+		{"footnote label too long", "x[^a" + label + "]\n\n[^a" + label + "]: n", "", "footnote-ref"},
+		{"reference label at the limit", "[" + label + "]\n\n[" + label + "]: /u", `<a href="/u">`, ""},
+		{"no link in a link", "[a [b](c) d](e)", `[a <a href="c">b</a> d](e)`, ""},
+		{"image around a link", "![a [b](c) d](e)", `<img src="e" alt="a b d" />`, ""},
+		{"opener after a link", "[a](b) [c](d)", `<a href="d">c</a>`, ""},
+		{"emphasis after a removed opener", "*a **b* _c_ **d**", `*a *<em>b</em> <em>c</em> <strong>d</strong>`, ""},
+		{"table after paragraph lines", "x\ny\n| a | b |\n|---|---|\n| 1 | 2 |", "<p>x\ny</p>\n<table>", ""},
+		{"e-mail", "write to a@b.example", `<a href="mailto:a@b.example">`, ""},
+		// #72 SR-24: a file name escaped as Markdown stays text
+		{"escaped @", `a\@evil.example.md`, "", "<a "},
+		{"encoded @", "a&#64;evil.example", "", "<a "},
+		{"e-mail by an emoji", ":rocket: a@b.example", `🚀 <a href="mailto:a@b.example">`, ""},
+	} {
+		out := html(c.src)
+		if c.want != "" && !strings.Contains(out, c.want) {
+			t.Errorf("%s: %q lacks %q", c.name, out, c.want)
+		}
+		if c.not != "" && strings.Contains(out, c.not) {
+			t.Errorf("%s: %q has %q", c.name, out, c.not)
+		}
+	}
+}
+
+// TestHTMLDropsHiddenCharacters: bidi controls ("Trojan Source"), zero-width
+// characters and carriage returns are dropped from the export, as the
+// terminal renderer drops them, in prose, code, titles, alt text and
+// footnote labels; --unsafe-html keeps them.
+func TestHTMLDropsHiddenCharacters(t *testing.T) {
+	trojan := "if access != \"user\u202e \u2066// check admin\u2069 \u2066\" {"
+	src := "# title\u200b\n\nprose \u202e and &#x202e; and &#13; `code\u2066`\n\n" +
+		"[l](/u \"t\u2067\") ![alt\u200f](/i)[^n\u2068]\n\n[^n\u2068]: note\n\n```\n" + trojan + "\n```\n\n    indented\u2069\n"
+	out := HTML(Parse(src, GFM), HTMLOptions{})
+	for _, bad := range []string{"\u202e", "\u2066", "\u2067", "\u2068", "\u2069", "\u200b", "\u200f", "\r"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("HTML contains %q:\n%q", bad, out)
+		}
+	}
+	if !strings.Contains(out, `if access != &quot;user // check admin &quot; {`) {
+		t.Errorf("code lost more than its bidi controls:\n%s", out)
+	}
+	if unsafe := HTML(Parse(src, GFM), HTMLOptions{Unsafe: true}); !strings.Contains(unsafe, "\u202e") {
+		t.Errorf("--unsafe-html must keep bidi controls:\n%q", unsafe)
+	}
+}

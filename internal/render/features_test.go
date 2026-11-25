@@ -209,11 +209,38 @@ func TestThemes(t *testing.T) {
 	if c, err := ParseColor("#ABCDEF"); err != nil || c.Hex() != "#abcdef" {
 		t.Error("ParseColor")
 	}
-	if d := ThemeDirs(func(k string) string { return map[string]string{"XDG_CONFIG_HOME": "/x"}[k] }); d[0] != "/x/kmd/themes" {
-		t.Errorf("ThemeDirs = %v", d)
+}
+
+// TestUserThemesHostileNames: theme names a shell or the terminal would
+// interpret are never listed (SR-11).
+func TestUserThemesHostileNames(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"$(touch PWNED).theme", "`id`.theme", "a b.theme", "esc\x1b]0;T\a.theme", "-rf.theme", ".theme", "x:y.theme", "mine.theme", "my-theme_2.1.theme"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("inherit = nord\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if d := ThemeDirs(func(k string) string { return map[string]string{"HOME": "/h"}[k] }); d[0] != "/h/.config/kmd/themes" {
-		t.Errorf("ThemeDirs = %v", d)
+	if names := strings.Join(UserThemes([]string{dir}), " "); names != "mine my-theme_2.1" {
+		t.Errorf("UserThemes with hostile names = %q", names)
+	}
+}
+
+// TestThemeDirs: theme folders come from XDG_CONFIG_HOME or HOME, and only
+// from absolute values: relative ones would read themes from the current
+// folder (SR-20).
+func TestThemeDirs(t *testing.T) {
+	for _, c := range []struct {
+		env  map[string]string
+		want string
+	}{
+		{map[string]string{"XDG_CONFIG_HOME": "/x"}, "/x/kmd/themes"},
+		{map[string]string{"HOME": "/h"}, "/h/.config/kmd/themes"},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "/h"}, "/h/.config/kmd/themes"},
+		{map[string]string{"XDG_CONFIG_HOME": "~/.config", "HOME": "~"}, "/usr/share/kmd/themes"},
+	} {
+		if d := ThemeDirs(func(k string) string { return c.env[k] }); d[0] != c.want {
+			t.Errorf("%v: ThemeDirs = %v, want %s first", c.env, d, c.want)
+		}
 	}
 }
 
@@ -311,6 +338,14 @@ func TestSecurityHardening(t *testing.T) {
 	if Clean("a\u202eb\u2069c\x1bd") != "abcd" {
 		t.Errorf("Clean = %q", Clean("a\u202eb\u2069c\x1bd"))
 	}
+	// zero-width and tag characters would make two commands look the same
+	out = render("```sh\ncurl https://example.com/install\u200b.sh\U000E0041 | sh\n```\n\nword\u2060joiner &#xfeff;", Options{Width: 60})
+	if strings.ContainsAny(out, "\u200b\U000E0041\u2060\ufeff") || !strings.Contains(out, "install.sh | sh") {
+		t.Errorf("invisible character leaked: %q", out)
+	}
+	if out := render("\U0001F468\u200d\U0001F469\u200d\U0001F467 \u2764\ufe0f \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", Options{Width: 60}); !strings.Contains(out, "\U0001F468\u200d\U0001F469\u200d\U0001F467 \u2764\ufe0f \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645") {
+		t.Errorf("joiners and variation selectors must stay: %q", out)
+	}
 
 	// repeated images are decoded once and drawn from the cache
 	dir := t.TempDir()
@@ -364,6 +399,39 @@ func TestImageLoadedOnce(t *testing.T) {
 	spent := &Budget{imgPixels: maxImagePixels}
 	if res := Render(doc, Options{Width: 100, Color: true, Images: termimg.Blocks, BaseDir: dir, Budget: spent}); strings.Contains(res.Text, "▀") {
 		t.Error("image drawn past the pixel budget")
+	}
+}
+
+// TestImageNamesShareOneImage: the names of one file (pic.png, ./pic.png,
+// ././pic.png…) are one image with one frame per size, not one each.
+func TestImageNamesShareOneImage(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir)
+	var src strings.Builder
+	for i := range 60 {
+		src.WriteString("![a](" + strings.Repeat("./", i) + "pic.png)\n\n")
+	}
+	b := &Budget{}
+	res := Render(md.Parse(src.String(), md.GFM), Options{Width: 40, Color: true, Images: termimg.Kitty, BaseDir: dir, Budget: b})
+	if len(b.images) != 1 || strings.Count(res.Text, "\x1b_G") != 60 {
+		t.Errorf("%d frames for one file, %d drawn", len(b.images), strings.Count(res.Text, "\x1b_G"))
+	}
+}
+
+// TestImageFramesWithinBudget: a frame that cannot be shown because the
+// output budget is spent is not kept either.
+func TestImageFramesWithinBudget(t *testing.T) {
+	dir := t.TempDir()
+	writePNG(t, dir)
+	b := &Budget{imgBytes: maxImageBytes - 10}
+	res := Render(md.Parse("![a](pic.png)", md.GFM), Options{Width: 40, Color: true, Images: termimg.Kitty, BaseDir: dir, Budget: b})
+	if strings.Contains(res.Text, "\x1b_G") {
+		t.Error("image drawn past the budget")
+	}
+	for _, f := range b.images {
+		if f.ok || len(f.frame.Lines) > 0 {
+			t.Errorf("frame kept past the budget: %d lines", len(f.frame.Lines))
+		}
 	}
 }
 

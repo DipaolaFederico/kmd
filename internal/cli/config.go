@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -37,26 +38,38 @@ type config struct {
 	AIKeyFile string
 }
 
-// configPath returns $KMD_CONFIG, or $XDG_CONFIG_HOME/kmd/config, or ~/.config/kmd/config.
-func configPath(getenv func(string) string) string {
+// configPath returns $KMD_CONFIG, or the config file in configDir ("" for
+// none). KMD_CONFIG must be absolute: a relative one would load whatever
+// config, and pager command, the current folder holds.
+func configPath(getenv func(string) string) (string, error) {
 	if p := getenv("KMD_CONFIG"); p != "" {
-		return p
+		if !filepath.IsAbs(p) {
+			return "", errors.New("KMD_CONFIG must be an absolute path")
+		}
+		return p, nil
 	}
 	if d := configDir(getenv); d != "" {
-		return filepath.Join(d, "config")
+		return filepath.Join(d, "config"), nil
+	}
+	return "", nil
+}
+
+// configDir returns $XDG_CONFIG_HOME/kmd, or ~/.config/kmd ("" when
+// neither is set to an absolute path: see render.ConfigHome).
+func configDir(getenv func(string) string) string {
+	if c := render.ConfigHome(getenv); c != "" {
+		return filepath.Join(c, "kmd")
 	}
 	return ""
 }
 
-// configDir returns $XDG_CONFIG_HOME/kmd, or ~/.config/kmd ("" without HOME).
-func configDir(getenv func(string) string) string {
-	if x := getenv("XDG_CONFIG_HOME"); x != "" {
-		return filepath.Join(x, "kmd")
+// readConfig loads the user's config file (configPath).
+func readConfig(getenv func(string) string) (config, error) {
+	path, err := configPath(getenv)
+	if err != nil {
+		return config{}, err
 	}
-	if h := getenv("HOME"); h != "" {
-		return filepath.Join(h, ".config", "kmd")
-	}
-	return ""
+	return loadConfig(path)
 }
 
 const configTemplate = `# kmd configuration (key = value). Command-line flags take precedence.

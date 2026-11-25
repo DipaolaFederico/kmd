@@ -127,7 +127,7 @@ func isDir(name string) bool {
 func mdEscape(s string) string {
 	var b strings.Builder
 	for _, r := range render.Clean(s) {
-		if strings.ContainsRune("\\`*_{}[]<>()#+-.!|~&$:", r) {
+		if strings.ContainsRune("\\`*_{}[]<>()#+-.!|~&$:@", r) {
 			b.WriteByte('\\')
 		}
 		b.WriteRune(r)

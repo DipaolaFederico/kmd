@@ -1,6 +1,7 @@
 package md
 
 import (
+	"bytes"
 	"strconv"
 	"strings"
 )
@@ -38,9 +39,11 @@ const MaxBlocks = 250000
 
 // Table limits keep a short document from expanding into millions of
 // (padding) cells: at most maxTableCols columns and maxTableCells cells.
+// A cell costs two nodes (the cell and its text, 640 bytes) and its
+// layout: 2¹⁸ cells keep the tree of a table-only document near 170 MB.
 const (
 	maxTableCols  = 1000
-	maxTableCells = 1 << 19
+	maxTableCells = 1 << 18
 )
 
 // Parse parses Markdown source into a document tree using opt extensions.
@@ -827,15 +830,17 @@ func (p *blockParser) tableStart(para *Node, delim string) bool {
 	if !ok || len(aligns) > maxTableCols || p.cells+2*len(aligns) > maxTableCells {
 		return false
 	}
-	content := strings.TrimSuffix(string(para.content), "\n")
-	head := content
-	before := ""
-	if nl := strings.LastIndexByte(content, '\n'); nl >= 0 {
-		head, before = content[nl+1:], content[:nl+1]
-	}
+	// Only the paragraph's last line is copied before the column counts
+	// match: a long paragraph alternating text and delimiter-like lines
+	// never becomes a table, and copying all of it at each such line was
+	// quadratic.
+	content := bytes.TrimSuffix(para.content, []byte("\n"))
+	nl := bytes.LastIndexByte(content, '\n')
+	head := string(content[nl+1:])
 	if len(splitCells(head)) != len(aligns) || (strings.IndexByte(head, '|') < 0 && len(aligns) > 1) {
 		return false
 	}
+	before := string(content[:nl+1])
 	p.closeUnmatched()
 	parent := para.Parent
 	t := &Node{Type: Table, open: true, startLine: p.lineNumber - 1, Aligns: aligns}
@@ -853,16 +858,16 @@ func (p *blockParser) tableStart(para *Node, delim string) bool {
 	return true
 }
 
+// addTableRow adds a row with the cells line has, at most one per column:
+// a shorter row is padded with empty cells when it is rendered, not here,
+// where a ragged hostile table would cost a node per padding cell. The
+// padding still counts towards maxTableCells.
 func (p *blockParser) addTableRow(t *Node, line string, header bool) {
 	p.cells += len(t.Aligns)
 	row := &Node{Type: TableRow, Header: header}
 	cells := splitCells(line)
-	for i, a := range t.Aligns {
-		cell := &Node{Type: TableCell, Align: a}
-		if i < len(cells) {
-			cell.content = []byte(cells[i])
-		}
-		row.AppendChild(cell)
+	for i, c := range cells[:min(len(cells), len(t.Aligns))] {
+		row.AppendChild(&Node{Type: TableCell, Align: t.Aligns[i], content: []byte(c)})
 	}
 	t.AppendChild(row)
 }

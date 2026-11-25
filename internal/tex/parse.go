@@ -171,13 +171,6 @@ func (p *parser) leave() { p.depth-- }
 func isLetter(c byte) bool { return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' }
 func isDigit(c byte) bool  { return c >= '0' && c <= '9' }
 
-// isControl reports runes that must never reach the terminal: C0/C1
-// controls (escape sequences) and bidirectional overrides.
-func isControl(r rune) bool {
-	return r < 0x20 || r >= 0x7f && r <= 0x9f || r >= 0x200e && r <= 0x200f ||
-		r >= 0x2028 && r <= 0x202e || r >= 0x2066 && r <= 0x2069 || r == 0x061c
-}
-
 // skipSpace skips whitespace, control characters and % comments.
 func (p *parser) skipSpace() {
 	for p.i < len(p.s) {
@@ -191,7 +184,7 @@ func (p *parser) skipSpace() {
 			p.i++
 		case c >= utf8.RuneSelf:
 			r, size := utf8.DecodeRuneInString(p.s[p.i:])
-			if !isControl(r) {
+			if !styled.Hidden(r) {
 				return
 			}
 			p.i += size
@@ -218,7 +211,7 @@ func (p *parser) cmdAt(i int) (string, int) {
 		return p.s[j:k], k
 	}
 	r, size := utf8.DecodeRuneInString(p.s[j:])
-	if isControl(r) {
+	if styled.Hidden(r) {
 		return "", j + size
 	}
 	return p.s[j : j+size], j + size
@@ -527,7 +520,7 @@ func (p *parser) char(r rune) *node {
 	case '/':
 		return atom("/", tOrd, styled.Op)
 	}
-	if isControl(r) {
+	if styled.Hidden(r) {
 		return nil
 	}
 	if unicode.IsLetter(r) {
@@ -630,7 +623,7 @@ func textOf(raw string) string {
 				b.WriteByte(' ')
 			case '!':
 			default:
-				if !isControl(r) {
+				if !styled.Hidden(r) {
 					b.WriteRune(r)
 				}
 			}
@@ -642,7 +635,7 @@ func textOf(raw string) string {
 		default:
 			r, size := utf8.DecodeRuneInString(raw[i:])
 			i += size
-			if !isControl(r) {
+			if !styled.Hidden(r) {
 				b.WriteRune(r)
 			}
 		}

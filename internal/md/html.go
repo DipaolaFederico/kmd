@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
 // HTMLOptions controls HTML output.
@@ -64,7 +66,7 @@ func (w *htmlWriter) url(u string) string {
 	if !w.opt.Unsafe && unsafeURL(u) {
 		return ""
 	}
-	return esc(u)
+	return w.esc(u)
 }
 
 type htmlWriter struct {
@@ -82,7 +84,7 @@ func (w *htmlWriter) codeBlock(n *Node) {
 		body, class, ok = w.opt.Code(n.Info, n.Literal)
 	}
 	if !ok {
-		body, class = esc(n.Literal), ""
+		body, class = w.esc(n.Literal), ""
 	}
 	w.cr()
 	w.lit("<pre")
@@ -91,7 +93,7 @@ func (w *htmlWriter) codeBlock(n *Node) {
 	}
 	w.lit("><code")
 	if f := strings.Fields(n.Info); len(f) > 0 {
-		w.lit(` class="language-` + esc(f[0]) + `"`)
+		w.lit(` class="language-` + w.esc(f[0]) + `"`)
 	}
 	w.lit(">")
 	w.lit(body) // not concatenated: it can be megabytes
@@ -109,22 +111,38 @@ func HTML(doc *Node, opt HTMLOptions) string {
 
 var xmlEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;")
 
-// esc escapes text and attribute values. It also drops C0 controls other
-// than tab and newlines, DEL and C1 controls: they are invalid in HTML and,
-// should the page reach a terminal (kmd --html x.md), could drive it.
-func esc(s string) string {
-	if hasControl(s) {
-		s = strings.Map(func(r rune) rune {
-			if isControl(r) {
-				return -1
-			}
-			return r
-		}, s)
+// esc escapes text and attribute values. Characters a terminal would obey
+// or a reader could not see go too (styled.Hidden): C0 controls other than
+// tab and newline, DEL and C1 controls, invalid in HTML, could drive a
+// terminal should the page reach one (kmd --html x.md); a carriage return
+// lets one line overwrite another there; bidi controls reorder code in the
+// browser ("Trojan Source") and zero-width characters disguise it, as the
+// terminal renderer and highlighted code already strip them. --unsafe-html
+// (trusted input) keeps everything but the controls.
+func (w *htmlWriter) esc(s string) string {
+	if w.opt.Unsafe {
+		s = dropControls(s)
+	} else {
+		s = styled.Strip(s, "\t\n")
 	}
 	if !strings.ContainsAny(s, `&<>"`) {
 		return s
 	}
 	return xmlEscaper.Replace(s)
+}
+
+// dropControls removes the C0 controls other than tab and line endings, DEL
+// and the C1 controls.
+func dropControls(s string) string {
+	if !hasControl(s) {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if isControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 func isControl(r rune) bool {
@@ -189,7 +207,7 @@ func tagFilter(s string) string {
 func (w *htmlWriter) raw(s string) {
 	switch {
 	case w.disable > 0: // inside image alt text: never emit markup
-		w.lit(esc(s))
+		w.lit(w.esc(s))
 		return
 	case !w.opt.Unsafe:
 		w.lit("<!-- raw HTML omitted -->")
@@ -296,7 +314,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.codeBlock(n)
 	case MathBlock:
 		w.cr()
-		w.lit(`<div class="math math-display">` + esc(n.Literal) + "</div>")
+		w.lit(`<div class="math math-display">` + w.esc(n.Literal) + "</div>")
 		w.cr()
 	case HTMLBlock:
 		w.cr()
@@ -311,7 +329,7 @@ func (w *htmlWriter) render(n *Node) {
 	case FootnoteDef, FrontMatter:
 		// footnotes go to the footnote section; front matter is metadata
 	case Text:
-		w.lit(esc(n.Literal))
+		w.lit(w.esc(n.Literal))
 	case SoftBreak:
 		w.lit("\n")
 	case LineBreak:
@@ -319,7 +337,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.cr()
 	case Code:
 		w.tag("<code>")
-		w.lit(esc(n.Literal))
+		w.lit(w.esc(n.Literal))
 		w.tag("</code>")
 	case Math:
 		cls := "math math-inline"
@@ -327,7 +345,7 @@ func (w *htmlWriter) render(n *Node) {
 			cls = "math math-display"
 		}
 		w.tag(`<span class="` + cls + `">`)
-		w.lit(esc(n.Literal))
+		w.lit(w.esc(n.Literal))
 		w.tag("</span>")
 	case Emph, Strong, Strike:
 		t := map[NodeType]string{Emph: "em", Strong: "strong", Strike: "del"}[n.Type]
@@ -337,7 +355,7 @@ func (w *htmlWriter) render(n *Node) {
 	case Link:
 		a := `<a href="` + w.url(ResolveLink(w.opt.BaseURL, n.Dest)) + `"`
 		if n.Title != "" {
-			a += ` title="` + esc(n.Title) + `"`
+			a += ` title="` + w.esc(n.Title) + `"`
 		}
 		w.tag(a + ">")
 		w.children(n)
@@ -351,7 +369,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.disable--
 		if w.disable == 0 {
 			if n.Title != "" {
-				w.lit(`" title="` + esc(n.Title))
+				w.lit(`" title="` + w.esc(n.Title))
 			}
 			w.lit(`" />`)
 		}
@@ -359,7 +377,7 @@ func (w *htmlWriter) render(n *Node) {
 		w.raw(n.Literal)
 	case FootnoteRef:
 		id := strconv.Itoa(n.Index)
-		w.tag(`<sup class="footnote-ref"><a href="#fn-` + esc(n.Label) + `" id="fnref-` + esc(n.Label) + `" data-footnote-ref>` + id + "</a></sup>")
+		w.tag(`<sup class="footnote-ref"><a href="#fn-` + w.esc(n.Label) + `" id="fnref-` + w.esc(n.Label) + `" data-footnote-ref>` + id + "</a></sup>")
 	}
 }
 
@@ -377,9 +395,10 @@ func (w *htmlWriter) table(t *Node) {
 		if row.Header {
 			cell = "th"
 		}
-		for c := row.FirstChild; c != nil; c = c.Next {
+		c := row.FirstChild
+		for _, a := range t.Aligns { // a short row is padded with empty cells
 			align := ""
-			switch c.Align {
+			switch a {
 			case AlignLeft:
 				align = ` align="left"`
 			case AlignCenter:
@@ -388,7 +407,10 @@ func (w *htmlWriter) table(t *Node) {
 				align = ` align="right"`
 			}
 			w.lit("<" + cell + align + ">")
-			w.children(c)
+			if c != nil {
+				w.children(c)
+				c = c.Next
+			}
 			w.lit("</" + cell + ">\n")
 		}
 		w.lit("</tr>\n")
@@ -423,10 +445,10 @@ func (w *htmlWriter) footnoteSection() {
 	w.cr()
 	w.lit("<section class=\"footnotes\" data-footnotes>\n<ol>\n")
 	for _, d := range defs {
-		w.lit(`<li id="fn-` + esc(d.Label) + "\">\n")
+		w.lit(`<li id="fn-` + w.esc(d.Label) + "\">\n")
 		w.children(d)
 		w.cr()
-		w.lit(`<a href="#fnref-` + esc(d.Label) + `" class="footnote-backref" data-footnote-backref>↩</a>` + "\n</li>\n")
+		w.lit(`<a href="#fnref-` + w.esc(d.Label) + `" class="footnote-backref" data-footnote-backref>↩</a>` + "\n</li>\n")
 	}
 	w.lit("</ol>\n</section>\n")
 }

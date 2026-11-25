@@ -189,19 +189,20 @@ after a merge to `main` passes CI, a release is published if both
 
 1. the commits since the last release include a `feat`, `fix`, `perf` or
    `revert` (or a breaking change), and
-2. the compiled `kmd` binary differs from the last release's (built twice
-   with identical settings and compared byte for byte).
+2. the compiled `kmd` binary differs from the last release's for at least
+   one released platform (each built twice with identical settings and
+   compared byte for byte, so a macOS-only fix counts).
 
 Changes to tests, docs, CI, scripts or packaging, and refactors, never
 publish a release on their own; they ship with the next one. The version is
 the latest `vX.Y.Z` tag plus the largest increment among those commits
 ([Semantic Versioning](https://semver.org)):
 
-| Commits since the last release            | Version   |
-|-------------------------------------------|-----------|
-| a breaking change (`type!:` / footer)     | `X+1.0.0` |
-| a `feat`                                  | `X.Y+1.0` |
-| only `fix`, `perf`, `revert`              | `X.Y.Z+1` |
+| Commits since the last release            | Version                   |
+|-------------------------------------------|---------------------------|
+| a breaking change (`type!:` / footer)     | `X+1.0.0`, by hand only   |
+| a `feat`                                  | `X.Y+1.0`                 |
+| only `fix`, `perf`, `revert`              | `X.Y.Z+1`                 |
 
 Each release is a tag `vX.Y.Z` and a GitHub release with binaries for Linux,
 macOS, FreeBSD and Windows, the source tarball, `SHA256SUMS` and a signed
@@ -209,17 +210,27 @@ build-provenance attestation; its notes list the merged pull requests.
 
 - The *PR conventions* check labels each pull request with the release
   merging it asks for (`release:major`, `release:minor`, `release:patch` or
-  `release:skip`). The labels are informational and follow the title: to
-  change the release, change the title, not the label.
+  `release:skip`). The labels are informational and follow the title and
+  the description, which together become the squash commit: to change the
+  release, change them, not the label.
+- A breaking change — a `!` in the title or a `BREAKING CHANGE:` paragraph
+  at the end of the description — fails that check until the maintainer
+  labels the pull request `breaking:approved`. Automatic releases never
+  publish a major version: when the commits since the last release include
+  a breaking change, the release workflow fails and the maintainer releases
+  it by hand (`major`, below).
 - Merges are never lost: if several land before a release runs (or CI fails
   on one of them), the next release covers all of them.
 - Re-running a release that already succeeded does nothing.
 - While kmd is `0.x`, breaking changes may also go out as `feat`; a breaking
-  change from `0.x` publishes `1.0.0`.
+  change from `0.x` is released by hand as `1.0.0`.
 - The maintainer can also release by hand (*Actions → Release → Run
   workflow*, `patch`, `minor` or `major`), for example after a Go security
   fix that changes no kmd code. Only from `main`; the workflow refuses any
   other user. Manual releases skip both conditions above.
+- A release is made from the commit CI ran on only while it is still the
+  head of `main`; when CI of an older commit finishes after `main` moved
+  on, the newer commit's own CI run releases both.
 - Verify a download with `sha256sum -c SHA256SUMS --ignore-missing` and its
   origin with `gh attestation verify <file> --repo DipaolaFederico/kmd`.
 - The version files (RPM spec, man page and AppStream metadata, one

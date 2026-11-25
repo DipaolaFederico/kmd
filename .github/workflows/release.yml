@@ -3,15 +3,19 @@
 # release must include a Conventional Commit that asks for one, and the
 # compiled binary must differ from the last release's.
 #
-#   feat!: … / BREAKING CHANGE footer  → X+1.0.0
+#   feat!: … / BREAKING CHANGE footer  → X+1.0.0, by hand only (below)
 #   feat: …                            → X.Y+1.0
 #   fix: … · perf: … · revert: …       → X.Y.Z+1
 #   build, chore, ci, docs, refactor, style, test → no release
 #
 # The largest increment since the last tag wins, so nothing is lost when
-# merges land close together and GitHub drops queued runs. The owner can
-# also release by hand (Actions → Release → Run workflow), which skips both
-# conditions. See CONTRIBUTING.md, "Releases".
+# merges land close together and GitHub drops queued runs. The binaries of
+# every released platform (scripts/release-targets.sh) are compared. The
+# owner can also release by hand (Actions → Release → Run workflow), which
+# skips both conditions. A major release is only made that way: an
+# automatic run that finds a breaking change since the last release fails
+# instead (a squash body is the PR description, which its author writes).
+# See CONTRIBUTING.md, "Releases".
 #
 # The tag vX.Y.Z points to a child of the released commit that adds the
 # version files (RPM spec, man page, AppStream metainfo, CHANGELOG.md)
@@ -80,7 +84,7 @@ jobs:
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15 # binary-changed.sh cross-compiles twice
     permissions:
       contents: read
     outputs:
@@ -129,6 +133,15 @@ jobs:
           INPUT_BUMP: ${{ inputs.bump }}
           SHA: ${{ steps.sha.outputs.sha }}
         run: |
+          # The build checks out the commit CI ran on, while the provenance
+          # attestation names github.sha: for workflow_run, main's head when
+          # the run started. They differ when CI of an older commit finishes
+          # (or is re-run) after main moved on; the newer commit's own CI
+          # run releases both, so this one stops.
+          if [ "$EVENT" = workflow_run ] && [ "$SHA" != "$GITHUB_SHA" ]; then
+            echo "::notice::CI ran on $SHA, but main is now at $GITHUB_SHA: the release waits for that commit's CI run, which covers both."
+            exit 0
+          fi
           # strict vX.Y.Z only: a stray tag like v1.2.3-rc1 must not stop releases
           last=$(git tag -l 'v*' | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' | sort -V | tail -1 || true)
           echo "last=${last:-v0.0.0}" >> "$GITHUB_OUTPUT"
@@ -152,8 +165,15 @@ jobs:
             echo "No feat, fix, perf or revert commits since ${last:-the start}: nothing to release."
             exit 0
           fi
+          # a squash body is the PR description, which its author controls
+          # (and can edit after approval): a major release, which tag, Go
+          # proxy and channels make permanent, is the owner's call
+          if [ "$bump" = major ]; then
+            echo "::error::The commits since ${last:-the start} include a breaking change, which asks for a major release. Major releases are made by hand: Actions → Release → Run workflow, major. Nothing released."
+            exit 1
+          fi
 
-          # 2. and the kmd binary must actually have changed
+          # 2. and a kmd binary must actually have changed
           if [ -n "$last" ]; then
             set +e
             scripts/binary-changed.sh "$last" "$SHA"
@@ -161,7 +181,7 @@ jobs:
             set -e
             case $status in
               0) ;;
-              1) echo "The commits ask for a $bump release, but the binary is identical to $last: nothing to release."; exit 0 ;;
+              1) echo "The commits ask for a $bump release, but the binaries of every platform are identical to $last's: nothing to release."; exit 0 ;;
               *) echo "::error::Could not compare the binaries."; exit 1 ;;
             esac
           fi
@@ -232,7 +252,7 @@ jobs:
         run: |
           mkdir -p dist
           ldflags="-s -w -X github.com/DipaolaFederico/kmd/internal/cli.Version=v$VERSION"
-          targets="linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 freebsd/amd64 windows/amd64"
+          targets=$(scripts/release-targets.sh)
           pids=()
           for t in $targets; do
             os=${t%/*} arch=${t#*/}
@@ -326,6 +346,7 @@ jobs:
       sums: ${{ steps.sums.outputs.sha256 }}
     env:
       VERSION: ${{ needs.plan.outputs.version }}
+      VERSION_FILES: packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml CHANGELOG.md
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -338,33 +359,24 @@ jobs:
           cd dist && sha256sum --strict -c SHA256SUMS
           echo "sha256=$(sha256sum SHA256SUMS | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: |
-            dist/kmd-*
-            dist/kmd_*.deb
-            dist/SHA256SUMS
-
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: version-files
           path: version-files
 
-      # The tag points to a child of the released commit that only adds the
-      # version files the build stamped: checking out the tag (Packit's git
-      # archive, nix, a clone) gives the same files as the source tarball.
-      # Made with the API, so this job still checks nothing out.
-      - name: Tag a commit with the version files
+      # Everything that can still fail is checked before the attestation: a
+      # run that stopped after attesting would leave, in its downloadable
+      # artifacts, files under a real release's names that verify as built
+      # by this workflow but were never released. Reads only.
+      - name: Validate the version files
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SHA: ${{ needs.plan.outputs.sha }}
         run: |
-          files="packaging/kmd.spec docs/kmd.1 packaging/io.github.dipaolafederico.kmd.metainfo.xml CHANGELOG.md"
           # exactly these regular files, stamped with this version
           got=$(cd version-files && find . -mindepth 1 ! -type d | sed 's,^\./,,' | sort)
-          [ "$got" = "$(printf '%s\n' $files | sort)" ] || { echo "::error::unexpected version files: $got"; exit 1; }
+          [ "$got" = "$(printf '%s\n' $VERSION_FILES | sort)" ] || { echo "::error::unexpected version files: $got"; exit 1; }
           if [ -n "$(find version-files -mindepth 1 ! -type d ! -type f)" ]; then echo "::error::version files must be regular files"; exit 1; fi
           grep -Eq "^Version:[[:space:]]+$VERSION\$" version-files/packaging/kmd.spec &&
             grep -q "\"kmd $VERSION\"" version-files/docs/kmd.1 &&
@@ -376,7 +388,7 @@ jobs:
           # each file in its own: the build job's output becomes the tag's
           # content
           url="https://github.com/$REPO/compare/v[0-9]+\.[0-9]+\.[0-9]+\.\.\."
-          for f in $files; do
+          for f in $VERSION_FILES; do
             case $f in
               packaging/kmd.spec) ok=('[-+]Version:[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+') ;;
               docs/kmd.1) ok=('[-+]\.TH KMD 1 "[0-9]{4}-[0-9]{2}-[0-9]{2}" "kmd [0-9]+\.[0-9]+\.[0-9]+" "User Commands"') ;;
@@ -395,9 +407,28 @@ jobs:
             [ -z "$bad" ] || { echo "::error::$f has changes other than the version:"; echo "$bad"; exit 1; }
           done
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/kmd-*
+            dist/kmd_*.deb
+            dist/SHA256SUMS
+
+      # The tag points to a child of the released commit that only adds the
+      # version files the build stamped (validated above): checking out the
+      # tag (Packit's git archive, nix, a clone) gives the same files as the
+      # source tarball. Made with the API, so this job still checks nothing
+      # out.
+      - name: Tag a commit with the version files
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ needs.plan.outputs.sha }}
+        run: |
           # the tree the tag must have: the released commit's plus these files
           entries='[]'
-          for f in $files; do
+          for f in $VERSION_FILES; do
             blob=$(jq -n --arg c "$(base64 -w0 "version-files/$f")" '{content: $c, encoding: "base64"}' |
               gh api -X POST "repos/$REPO/git/blobs" --input - --jq .sha)
             entries=$(jq --arg p "$f" --arg s "$blob" '. + [{path: $p, mode: "100644", type: "blob", sha: $s}]' <<<"$entries")

@@ -14,6 +14,7 @@ import (
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
+	"github.com/DipaolaFederico/kmd/internal/termimg"
 )
 
 // Page is a rendered document.
@@ -449,20 +450,29 @@ func (m *model) follow(href string) {
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "file":
+		if !termimg.LocalHost(u.Host) || termimg.NetworkPath(u.Path) {
+			m.msg = "not a local file: " + clip(href, 50)
+			return
+		}
 		m.followFile(u.Path, u.Fragment)
 	case "http", "https":
-		m.external(href, clip(href, 60))
-	case "mailto":
-		// only the address, subject and body: some mail clients honour
-		// parameters such as attach=/path/to/secret
-		q := url.Values{}
-		for _, k := range []string{"subject", "body"} {
-			if v := u.Query().Get(k); v != "" {
-				q.Set(k, v)
+		if !webURL(u) {
+			shown := clip(href, 40)
+			if u.Host != "" {
+				shown = webTarget(u, 40) // the real host, after "…@"
 			}
+			m.msg = "refused: hidden or missing host: " + shown
+			return
 		}
-		u.RawQuery = q.Encode()
-		m.external(u.String(), clip(u.String(), 60))
+		m.external(href, webTarget(u, 60))
+	case "mailto":
+		// only the address, subject and body
+		s := render.Mailto(u)
+		if s == "" {
+			m.msg = "refused: the address hides a parameter"
+			return
+		}
+		m.external(s, clip(s, 60))
 	default:
 		m.msg = "unsupported link: " + clip(href, 50)
 	}
@@ -527,11 +537,11 @@ func (m *model) followFile(path, frag string) {
 		m.msg = "not a regular file: " + shown
 		return
 	}
-	ext := strings.ToLower(filepath.Ext(path))
-	if rext := strings.ToLower(filepath.Ext(real)); rext != ext {
+	if !render.SameKind(path, real) {
 		m.msg = "link points elsewhere: " + shown + " → " + m.rel(real)
 		return
 	}
+	ext := strings.ToLower(filepath.Ext(path))
 	switch {
 	case render.MarkdownExt[ext]:
 		if path == m.abs(m.path) {
@@ -708,25 +718,10 @@ func stripEscapes(s string) string {
 	return b.String()
 }
 
-// clip cleans s and shortens it to n columns with an ellipsis, in one pass
-// (link targets can be megabytes long).
+// clip cleans s and shortens it to n columns with an ellipsis, in time
+// linear in s (link targets can be megabytes long).
 func clip(s string, n int) string {
-	s = render.Clean(s)
-	keep, w, last := len(s), 0, 0 // keep: where to cut so the ellipsis fits
-	for i, r := range s {
-		rw := styled.RuneWidth(r)
-		if r == 0xfe0f && last == 1 { // widens its base, as styled.Width counts it
-			rw = 1
-		}
-		last = rw
-		if w+rw > n-1 && keep == len(s) {
-			keep = i
-		}
-		if w += rw; w > n {
-			return s[:keep] + "…"
-		}
-	}
-	return s
+	return styled.Elide(render.Clean(s), n)
 }
 
 func errText(err error) string {

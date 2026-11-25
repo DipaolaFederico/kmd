@@ -2,8 +2,10 @@ package render
 
 import (
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
 	"github.com/DipaolaFederico/kmd/internal/termimg"
@@ -26,6 +28,11 @@ type Options struct {
 	// resolve against instead of BaseDir (a document read from a pipe).
 	// Images are not affected: they are never downloaded.
 	BaseURL *url.URL
+
+	// NoWorkingDir leaves relative links unresolved when BaseDir is empty,
+	// instead of resolving them against the working directory: a service
+	// embedding the render package must not disclose it in OSC 8 targets.
+	NoWorkingDir bool
 
 	// AnyImagePath lets images be read from anywhere: absolute paths, file:
 	// URLs and paths leaving BaseDir. Off, local images are confined to
@@ -57,10 +64,11 @@ type Options struct {
 
 // Budget holds the per-document limits: a short hostile document must not
 // be able to trigger unbounded image decoding, diagram layout or math
-// layout. Images are decoded once per budget. The zero value is ready.
+// layout. Image files are read once per budget. The zero value is ready.
 type Budget struct {
-	images    map[string]imageResult    // frames by source and size
+	images    map[frameKey]imageResult  // frames by image and size
 	loaded    map[string]*termimg.Image // loaded images by source (nil: failed)
+	loader    termimg.Loader            // reads each file once, ≤ 64 MiB in all
 	imgBytes  int
 	imgPixels int // source pixels rendered (decoded and scaled)
 	specials  int
@@ -131,6 +139,13 @@ type renderer struct {
 
 	links  *nav   // link registry (Navigate)
 	absDir string // absolute BaseDir, resolved once for href
+
+	// layout budget of the top-level block being laid out (limits.go)
+	laid int  // runs laid out so far
+	nest int  // containers around the block being laid out
+	over bool // the budget ran out: the rest of the block is left out
+	room int  // runs the inline being built may take (see inline)
+	cut  bool // an inline was cut short at room
 }
 
 const (
@@ -170,11 +185,15 @@ func Render(doc *md.Node, o Options) Result {
 		b.WriteByte('\n')
 		row++
 		if p.nav != nil {
-			p.nav.row++
+			p.nav.endRow()
 		}
 	}
-	paint := func(lines []rline) {
+	truncated := false // the output reached maxOutput
+	paint := func(lines []rline) bool {
 		for _, l := range lines {
+			if truncated = b.Len() > maxOutput; truncated {
+				return false
+			}
 			if len(l) == 0 {
 				blank()
 				continue
@@ -183,6 +202,7 @@ func Render(doc *md.Node, o Options) Result {
 			p.line(&b, l, len(margin))
 			row++
 		}
+		return true
 	}
 	// Top-level blocks are painted as soon as they are laid out, so memory
 	// holds the tree and the output, never every styled line at once.
@@ -190,7 +210,7 @@ func Render(doc *md.Node, o Options) Result {
 	paused := false   // a pause came after it
 	var headings []Heading
 	var pauses []int
-	for c := doc.FirstChild; c != nil; c = c.Next {
+	for c := doc.FirstChild; c != nil && !truncated; c = c.Next {
 		if c.Type == md.FootnoteDef {
 			continue
 		}
@@ -198,7 +218,7 @@ func Render(doc *md.Node, o Options) Result {
 			paused = true
 			continue
 		}
-		lines := r.block(c, width)
+		lines := r.finish(r.block(c, width))
 		if len(lines) == 0 {
 			continue
 		}
@@ -218,16 +238,10 @@ func Render(doc *md.Node, o Options) Result {
 		}
 		paint(lines)
 	}
-	if defs := md.Footnotes(doc); len(defs) > 0 {
-		paint([]rline{nil, {{text: strings.Repeat("─", min(width, 24)), st: Style{Fg: r.th.Border}}}})
-		for _, d := range defs {
-			mark := run{text: superscript(d.Index) + " ", st: Style{Fg: r.th.Link, Attr: Bold}}
-			body := r.blocks(d, width-strWidth(mark.text), true)
-			if len(body) == 0 {
-				body = []rline{nil}
-			}
-			paint(prefixed(body, mark, run{text: strings.Repeat(" ", strWidth(mark.text))}))
-		}
+	if truncated {
+		b.WriteString("\n" + margin + truncatedNotice + "\n")
+	} else {
+		r.footnotes(doc, width, paint)
 	}
 	b.WriteByte('\n')
 	res := Result{Text: b.String(), Graphics: r.graphics, Pauses: pauses}
@@ -238,6 +252,25 @@ func Render(doc *md.Node, o Options) Result {
 		r.links.fill(&res)
 	}
 	return res
+}
+
+// footnotes paints the footnotes of doc, one at a time, while paint
+// reports room for more output.
+func (r *renderer) footnotes(doc *md.Node, width int, paint func([]rline) bool) {
+	defs := md.Footnotes(doc)
+	if len(defs) == 0 || !paint([]rline{nil, {{text: strings.Repeat("─", min(width, 24)), st: Style{Fg: r.th.Border}}}}) {
+		return
+	}
+	for _, d := range defs {
+		mark := run{text: superscript(d.Index) + " ", st: Style{Fg: r.th.Link, Attr: Bold}}
+		body := r.finish(r.blocks(d, width-strWidth(mark.text), true))
+		if len(body) == 0 {
+			body = []rline{nil}
+		}
+		if !paint(prefixed(body, mark, run{text: strings.Repeat(" ", strWidth(mark.text))})) {
+			return
+		}
+	}
 }
 
 // fill sets the navigation data of res: the placed images, and the code
@@ -305,11 +338,21 @@ func (r *renderer) blocks(parent *md.Node, width int, tight bool) []rline {
 	return out
 }
 
-func (r *renderer) inline(n *md.Node, base Style) []run { return r.runs(n, base, nil) }
+// inline returns the runs of n's inlines, at most as many as the block's
+// layout budget has left: they are all in memory, with the lines laid
+// out so far, before any of them is laid out.
+func (r *renderer) inline(n *md.Node, base Style) []run {
+	r.room = maxBlockRuns - r.laid
+	return r.runs(n, base, nil)
+}
 
 func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 	th := r.th
 	for n := parent.FirstChild; n != nil; n = n.Next {
+		if len(out) >= r.room {
+			r.cut = true
+			return out
+		}
 		switch n.Type {
 		case md.Text:
 			out = append(out, run{text: n.Literal, st: base})
@@ -354,27 +397,19 @@ func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 	return out
 }
 
-// link appends the runs of a link: underlined, with its OSC 8 target and,
-// for the viewer, its resolved destination; without hyperlinks the
-// destination follows the text in parentheses.
+// link appends the runs of a link: underlined, with its OSC 8 target (see
+// target) and, for the viewer, its resolved destination; without
+// hyperlinks the destination follows the text in parentheses.
 func (r *renderer) link(n *md.Node, base Style, out []run) []run {
 	th := r.th
 	st := base
-	st.Fg, st.URL = th.Link, n.Dest
-	href := n.Dest
+	st.Fg = th.Link
+	href, local := n.Dest, false
 	if r.opt.Hyperlinks || r.links != nil || r.opt.BaseURL != nil {
-		var local bool
 		href, local = r.href(n.Dest)
-		switch {
-		// a link resolved against BaseURL is a web link; file: links are
-		// left as written and still checked below
-		case local, r.opt.BaseURL != nil && href != n.Dest:
-			st.URL = href
-		case strings.HasPrefix(strings.ToLower(n.Dest), "file:") && !openable(n.Dest):
-			// a clicked file:// link is opened by the desktop: never a
-			// script or .desktop file
-			st.URL = ""
-		}
+	}
+	if r.opt.Hyperlinks { // validated once per link, not per painted run
+		st.URL = target(href, local)
 	}
 	if r.links != nil {
 		if k := len(r.links.links); k < maxLinks {
@@ -404,7 +439,11 @@ func (r *renderer) imageRef(alt, dest string, base Style, out []run) []run {
 	if alt == "" {
 		alt = "image"
 	}
-	st := Style{Fg: r.th.Image, Attr: base.Attr | Italic, URL: dest}
+	st := Style{Fg: r.th.Image, Attr: base.Attr | Italic}
+	// with BaseURL the image is on the web, and images are never fetched
+	if r.opt.Hyperlinks && r.opt.BaseURL == nil {
+		st.URL = target(r.href(dest))
+	}
 	out = append(out, run{text: "▣ " + alt, st: st})
 	if !r.opt.Hyperlinks && dest != "" {
 		out = append(out, run{text: " (" + dest + ")", st: Style{Fg: r.th.Muted, Attr: Faint}})
@@ -431,7 +470,7 @@ func (r *renderer) block(n *md.Node, width int) []rline {
 		if lines, ok := r.imageParagraph(n, width); ok {
 			return lines
 		}
-		return wrap(r.inline(n, r.base), width)
+		return r.wrap(r.inline(n, r.base), width)
 	case md.Heading:
 		return r.heading(n, width)
 	case md.CodeBlock:
@@ -456,7 +495,7 @@ func (r *renderer) block(n *md.Node, width int) []rline {
 		if strings.TrimSpace(runsText(rs)) == "" {
 			return nil
 		}
-		return wrap(rs, width)
+		return r.wrap(rs, width)
 	case md.FrontMatter:
 		return r.codeBox(n.Literal, "yaml", "metadata", width)
 	case md.ThematicBreak:
@@ -494,13 +533,17 @@ func displayMath(p *md.Node) *md.Node {
 	return m
 }
 
+// prefixed puts first before the first line and rest before the others.
+// Containers nest it, a run per level on every line: inserting in place
+// when a line has room, and making room for the next levels when it has
+// not, costs a few allocations per line instead of one per level.
 func prefixed(lines []rline, first, rest run) []rline {
 	for i, l := range lines {
 		p := rest
 		if i == 0 {
 			p = first
 		}
-		lines[i] = append(rline{p}, l...)
+		lines[i] = slices.Insert(l, 0, p)
 	}
 	return lines
 }
@@ -511,10 +554,13 @@ func (r *renderer) heading(n *md.Node, width int) []rline {
 	case 1:
 		st := Style{Fg: th.H1Fg, Bg: th.H1Bg, Attr: Bold}
 		if !r.opt.Color {
-			lines := wrap(upper(r.inline(n, st)), width)
+			lines := r.wrap(upper(r.inline(n, st)), width)
+			if len(lines) == 0 {
+				return nil
+			}
 			return append(lines, rline{{text: strings.Repeat("═", min(width, max(lineWidth(lines[0]), 1))), st: st}})
 		}
-		lines := wrap(r.inline(n, st), max(width-2, 1))
+		lines := r.wrap(r.inline(n, st), max(width-2, 1))
 		for i, l := range lines {
 			pad := run{text: " ", st: st}
 			lines[i] = append(append(rline{pad}, l...), pad)
@@ -522,7 +568,7 @@ func (r *renderer) heading(n *md.Node, width int) []rline {
 		return lines
 	case 2:
 		st := Style{Fg: th.H2, Attr: Bold}
-		lines := prefixed(wrap(r.inline(n, st), max(width-2, 1)), run{text: "▌ ", st: Style{Fg: th.H2}}, run{text: "  "})
+		lines := prefixed(r.wrap(r.inline(n, st), max(width-2, 1)), run{text: "▌ ", st: Style{Fg: th.H2}}, run{text: "  "})
 		return append(lines, rline{{text: strings.Repeat("─", width), st: Style{Fg: th.Border}}})
 	}
 	mark, c := "◆ ", th.H3
@@ -533,7 +579,7 @@ func (r *renderer) heading(n *md.Node, width int) []rline {
 		mark, c = "· ", th.H5
 	}
 	st := Style{Fg: c, Attr: Bold}
-	return prefixed(wrap(r.inline(n, st), max(width-2, 1)), run{text: mark, st: Style{Fg: c}}, run{text: "  "})
+	return prefixed(r.wrap(r.inline(n, st), max(width-2, 1)), run{text: mark, st: Style{Fg: c}}, run{text: "  "})
 }
 
 func upper(rs []run) []run {
@@ -566,7 +612,23 @@ func expandTabs(l string) string {
 	return b.String()
 }
 
+// cutBytes returns the longest prefix of s of at most n bytes that ends
+// on a character boundary, and whether it is shorter than s.
+func cutBytes(s string, n int) (string, bool) {
+	if len(s) <= n {
+		return s, false
+	}
+	n = max(n, 0)
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n], true
+}
+
 func (r *renderer) codeBox(text, lang, label string, width int) []rline {
+	if r.over {
+		return nil
+	}
 	border := Style{Fg: r.th.Border}
 	inner := max(width-4, 1)
 	top := rline{{text: "╭─", st: border}}
@@ -591,13 +653,26 @@ func (r *renderer) codeBox(text, lang, label string, width int) []rline {
 		}
 	}
 	out := []rline{top}
-	for _, l := range r.highlight(expandTabs(text), lang) {
+	// every token and line takes at least a byte: highlighting more than
+	// the budget has room for only to drop it would hold a run per byte
+	// of it (cut before expanding tabs too, which copies the text)
+	room := maxBlockRuns - r.laid
+	src, cutSrc := cutBytes(text, room)
+	src, cutTabs := cutBytes(expandTabs(src), room)
+	cutSrc = cutSrc || cutTabs
+rows:
+	for _, l := range r.highlight(src, lang) {
 		for _, seg := range cut(l, inner) {
-			row := append(rline{{text: "│ ", st: border}}, seg...)
+			row := make(rline, 0, len(seg)+3)
+			row = append(append(row, run{text: "│ ", st: border}), seg...)
 			row = append(row, run{text: strings.Repeat(" ", max(inner-lineWidth(seg), 0)+1)}, run{text: "│", st: border})
+			if !r.charge(len(row)) {
+				break rows
+			}
 			out = append(out, row)
 		}
 	}
+	r.over = r.over || cutSrc
 	// only the corner is marked: marked runs are measured when painted
 	return append(out, rline{{text: "╰", st: edge}, {text: strings.Repeat("─", max(width-2, 0)) + "╯", st: border}})
 }
@@ -641,7 +716,9 @@ func (r *renderer) quote(n *md.Node, width int) []rline {
 	if width-2 < minNestWidth { // too deep: keep the width, drop the bar
 		return append(lines, r.blocks(n, width, false)...)
 	}
+	r.nest++
 	lines = append(lines, r.blocks(n, width-2, false)...)
+	r.nest--
 	if len(lines) == 0 {
 		lines = []rline{nil}
 	}
@@ -686,7 +763,9 @@ func (r *renderer) list(n *md.Node, width int) []rline {
 		if inner < minNestWidth { // too deep: stop indenting further
 			inner, indent = width, 0
 		}
+		r.nest++
 		lines := r.blocks(it, max(inner, 1), n.Tight)
+		r.nest--
 		r.base = saved
 		if len(lines) == 0 {
 			lines = []rline{nil}
@@ -716,45 +795,18 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 		if row.Header {
 			base = Style{Fg: th.TableHead, Attr: Bold}
 		}
-		rc := make([][]run, ncol)
-		j := 0
-		for c := row.FirstChild; c != nil && j < ncol; c = c.Next {
-			rc[j] = r.inline(c, base)
-			for _, l := range wrap(rc[j], 1<<20) {
-				widths[j] = max(widths[j], lineWidth(l))
-			}
-			j++
+		// only the cells the row has: a short row is drawn padded, and
+		// a table of short rows would otherwise cost its full width each
+		var rc [][]run
+		for c := row.FirstChild; c != nil && len(rc) < ncol; c = c.Next {
+			j := len(rc)
+			rc = append(rc, r.inline(c, base))
+			widths[j] = max(widths[j], naturalWidth(rc[j]))
 		}
 		cells = append(cells, rc)
 	}
-	avail := width - 3*ncol - 1
-	for {
-		sum, big := 0, 0
-		for j, w := range widths {
-			sum += w
-			if w > widths[big] {
-				big = j
-			}
-		}
-		if sum <= avail || widths[big] <= 4 {
-			break
-		}
-		widths[big]--
-	}
-	if sum := sumInts(widths); sum > avail {
-		if avail < 4*ncol { // too many columns for a grid: one record per row
-			return r.stackedTable(cells, width)
-		}
-		for sum > avail { // shrink the widest columns further, down to 4
-			big := 0
-			for j, w := range widths {
-				if w > widths[big] {
-					big = j
-				}
-			}
-			widths[big]--
-			sum--
-		}
+	if !fitColumns(widths, width-3*ncol-1) { // too many columns for a grid: one record per row
+		return r.stackedTable(cells, width)
 	}
 	border := Style{Fg: th.Border}
 	rule := func(l, m, rr string) rline {
@@ -771,6 +823,7 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 	}
 	out := []rline{rule("╭", "┬", "╮")}
 	header := n.FirstChild != nil && n.FirstChild.Header
+rows:
 	for i, row := range cells {
 		wrapped := make([][]rline, ncol)
 		h := 1
@@ -779,8 +832,8 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 			h = max(h, len(wrapped[j]))
 		}
 		for k := 0; k < h; k++ {
-			line := rline{{text: "│", st: border}}
-			for j := range row {
+			line := append(make(rline, 0, 1+4*ncol), run{text: "│", st: border}) // kept: sized once
+			for j := range ncol {
 				var cl rline
 				if k < len(wrapped[j]) {
 					cl = wrapped[j][k]
@@ -797,6 +850,9 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 				line = append(line, cl...)
 				line = append(line, run{text: strings.Repeat(" ", pad-left+1)}, run{text: "│", st: border})
 			}
+			if !r.charge(len(line)) {
+				break rows
+			}
 			out = append(out, line)
 		}
 		if i == 0 && header && len(cells) > 1 {
@@ -806,12 +862,50 @@ func (r *renderer) table(n *md.Node, width int) []rline {
 	return append(out, rule("╰", "┴", "╯"))
 }
 
-func sumInts(v []int) int {
-	t := 0
-	for _, x := range v {
-		t += x
+// fitColumns narrows widths to fit avail columns as taking one column at
+// a time from the widest (the first of equals) would, but never below 4,
+// and reports whether they fit. It works out the final widths level by
+// level instead of column by column: a hostile table can be millions of
+// columns too wide, times a thousand columns per step.
+func fitColumns(widths []int, avail int) bool {
+	capped := func(level int) int { // the total width with no column above level
+		t := 0
+		for _, w := range widths {
+			t += min(w, level)
+		}
+		return t
 	}
-	return t
+	widest := 0
+	for _, w := range widths {
+		widest = max(widest, w)
+	}
+	if capped(widest) <= avail {
+		return true
+	}
+	if capped(4) > avail {
+		return false
+	}
+	lo, hi := 4, widest // capped(lo) <= avail < capped(hi)
+	for hi-lo > 1 {
+		if mid := lo + (hi-lo)/2; capped(mid) <= avail {
+			lo = mid
+		} else {
+			hi = mid
+		}
+	}
+	// columns wider than lo end at lo, but the last few keep one more
+	// column: the ones the one-at-a-time order had not reached yet
+	keep := avail - capped(lo)
+	for j := len(widths) - 1; j >= 0; j-- {
+		if widths[j] > lo {
+			widths[j] = lo
+			if keep > 0 {
+				widths[j]++
+				keep--
+			}
+		}
+	}
+	return true
 }
 
 // stackedTable renders a table too wide for a grid as "header: value"
@@ -823,25 +917,55 @@ func (r *renderer) stackedTable(cells [][][]run, width int) []rline {
 	head := cells[0]
 	label := Style{Fg: r.th.TableHead, Attr: Bold}
 	sep := rline{{text: strings.Repeat("┄", min(width, 24)), st: Style{Fg: r.th.Border}}}
+	names := make([]string, len(head))
+	for j := range head {
+		names[j] = recordLabel(head[j], j)
+	}
 	var out []rline
 	body := cells[1:]
 	if len(body) == 0 {
 		body = [][][]run{make([][]run, len(head))}
 	}
+	var rs []run // reused: wrap copies what it keeps
 	for i, row := range body {
 		if i > 0 {
 			out = append(out, sep)
 		}
-		for j, cell := range row {
-			name := strings.TrimSpace(runsText(head[j]))
-			if name == "" {
-				name = "#" + strconv.Itoa(j+1)
-			}
-			rs := append([]run{{text: name + ":", st: label}, {text: " "}}, cell...)
-			out = append(out, wrap(rs, width)...)
+		// a record shows the cells its row has, not the padding of a
+		// short row: a table of empty rows would print every label of
+		// every row (thousands of lines from a few bytes of input)
+		for j, cell := range row[:min(len(row), len(names))] {
+			rs = append(append(rs[:0], run{text: names[j], st: label}, run{text: " "}), cell...)
+			out = append(out, r.wrap(rs, width)...)
+		}
+		if r.over {
+			break
 		}
 	}
 	return out
+}
+
+// Labels of a table drawn as records are repeated in every record: they
+// are made once, and short, or a table of long headers and many rows
+// would print the headers thousands of times. maxLabelWidth bounds a
+// label's columns, maxLabelBytes its bytes (zero-width characters such
+// as combining marks take bytes but no columns).
+const (
+	maxLabelWidth = 32
+	maxLabelBytes = 128
+)
+
+// recordLabel is the label of column j in a table drawn as records: its
+// header, or its number when the header is empty.
+func recordLabel(head []run, j int) string {
+	name := strings.TrimSpace(runsText(head))
+	if name == "" {
+		name = "#" + strconv.Itoa(j+1)
+	}
+	if short, cut := cutBytes(name, maxLabelBytes); cut {
+		name = short + "…"
+	}
+	return elide(name, maxLabelWidth) + ":"
 }
 
 // TOC renders the document outline (headings) as a numbered tree.
@@ -853,7 +977,8 @@ func TOC(doc *md.Node, o Options) string {
 	width := max(o.Width-2*len(margin), 10)
 	var counters [7]int
 	var stack []int // levels of the currently open headings
-	var lines []rline
+	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
+	var b strings.Builder
 	colors := [...]Color{r.th.H1Bg, r.th.H2, r.th.H3, r.th.H4, r.th.H5, r.th.H5}
 	for c := doc.FirstChild; c != nil; c = c.Next {
 		if c.Type != md.Heading {
@@ -878,16 +1003,18 @@ func TOC(doc *md.Node, o Options) string {
 		if lvl == 0 {
 			st.Attr = Bold
 		}
-		body := wrap(r.inline(c, st), max(width-len(indent)-strWidth(label), 1))
-		lines = append(lines, prefixed(body,
+		body := r.wrap(r.inline(c, st), max(width-len(indent)-strWidth(label), 1))
+		// each entry is painted as it is laid out, like a document's blocks
+		for _, l := range r.finish(prefixed(body,
 			run{text: indent + label, st: Style{Fg: r.th.Muted}},
-			run{text: strings.Repeat(" ", len(indent)+strWidth(label))})...)
-	}
-	p := &painter{color: o.Color, truecolor: o.TrueColor, links: o.Hyperlinks}
-	var b strings.Builder
-	for _, l := range lines {
-		b.WriteString(margin)
-		p.line(&b, l, len(margin))
+			run{text: strings.Repeat(" ", len(indent)+strWidth(label))})) {
+			if b.Len() > maxOutput {
+				b.WriteString(margin + truncatedNotice + "\n")
+				return b.String()
+			}
+			b.WriteString(margin)
+			p.line(&b, l, len(margin))
+		}
 	}
 	return b.String()
 }

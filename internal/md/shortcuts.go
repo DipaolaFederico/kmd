@@ -113,7 +113,7 @@ func wikiLink(content string, opt *Options) *Node {
 		label = heading
 	}
 	l := &Node{Type: Link, Dest: dest.String()}
-	if kids := expandText(label, opt, false); kids != nil {
+	if kids := expandText(label, opt, nil); kids != nil { // a label holds no wiki link
 		for _, k := range kids {
 			l.AppendChild(k)
 		}
@@ -154,10 +154,11 @@ func (o *Options) triggers(wiki bool) string {
 	return ""
 }
 
-// expandText rewrites shortcodes (and wiki links when wiki is set) in s. It
-// returns nil when nothing changed, else the replacement nodes.
-func expandText(s string, opt *Options, wiki bool) []*Node {
-	set := opt.triggers(wiki && opt.WikiLinks)
+// expandText rewrites shortcodes in s, and wiki links when wiki, the
+// budget they are charged to, is not nil. It returns nil when nothing
+// changed, else the replacement nodes.
+func expandText(s string, opt *Options, wiki *nodeBudget) []*Node {
+	set := opt.triggers(wiki != nil && opt.WikiLinks)
 	if set == "" {
 		return nil
 	}
@@ -182,8 +183,13 @@ func expandText(s string, opt *Options, wiki bool) []*Node {
 			i = end
 			continue
 		}
+		if wiki.spent() {
+			i++ // no budget left for a link: the "[" stays text
+			continue
+		}
 		l, end := wikiAt(s, i, opt)
 		if l != nil {
+			wiki.take(splitLinkNodes)
 			if buf = append(buf, s[last:i]...); len(buf) > 0 {
 				nodes = append(nodes, text(string(buf)))
 				buf = buf[:0]
@@ -203,73 +209,43 @@ func expandText(s string, opt *Options, wiki bool) []*Node {
 }
 
 // shortcuts applies the emoji and wiki link extensions to the inline
-// children of n. Adjacent Text nodes are joined first, since the parser
-// splits text at every '[', '_' or other potential delimiter. Its recursion
-// depth is bounded by flattenDeep.
-func shortcuts(n *Node, opt *Options, inLink bool) {
-	set := opt.triggers(opt.WikiLinks && !inLink)
+// children of n. mergeText has joined adjacent text, so each Text node is
+// a whole run of it. Its recursion depth is bounded by flattenDeep.
+func shortcuts(n *Node, opt *Options, inLink bool, nodes *nodeBudget) {
+	wiki := nodes
+	if inLink {
+		wiki = nil // no links inside links
+	}
+	set := opt.triggers(wiki != nil && opt.WikiLinks)
 	for c := n.FirstChild; c != nil; {
+		next := c.Next
 		switch {
 		case c.Type == Text && !c.noExt:
-			end, hit := c, strings.ContainsAny(c.Literal, set)
-			for end.Next != nil && end.Next.Type == Text && !end.Next.noExt {
-				end = end.Next
-				hit = hit || strings.ContainsAny(end.Literal, set)
+			if strings.ContainsAny(c.Literal, set) {
+				rewrite(c, opt, wiki)
 			}
-			next := end.Next
-			if hit {
-				rewriteRun(c, end, opt, !inLink)
-			}
-			c = next
 		case c.Type == Link || c.Type == Image:
-			// no links inside links; autolinks show their URL verbatim
+			// autolinks show their URL verbatim
 			if !c.noExt && c.FirstChild != nil {
-				shortcuts(c, opt, true)
+				shortcuts(c, opt, true, nodes)
 			}
-			c = c.Next
 		default:
 			if c.FirstChild != nil {
-				shortcuts(c, opt, inLink)
+				shortcuts(c, opt, inLink, nodes)
 			}
-			c = c.Next
 		}
+		c = next
 	}
 }
 
-// rewriteRun replaces the Text nodes first…last with their expansion.
-func rewriteRun(first, last *Node, opt *Options, wiki bool) {
-	s := first.Literal
-	if first != last {
-		n := 0
-		for t := first; ; t = t.Next {
-			n += len(t.Literal)
-			if t == last {
-				break
-			}
-		}
-		var b strings.Builder
-		b.Grow(n)
-		for t := first; ; t = t.Next {
-			b.WriteString(t.Literal)
-			if t == last {
-				break
-			}
-		}
-		s = b.String()
-	}
-	nodes := expandText(s, opt, wiki)
-	if nodes == nil {
+// rewrite replaces Text node t with its expansion.
+func rewrite(t *Node, opt *Options, wiki *nodeBudget) {
+	repl := expandText(t.Literal, opt, wiki)
+	if repl == nil {
 		return
 	}
-	for _, nd := range nodes {
-		first.insertBefore(nd)
+	for _, nd := range repl {
+		t.insertBefore(nd)
 	}
-	for t := first; ; {
-		next := t.Next
-		t.unlink()
-		if t == last {
-			break
-		}
-		t = next
-	}
+	t.unlink()
 }

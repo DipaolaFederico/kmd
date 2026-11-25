@@ -2,14 +2,17 @@
 # CONTRIBUTING.md): the title is a Conventional Commit — it becomes the
 # squash commit on main, which decides the release — and the branch is named
 # type/short-description. Then it labels the PR with the release that
-# merging it asks for (release:major/minor/patch/skip), for visibility, and
-# checks that a PR asking for a release adds a CHANGELOG.md entry (unless it
-# is labelled changelog:skip: nothing users would notice).
+# merging it asks for (release:major/minor/patch/skip, from the title and
+# the description, which together become the squash commit), for
+# visibility; fails a breaking change the maintainer has not labelled
+# breaking:approved; and checks that a PR asking for a release adds a
+# CHANGELOG.md entry (unless it is labelled changelog:skip: nothing users
+# would notice).
 #
 # pull_request_target: runs with the base branch's code and a token that can
 # label fork PRs too. Safe because nothing from the PR is checked out or
-# executed; the title, branch name and labels only reach the shell through
-# env, and the changed files are only listed through the API.
+# executed; the title, description, branch name and labels only reach the
+# shell through env, and the changed files are only listed through the API.
 name: PR conventions
 
 on:
@@ -38,6 +41,7 @@ jobs:
         id: title
         env:
           TITLE: ${{ github.event.pull_request.title }}
+          BODY: ${{ github.event.pull_request.body }}
         run: |
           types='feat|fix|perf|revert|refactor|test|docs|build|ci|chore|style'
           re="^($types)(\\([a-z0-9._/-]+\\))?!?: [^ ]"
@@ -45,7 +49,11 @@ jobs:
             echo "::error::PR title must be a Conventional Commit, e.g. 'feat(view): follow links' or 'fix(md): handle tabs' (types: ${types//|/, }). It becomes the commit on main."
             exit 1
           fi
-          bump=$(printf '%s\0' "$TITLE" | scripts/release-bump.sh)
+          # the squash commit is the title plus the description (the
+          # repository's squash_merge_commit_message is PR_BODY), and a
+          # BREAKING CHANGE footer in the description counts: read both,
+          # as the release will
+          bump=$(printf '%s\n\n%s\0' "$TITLE" "$BODY" | scripts/release-bump.sh)
           echo "bump=$bump" >> "$GITHUB_OUTPUT"
 
       - name: Branch is type/description
@@ -83,6 +91,23 @@ jobs:
           esac
           echo "::notice::$msg"
           echo "### Release: $msg" >> "$GITHUB_STEP_SUMMARY"
+
+      # A breaking change (title "type!:" or a BREAKING CHANGE footer in the
+      # description, which the author can edit after approval) asks for a
+      # major release. Only the maintainer can add labels, so the label is
+      # the maintainer saying it is meant; the release workflow still makes
+      # major releases only by hand.
+      - name: A breaking change is approved by the maintainer
+        if: steps.title.outputs.bump == 'major'
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          if [[ ",$LABELS," == *,breaking:approved,* ]]; then
+            echo "::notice::breaking:approved: release this with Actions → Release → Run workflow (major) after merging"
+            exit 0
+          fi
+          echo "::error::This pull request is a breaking change (a '!' in the title or a 'BREAKING CHANGE:' paragraph at the end of the description), which asks for a major release. Remove it, or ask the maintainer to label the pull request breaking:approved (see CONTRIBUTING.md, \"Releases\")."
+          exit 1
 
       - name: Changelog entry
         if: steps.title.outputs.bump != ''

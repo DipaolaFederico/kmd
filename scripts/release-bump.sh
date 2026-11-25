@@ -9,7 +9,8 @@
 #   build, chore, ci, docs, refactor, style, test → nothing (prints nothing)
 #
 # The largest increment wins. Messages that are not Conventional Commits are
-# reported on stderr and ignored.
+# reported on stderr and ignored. Carriage returns are dropped: a pull
+# request description typed in a browser has CRLF line ends.
 #   git log -z --format=%B v0.2.0..main | scripts/release-bump.sh
 set -euo pipefail
 
@@ -17,6 +18,7 @@ rank() { case $1 in major) echo 3 ;; minor) echo 2 ;; patch) echo 1 ;; *) echo 0
 re='^([a-z]+)(\([a-z0-9._/-]+\))?(!)?: [^ ].*$'
 best=""
 while IFS= read -r -d '' msg || [ -n "$msg" ]; do
+  msg=${msg//$'\r'/}
   subject=${msg%%$'\n'*}
   [ -z "$subject" ] && continue
   if [[ ! $subject =~ $re ]]; then

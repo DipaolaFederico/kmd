@@ -2,7 +2,6 @@ package render
 
 import (
 	"html"
-	"strconv"
 	"strings"
 
 	"github.com/DipaolaFederico/kmd/internal/diagram"
@@ -201,37 +200,40 @@ type imageResult struct {
 	ok    bool
 }
 
-// loadImage decodes and renders an image once per document (repeated
-// references reuse the frame) within the per-document budgets.
+// frameKey names a frame: an image (one per file, however the document
+// names it) drawn at a size.
+type frameKey struct {
+	img         *termimg.Image
+	width, rows int
+}
+
+// loadImage renders an image once per document and size (repeated
+// references reuse the frame) within the per-document budgets. A frame is
+// kept only if it fits the output budget, so the frames held in memory
+// never exceed it.
 func (r *renderer) loadImage(src string, width, rows int) (imageResult, bool) {
-	key := src + "\x00" + strconv.Itoa(width) + "x" + strconv.Itoa(rows)
-	if res, ok := r.images[key]; ok {
-		if r.placing() { // not copied into the text: only the first counts
-			return res, res.ok
-		}
-		if r.imgBytes+frameBytes(res.frame) > maxImageBytes {
-			return imageResult{}, false
-		}
-		r.imgBytes += frameBytes(res.frame)
-		return res, res.ok
-	}
-	if r.images == nil {
-		r.images = map[string]imageResult{}
-	}
-	if len(r.images) >= maxImages {
+	img := r.image(src)
+	if img == nil {
 		return imageResult{}, false
 	}
-	var res imageResult
-	if img := r.image(src); img != nil {
-		w, h := img.Size()
-		if r.imgPixels+w*h <= maxImagePixels {
-			r.imgPixels += w * h
-			if f, err := termimg.Render(img, r.opt.Images, width, rows, r.opt.Cell); err == nil && len(f.Lines) > 0 {
-				res = imageResult{frame: f, ok: true}
-			}
+	key := frameKey{img, width, rows}
+	res, seen := r.images[key]
+	switch {
+	case seen && r.placing(): // not copied into the text: only the first counts
+		return res, res.ok
+	case !seen:
+		if len(r.images) >= maxImages {
+			return imageResult{}, false
 		}
+		res = r.renderImage(img, width, rows)
+		if res.ok && r.imgBytes+frameBytes(res.frame) > maxImageBytes {
+			res = imageResult{} // it could never be shown: not kept
+		}
+		if r.images == nil {
+			r.images = map[frameKey]imageResult{}
+		}
+		r.images[key] = res
 	}
-	r.images[key] = res
 	if !res.ok || r.imgBytes+frameBytes(res.frame) > maxImageBytes {
 		return imageResult{}, false
 	}
@@ -239,18 +241,37 @@ func (r *renderer) loadImage(src string, width, rows int) (imageResult, bool) {
 	return res, true
 }
 
-// image loads src once per document, whatever sizes it is drawn at: the
-// image decodes its pixels at most once. nil when it cannot be loaded.
+// renderImage draws img at a size within the budget of source pixels
+// rendered: each size decodes the image again.
+func (r *renderer) renderImage(img *termimg.Image, width, rows int) imageResult {
+	w, h := img.Size()
+	if r.imgPixels+w*h > maxImagePixels {
+		return imageResult{}
+	}
+	r.imgPixels += w * h
+	f, err := termimg.Render(img, r.opt.Images, width, rows, r.opt.Cell)
+	if err != nil || len(f.Lines) == 0 {
+		return imageResult{}
+	}
+	return imageResult{frame: f, ok: true}
+}
+
+// image loads src once per document, whatever sizes it is drawn at; the
+// Loader reads each file once whatever the name and bounds the bytes read.
+// nil when it cannot be loaded, or once no new frame could be drawn.
 func (r *renderer) image(src string) *termimg.Image {
 	if img, ok := r.loaded[src]; ok {
 		return img
 	}
+	if len(r.images) >= maxImages {
+		return nil
+	}
 	if r.loaded == nil {
 		r.loaded = map[string]*termimg.Image{}
 	}
-	load := termimg.LoadIn
+	load := r.loader.LoadIn
 	if r.opt.AnyImagePath {
-		load = termimg.Load
+		load = r.loader.Load
 	}
 	img, err := load(src, r.opt.BaseDir)
 	if err != nil {

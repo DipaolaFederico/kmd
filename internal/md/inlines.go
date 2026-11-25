@@ -1,10 +1,14 @@
 package md
 
-import "strings"
+import (
+	"strconv"
+	"strings"
+)
 
 type delimiter struct {
 	cc                byte
 	num, orig         int
+	pos               int // offset in the subject: increases up the stack
 	node              *Node
 	prev, next        *delimiter
 	canOpen, canClose bool
@@ -16,7 +20,6 @@ type bracket struct {
 	prevDelim    *delimiter
 	index        int
 	image        bool
-	active       bool
 	bracketAfter bool
 }
 
@@ -29,9 +32,17 @@ type inlineParser struct {
 	refs      map[string]ref
 	footnotes map[string]*Node
 	opt       *Options
-	tickRuns  map[int][]int // backtick run length -> start offsets (built lazily)
-	htmlEnds  htmlEnds      // absent HTML terminators (see scanHTMLTag)
-	refBudget *int          // see refBudget
+	tickRuns  map[int][]int   // backtick run length -> start offsets (built lazily)
+	htmlEnds  htmlEnds        // absent HTML terminators (see scanHTMLTag)
+	refBudget *int            // see refBudget
+	nodes     *nodeBudget     // see MaxInlines
+	run       *Node           // the text node addText may extend
+	runText   strings.Builder // its text once extended (see addText)
+	// linkEnd is where the last link of the block ends. A link cannot
+	// contain another, so every non-image opener before it is inactive.
+	// One position instead of a flag per opener: deactivating them one by
+	// one walked past every unclosed "![" at each link (quadratic).
+	linkEnd int
 }
 
 // refBudget is how many bytes of destinations and titles the reference links
@@ -41,20 +52,53 @@ type inlineParser struct {
 // reference links keep their text but lose their destination and title.
 func refBudget(n int) int { return 1<<20 + n }
 
+// MaxInlines bounds the inline nodes (text, emphasis, links, code spans,
+// line breaks…) of a document, as MaxBlocks bounds its blocks. A node costs
+// hundreds of bytes and hostile text makes one every two or three bytes
+// ("*a", "a\n", "[a](b)"): gigabytes for a 16 MiB document. Past the limit
+// the rest of each block is plain text and a notice paragraph is appended.
+// Table cells count too: each is a node, made before the inlines are.
+const MaxInlines = 500000
+
+// nodeBudget counts the inline nodes a document may still create.
+type nodeBudget struct {
+	left int
+	cut  bool // some markup was left as text because the budget ran out
+}
+
+// splitLinkNodes is what a link found in text costs: the link, its label
+// and the text node left beside it.
+const splitLinkNodes = 3
+
+// take charges n nodes to the budget.
+func (b *nodeBudget) take(n int) { b.left -= n }
+
+// spent reports whether the budget is used up, noting that the caller
+// leaves markup as text because of it.
+func (b *nodeBudget) spent() bool {
+	if b.left > 0 {
+		return false
+	}
+	b.cut = true
+	return true
+}
+
 func text(s string) *Node { return &Node{Type: Text, Literal: s} }
 
 func (p *blockParser) processInlines() {
-	ip := &inlineParser{refs: p.refs, footnotes: p.footnotes, opt: &p.opt, refBudget: &p.refBudget}
+	nodes := &nodeBudget{left: MaxInlines - p.cells}
+	ip := &inlineParser{refs: p.refs, footnotes: p.footnotes, opt: &p.opt, refBudget: &p.refBudget, nodes: nodes}
 	Walk(p.doc, func(n *Node, entering bool) bool {
 		if entering && (n.Type == Paragraph || n.Type == Heading || n.Type == TableCell) {
 			ip.parse(n, string(n.content))
 			n.content = nil
 			flattenDeep(n, maxInlineDepth)
+			mergeText(n)
 			if p.opt.Emoji || p.opt.WikiLinks {
-				shortcuts(n, &p.opt, false)
+				shortcuts(n, &p.opt, false, nodes)
 			}
 			if p.opt.Autolinks {
-				emailAutolinks(n)
+				emailAutolinks(n, nodes)
 			}
 			return false
 		}
@@ -63,23 +107,82 @@ func (p *blockParser) processInlines() {
 	if p.opt.Footnotes && len(p.footnotes) > 0 {
 		numberFootnotes(p.doc, p.footnotes)
 	}
+	if nodes.cut {
+		notice := &Node{Type: Paragraph}
+		notice.AppendChild(text("[kmd: inline markup ignored after " + strconv.Itoa(MaxInlines) + " elements]"))
+		p.doc.AppendChild(notice)
+	}
 }
 
 func (p *inlineParser) parse(block *Node, content string) {
-	p.subj, p.pos, p.block = trimLineSpace(content), 0, block
-	p.delims, p.brackets, p.tickRuns, p.htmlEnds = nil, nil, nil, htmlEnds{}
+	p.subj, p.pos, p.block, p.run = trimLineSpace(content), 0, block, nil
+	p.delims, p.brackets, p.tickRuns, p.htmlEnds, p.linkEnd = nil, nil, nil, htmlEnds{}, 0
 	for p.pos < len(p.subj) {
+		if p.nodes.spent() {
+			p.addText(p.subj[p.pos:], true)
+			break
+		}
 		p.parseInline()
 	}
 	p.processEmphasis(nil)
 }
 
-func (p *inlineParser) appendText(s string) { p.block.AppendChild(text(s)) }
+// add appends n to the block, charging it to the document's budget.
+func (p *inlineParser) add(n *Node) {
+	p.nodes.take(1)
+	p.block.AppendChild(n)
+}
 
-// appendLiteral appends text the emoji and wiki link extensions must not
-// touch (an escaped or entity-encoded character).
-func (p *inlineParser) appendLiteral(s string) {
-	p.block.AppendChild(&Node{Type: Text, Literal: s, noExt: true})
+// addText appends text, extending the previous node when addText made it
+// too: one node per "]", "!", "<", "&" or escaped character would cost
+// hundreds of bytes per byte of input. noExt marks text the emoji and wiki
+// link extensions must not touch (an escaped or entity-encoded character);
+// only text with the same mark is joined.
+func (p *inlineParser) addText(s string, noExt bool) {
+	if r := p.run; r != nil && r == p.block.LastChild && r.noExt == noExt {
+		if p.runText.Len() == 0 {
+			p.runText.WriteString(r.Literal)
+		}
+		p.runText.WriteString(s)
+		r.Literal = p.runText.String() // no copy: a Builder never rewrites its bytes
+		return
+	}
+	p.run = &Node{Type: Text, Literal: s, noExt: noExt}
+	p.runText.Reset()
+	p.add(p.run)
+}
+
+// autolink appends a link showing label, which no extension rewrites.
+func (p *inlineParser) autolink(dest, label string) {
+	l := &Node{Type: Link, Dest: dest, noExt: true}
+	l.AppendChild(text(label))
+	p.nodes.take(1) // the label; add charges the link
+	p.add(l)
+}
+
+// mergeText joins adjacent text nodes below n that have the same noExt
+// mark: delimiters that matched nothing are left as nodes of their own.
+// Its recursion depth is bounded by flattenDeep.
+func mergeText(n *Node) {
+	for c := n.FirstChild; c != nil; c = c.Next {
+		if c.Type != Text {
+			if c.FirstChild != nil {
+				mergeText(c)
+			}
+			continue
+		}
+		next := c.Next
+		if next == nil || next.Type != Text || next.noExt != c.noExt {
+			continue
+		}
+		var b strings.Builder
+		b.WriteString(c.Literal)
+		for ; next != nil && next.Type == Text && next.noExt == c.noExt; next = c.Next {
+			b.WriteString(next.Literal)
+			next.unlink()
+		}
+		c.Literal = b.String()
+	}
 }
 
 func (p *inlineParser) parseInline() {
@@ -102,17 +205,17 @@ func (p *inlineParser) parseInline() {
 	case '[':
 		p.pos++
 		node := text("[")
-		p.block.AppendChild(node)
+		p.add(node)
 		p.addBracket(node, p.pos-1, false)
 	case '!':
 		if p.pos+1 < len(p.subj) && p.subj[p.pos+1] == '[' {
 			p.pos += 2
 			node := text("![")
-			p.block.AppendChild(node)
+			p.add(node)
 			p.addBracket(node, p.pos-1, true)
 		} else {
 			p.pos++
-			p.appendText("!")
+			p.addText("!", false)
 		}
 	case ']':
 		p.closeBracket()
@@ -121,10 +224,10 @@ func (p *inlineParser) parseInline() {
 	case '&':
 		if dec, n, ok := entityAt(p.subj, p.pos); ok {
 			p.pos += n
-			p.appendLiteral(dec)
+			p.addText(dec, true)
 		} else {
 			p.pos++
-			p.appendText("&")
+			p.addText("&", false)
 		}
 	case '$':
 		if p.opt.Math && p.math() {
@@ -157,9 +260,7 @@ func (p *inlineParser) str() {
 	st := p.pos
 	if p.opt.Autolinks && p.brackets == nil && (st == 0 || autolinkBoundary(p.subj[st-1])) {
 		if n, dest := extAutolink(p.subj[st:]); n > 0 {
-			l := &Node{Type: Link, Dest: dest, noExt: true}
-			l.AppendChild(text(p.subj[st : st+n]))
-			p.block.AppendChild(l)
+			p.autolink(dest, p.subj[st:st+n])
 			p.pos += n
 			return
 		}
@@ -176,7 +277,7 @@ func (p *inlineParser) str() {
 		j++
 	}
 	p.pos = j
-	p.appendText(p.subj[st:j])
+	p.addText(p.subj[st:j], false)
 }
 
 func (p *inlineParser) newline() {
@@ -186,12 +287,12 @@ func (p *inlineParser) newline() {
 		hard := len(last.Literal)-len(trimmed) >= 2
 		last.Literal = trimmed
 		if hard {
-			p.block.AppendChild(&Node{Type: LineBreak})
+			p.add(&Node{Type: LineBreak})
 		} else {
-			p.block.AppendChild(&Node{Type: SoftBreak})
+			p.add(&Node{Type: SoftBreak})
 		}
 	} else {
-		p.block.AppendChild(&Node{Type: SoftBreak})
+		p.add(&Node{Type: SoftBreak})
 	}
 	for p.pos < len(p.subj) && p.subj[p.pos] == ' ' {
 		p.pos++
@@ -203,12 +304,12 @@ func (p *inlineParser) backslash() {
 	switch {
 	case p.pos < len(p.subj) && p.subj[p.pos] == '\n':
 		p.pos++
-		p.block.AppendChild(&Node{Type: LineBreak})
+		p.add(&Node{Type: LineBreak})
 	case p.pos < len(p.subj) && isEscapable(p.subj[p.pos]):
-		p.appendLiteral(p.subj[p.pos : p.pos+1])
+		p.addText(p.subj[p.pos:p.pos+1], true)
 		p.pos++
 	default:
-		p.appendText("\\")
+		p.addText("\\", false)
 	}
 }
 
@@ -255,12 +356,12 @@ func (p *inlineParser) backticks() {
 		if len(content) > 0 && strings.Trim(content, " ") != "" && content[0] == ' ' && content[len(content)-1] == ' ' {
 			content = content[1 : len(content)-1]
 		}
-		p.block.AppendChild(&Node{Type: Code, Literal: content})
+		p.add(&Node{Type: Code, Literal: content})
 		p.pos = k + n
 		return
 	}
 	p.pos = after
-	p.appendText(p.subj[st:after])
+	p.addText(p.subj[st:after], false)
 }
 
 func (p *inlineParser) handleDelim(c byte) {
@@ -278,12 +379,12 @@ func (p *inlineParser) handleDelim(c byte) {
 	}
 	p.pos += n
 	node := text(p.subj[st:p.pos])
-	p.block.AppendChild(node)
+	p.add(node)
 	if c == '~' && n > 2 {
 		return
 	}
 	if canOpen || canClose {
-		d := &delimiter{cc: c, num: n, orig: n, node: node, prev: p.delims, canOpen: canOpen, canClose: canClose}
+		d := &delimiter{cc: c, num: n, orig: n, pos: st, node: node, prev: p.delims, canOpen: canOpen, canClose: canClose}
 		if d.prev != nil {
 			d.prev.next = d
 		}
@@ -309,10 +410,52 @@ func b2i(b bool) int {
 	return 0
 }
 
+// delimPos is the position of d, -1 for the bottom of the stack (nil).
+func delimPos(d *delimiter) int {
+	if d == nil {
+		return -1
+	}
+	return d.pos
+}
+
+// bottomSlot is closer's entry in openersBottom: closers that can match
+// the same openers share one.
+func bottomSlot(closer *delimiter) int {
+	switch closer.cc {
+	case '_':
+		return 2 + b2i(closer.canOpen)*3 + closer.orig%3
+	case '*':
+		return 8 + b2i(closer.canOpen)*3 + closer.orig%3
+	}
+	return 13 + closer.orig // '~'
+}
+
+// findOpener returns the nearest delimiter after position stop that closer
+// can close, or nil.
+func findOpener(closer *delimiter, stop int) *delimiter {
+	for opener := closer.prev; opener != nil && opener.pos > stop; opener = opener.prev {
+		if closer.cc == '~' {
+			if opener.cc == '~' && opener.canOpen && opener.num == closer.num {
+				return opener
+			}
+			continue
+		}
+		odd := (closer.canOpen || opener.canClose) && closer.orig%3 != 0 && (opener.orig+closer.orig)%3 == 0
+		if opener.cc == closer.cc && opener.canOpen && !odd {
+			return opener
+		}
+	}
+	return nil
+}
+
 func (p *inlineParser) processEmphasis(bottom *delimiter) {
-	var openersBottom [16]*delimiter
+	// openersBottom holds positions, not delimiters: a match removes the
+	// delimiters between its opener and closer, and a stored pointer to one
+	// of them was never met again, so every later closer of that kind
+	// walked to the bottom of the stack (quadratic).
+	var openersBottom [16]int
 	for i := range openersBottom {
-		openersBottom[i] = bottom
+		openersBottom[i] = delimPos(bottom)
 	}
 	if p.delims == bottom {
 		return // nothing above the bottom: avoid walking the whole stack
@@ -321,41 +464,17 @@ func (p *inlineParser) processEmphasis(bottom *delimiter) {
 	for closer != nil && closer.prev != bottom {
 		closer = closer.prev
 	}
-	for closer != nil {
+	for closer != nil && !p.nodes.spent() {
 		if !closer.canClose {
 			closer = closer.next
 			continue
 		}
-		var idx int
-		switch closer.cc {
-		case '_':
-			idx = 2 + b2i(closer.canOpen)*3 + closer.orig%3
-		case '*':
-			idx = 8 + b2i(closer.canOpen)*3 + closer.orig%3
-		default: // '~'
-			idx = 13 + closer.orig
-		}
-		opener := closer.prev
-		found := false
-		for opener != nil && opener != bottom && opener != openersBottom[idx] {
-			if closer.cc == '~' {
-				if opener.cc == '~' && opener.canOpen && opener.num == closer.num {
-					found = true
-					break
-				}
-			} else {
-				odd := (closer.canOpen || opener.canClose) && closer.orig%3 != 0 && (opener.orig+closer.orig)%3 == 0
-				if opener.cc == closer.cc && opener.canOpen && !odd {
-					found = true
-					break
-				}
-			}
-			opener = opener.prev
-		}
+		idx := bottomSlot(closer)
+		opener := findOpener(closer, openersBottom[idx])
 		old := closer
-		if !found {
+		if opener == nil {
 			closer = closer.next
-			openersBottom[idx] = old.prev
+			openersBottom[idx] = delimPos(old.prev)
 			if !old.canOpen {
 				p.removeDelim(old)
 			}
@@ -380,6 +499,7 @@ func (p *inlineParser) processEmphasis(bottom *delimiter) {
 			typ = Strong
 		}
 		emph := &Node{Type: typ}
+		p.nodes.take(1)
 		for tmp := oi.Next; tmp != nil && tmp != ci; {
 			next := tmp.Next
 			emph.AppendChild(tmp)
@@ -410,8 +530,11 @@ func (p *inlineParser) addBracket(node *Node, index int, image bool) {
 	if p.brackets != nil {
 		p.brackets.bracketAfter = true
 	}
-	p.brackets = &bracket{node: node, prev: p.brackets, prevDelim: p.delims, index: index, image: image, active: true}
+	p.brackets = &bracket{node: node, prev: p.brackets, prevDelim: p.delims, index: index, image: image}
 }
+
+// active reports whether b can still open a link or image.
+func (p *inlineParser) active(b *bracket) bool { return b.image || b.index >= p.linkEnd }
 
 func (p *inlineParser) spnl() {
 	for p.pos < len(p.subj) && isSpaceOrTab(p.subj[p.pos]) {
@@ -425,13 +548,17 @@ func (p *inlineParser) spnl() {
 	}
 }
 
+// maxLabel is the longest link label CommonMark allows, in bytes between
+// the brackets.
+const maxLabel = 999
+
 // linkLabel matches [label] at pos and returns its length (0 if none).
 func (p *inlineParser) linkLabel() int {
 	s := p.subj
 	if p.pos >= len(s) || s[p.pos] != '[' {
 		return 0
 	}
-	for j := p.pos + 1; j < len(s) && j-p.pos <= 1000; j++ {
+	for j := p.pos + 1; j < len(s) && j-p.pos <= maxLabel+1; j++ {
 		switch s[j] {
 		case '\\':
 			j++
@@ -439,7 +566,7 @@ func (p *inlineParser) linkLabel() int {
 			return 0
 		case ']':
 			n := j + 1 - p.pos
-			if n > 1001 {
+			if n > maxLabel+2 {
 				return 0
 			}
 			p.pos = j + 1
@@ -536,19 +663,22 @@ func (p *inlineParser) closeBracket() {
 	startpos := p.pos
 	opener := p.brackets
 	if opener == nil {
-		p.appendText("]")
+		p.addText("]", false)
 		return
 	}
-	if !opener.active {
-		p.appendText("]")
+	if !p.active(opener) {
+		p.addText("]", false)
 		p.brackets = opener.prev
 		return
 	}
 	isImage := opener.image
 	s := p.subj
 
-	// footnote reference [^label]
-	if p.opt.Footnotes && !isImage && opener.index+1 < startpos-1 && s[opener.index+1] == '^' {
+	// footnote reference [^label]. A label holds no unescaped bracket and
+	// at most maxLabel bytes; checking that first keeps nested "[^[^[^…]]]"
+	// from normalizing ever longer non-labels at each "]" (quadratic).
+	if p.opt.Footnotes && !isImage && !opener.bracketAfter && opener.index+1 < startpos-1 &&
+		startpos-1-(opener.index+1) <= maxLabel && s[opener.index+1] == '^' {
 		label := normalizeLabel(s[opener.index+2 : startpos-1])
 		if _, ok := p.footnotes[label]; ok && label != "" {
 			for tmp := opener.node.Next; tmp != nil; {
@@ -559,6 +689,7 @@ func (p *inlineParser) closeBracket() {
 			for p.delims != nil && p.delims != opener.prevDelim {
 				p.removeDelim(p.delims)
 			}
+			p.nodes.take(1)
 			opener.node.insertAfter(&Node{Type: FootnoteRef, Label: label})
 			opener.node.unlink()
 			p.brackets = opener.prev
@@ -597,7 +728,7 @@ func (p *inlineParser) closeBracket() {
 		label, has := "", false
 		if n > 2 {
 			label, has = s[beforeLabel:beforeLabel+n], true
-		} else if !opener.bracketAfter {
+		} else if !opener.bracketAfter && startpos-opener.index-2 <= maxLabel {
 			label, has = s[opener.index:startpos], true
 		}
 		if n == 0 {
@@ -616,7 +747,7 @@ func (p *inlineParser) closeBracket() {
 	if !matched {
 		p.brackets = opener.prev
 		p.pos = startpos
-		p.appendText("]")
+		p.addText("]", false)
 		return
 	}
 	typ := Link
@@ -629,19 +760,12 @@ func (p *inlineParser) closeBracket() {
 		node.AppendChild(tmp)
 		tmp = next
 	}
-	p.block.AppendChild(node)
+	p.add(node)
 	p.processEmphasis(opener.prevDelim)
 	p.brackets = opener.prev
 	opener.node.unlink()
 	if !isImage {
-		for o := p.brackets; o != nil; o = o.prev {
-			if !o.image {
-				if !o.active {
-					break // everything below was deactivated by an earlier link
-				}
-				o.active = false
-			}
-		}
+		p.linkEnd = p.pos
 	}
 }
 
@@ -649,27 +773,23 @@ func (p *inlineParser) angle() {
 	s, i := p.subj, p.pos
 	if e := scanURIAutolink(s, i); e > 0 {
 		uri := s[i+1 : e-1]
-		l := &Node{Type: Link, Dest: normalizeURI(uri), noExt: true}
-		l.AppendChild(text(uri))
-		p.block.AppendChild(l)
+		p.autolink(normalizeURI(uri), uri)
 		p.pos = e
 		return
 	}
 	if e := scanEmailAutolink(s, i); e > 0 {
 		addr := s[i+1 : e-1]
-		l := &Node{Type: Link, Dest: normalizeURI("mailto:" + addr), noExt: true}
-		l.AppendChild(text(addr))
-		p.block.AppendChild(l)
+		p.autolink(normalizeURI("mailto:"+addr), addr)
 		p.pos = e
 		return
 	}
 	if e := scanHTMLTag(s, i, p.htmlEnds); e > 0 {
-		p.block.AppendChild(&Node{Type: HTMLInline, Literal: s[i:e]})
+		p.add(&Node{Type: HTMLInline, Literal: s[i:e]})
 		p.pos = e
 		return
 	}
 	p.pos++
-	p.appendText("<")
+	p.addText("<", false)
 }
 
 // math parses $…$ (inline) or $$…$$ (display) at pos.
@@ -677,7 +797,7 @@ func (p *inlineParser) math() bool {
 	s, st := p.subj, p.pos
 	if strings.HasPrefix(s[st:], "$$") {
 		if e := strings.Index(s[st+2:], "$$"); e > 0 {
-			p.block.AppendChild(&Node{Type: Math, Display: true, Literal: trimLineSpace(s[st+2 : st+2+e])})
+			p.add(&Node{Type: Math, Display: true, Literal: trimLineSpace(s[st+2 : st+2+e])})
 			p.pos = st + 2 + e + 2
 			return true
 		}
@@ -695,7 +815,7 @@ func (p *inlineParser) math() bool {
 			if isLineSpace(s[j-1]) || (j+1 < len(s) && isDigit(s[j+1])) {
 				return false
 			}
-			p.block.AppendChild(&Node{Type: Math, Literal: s[st+1 : j]})
+			p.add(&Node{Type: Math, Literal: s[st+1 : j]})
 			p.pos = j + 1
 			return true
 		}
@@ -707,6 +827,12 @@ func (p *inlineParser) math() bool {
 
 func isHostChar(c byte) bool { return isASCIIAlnum(c) || c >= 0x80 }
 
+// maxDomain is the longest host name DNS allows. A longer run of host
+// characters is not a domain: without the bound, "www.a_www.a_…" scanned the
+// rest of the line at every "www." (each candidate failing on the "_" of
+// its last segments), which was quadratic.
+const maxDomain = 253
+
 // checkDomain returns the length of a valid domain prefix of s, or 0.
 func checkDomain(s string, allowShort bool) int {
 	if s == "" || !isHostChar(s[0]) {
@@ -714,7 +840,7 @@ func checkDomain(s string, allowShort bool) int {
 	}
 	np, us1, us2 := 0, 0, 0
 	i := 1
-	for ; i < len(s); i++ {
+	for end := min(len(s), maxDomain+1); i < end; i++ {
 		c := s[i]
 		switch {
 		case c == '_':
@@ -731,7 +857,7 @@ func checkDomain(s string, allowShort bool) int {
 		}
 	}
 done:
-	if us1 > 0 || us2 > 0 {
+	if i > maxDomain || us1 > 0 || us2 > 0 {
 		return 0
 	}
 	if !allowShort && np == 0 {
@@ -745,6 +871,8 @@ func autolinkDelim(s string, end int) int {
 	if i := strings.IndexByte(s[:end], '<'); i >= 0 {
 		end = i
 	}
+	// counted once, not at each trailing ')': "http://a.b/)))…" was quadratic
+	open, closed := -1, 0
 	for end > 0 {
 		c := s[end-1]
 		switch {
@@ -761,10 +889,13 @@ func autolinkDelim(s string, end int) int {
 				end--
 			}
 		case c == ')':
-			open, closed := strings.Count(s[:end], "("), strings.Count(s[:end], ")")
+			if open < 0 {
+				open, closed = strings.Count(s[:end], "("), strings.Count(s[:end], ")")
+			}
 			if closed <= open {
 				return end
 			}
+			closed--
 			end--
 		default:
 			return end
@@ -808,34 +939,28 @@ func extAutolink(s string) (int, string) {
 func isEmailChar(c byte) bool { return isASCIIAlnum(c) || c == '.' || c == '+' || c == '-' || c == '_' }
 
 // emailAutolinks links bare e-mail addresses in the text of block.
-func emailAutolinks(block *Node) {
+func emailAutolinks(block *Node, nodes *nodeBudget) {
 	for n := block.FirstChild; n != nil; n = n.Next {
 		switch n.Type {
 		case Link, Image:
 			continue
 		case Text:
-			if n.Next != nil && n.Next.Type == Text { // merge adjacent text
-				var b strings.Builder
-				b.WriteString(n.Literal)
-				for n.Next != nil && n.Next.Type == Text {
-					b.WriteString(n.Next.Literal)
-					n.Next.unlink()
-				}
-				n.Literal = b.String()
-			}
+			// mergeText joined adjacent text, except across a noExt mark:
+			// an escaped or encoded character never joins an address
+			// ("a\@b.com", or a file name escaped as Markdown)
 			if strings.IndexByte(n.Literal, '@') >= 0 {
-				n = linkEmails(n)
+				n = linkEmails(n, nodes)
 			}
 		default:
 			if n.FirstChild != nil {
-				emailAutolinks(n)
+				emailAutolinks(n, nodes)
 			}
 		}
 	}
 }
 
 // linkEmails splits text node t around e-mail addresses; returns the last node.
-func linkEmails(t *Node) *Node {
+func linkEmails(t *Node, nodes *nodeBudget) *Node {
 	s := t.Literal
 	for at := strings.IndexByte(s, '@'); at >= 0; {
 		st := at
@@ -855,6 +980,10 @@ func linkEmails(t *Node) *Node {
 			}
 		}
 		if st < at && dots > 0 && end > at+1 && isASCIIAlpha(s[end-1]) {
+			if nodes.spent() {
+				break
+			}
+			nodes.take(splitLinkNodes)
 			end = at + autolinkDelim(s[at:], end-at)
 			addr := s[st:end]
 			l := &Node{Type: Link, Dest: "mailto:" + addr}

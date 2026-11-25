@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"strconv"
 	"strings"
+
+	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
 // maxCopy bounds what is sent to the clipboard (terminals cap OSC 52
@@ -67,24 +69,13 @@ func (m *model) copyCode() {
 	m.msg = what
 }
 
-// clipboardText removes the characters a paste must not carry: control
-// characters other than tab and newline (a pasted ESC could drive the
-// terminal or the shell's line editor) and bidi overrides.
-func clipboardText(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for _, r := range s {
-		switch {
-		case r == '\t' || r == '\n':
-			b.WriteRune(r)
-		case r < 0x20 || r >= 0x7f && r < 0xa0:
-		case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069, r == 0x200e, r == 0x200f:
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
+// clipboardText removes the characters a paste must not carry, which the
+// screen does not show either (styled.Hidden): control characters other
+// than tab and newline (a pasted ESC could drive the terminal or the
+// shell's line editor), bidi controls, and zero-width and other format
+// characters, which would make the copied command differ from the one on
+// screen.
+func clipboardText(s string) string { return styled.Strip(s, "\t\n") }
 
 // osc52 is the escape sequence that asks the terminal to put text in the
 // clipboard. The payload is base64, so it cannot end the sequence early.

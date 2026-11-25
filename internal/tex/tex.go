@@ -93,7 +93,7 @@ func Display(src string, width int) []styled.Line {
 func verbatim(src string) styled.Line {
 	var b strings.Builder
 	for _, r := range src {
-		if isControl(r) {
+		if styled.Hidden(r) {
 			r = ' '
 		}
 		b.WriteRune(r)
@@ -136,22 +136,45 @@ type cell struct {
 	w     int
 }
 
-// wrap breaks l into lines at most width columns wide, preferring breaks
-// at spaces, and pads them to a common width.
-func wrap(l styled.Line, width int) []styled.Line {
+// maxCellBytes bounds the bytes a cell grows to with zero-width runes
+// from later spans: they cannot be sliced from the cell's own span, so
+// they are copied, and copying an unbounded run of them would be
+// quadratic. Past it they are dropped.
+const maxCellBytes = 64
+
+// cellsOf splits l into characters, each with its zero-width runes
+// (combining marks).
+func cellsOf(l styled.Line) []cell {
 	var cells []cell
-	for _, s := range l {
+	owner, start := -1, 0 // span and offset where the last cell starts
+	for k, s := range l {
 		for i := 0; i < len(s.Text); {
 			r, size := utf8.DecodeRuneInString(s.Text[i:])
 			t := s.Text[i : i+size]
 			i += size
 			if n := len(cells); n > 0 && styled.RuneWidth(r) == 0 {
-				cells[n-1].text += t
+				// a longer slice of the same span costs nothing, however
+				// many follow (the verbatim fallback of a hostile formula
+				// is one span of thousands of them)
+				switch c := &cells[n-1]; {
+				case owner == k:
+					c.text = s.Text[start:i]
+				case len(c.text) < maxCellBytes:
+					c.text += t
+				}
 				continue
 			}
 			cells = append(cells, cell{text: t, class: s.Class})
+			owner, start = k, i-size
 		}
 	}
+	return cells
+}
+
+// wrap breaks l into lines at most width columns wide, preferring breaks
+// at spaces, and pads them to a common width.
+func wrap(l styled.Line, width int) []styled.Line {
+	cells := cellsOf(l)
 	for i := range cells {
 		cells[i].w = styled.Width(cells[i].text)
 	}

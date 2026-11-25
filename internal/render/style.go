@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
+	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
 // Color is a 24-bit RGB color. The zero value means "terminal default".
@@ -32,7 +33,9 @@ type Style struct {
 	// index of a code block on its box border (0: none), for navigation;
 	// it fits in Attr's padding.
 	Link int32
-	URL  string
+	// URL is the OSC 8 target, set only from target (validated, and only
+	// with Options.Hyperlinks); "" for none.
+	URL string
 }
 
 func (s Style) sgrEqual(o Style) bool { return s.Fg == o.Fg && s.Bg == o.Bg && s.Attr == o.Attr }
@@ -106,69 +109,33 @@ func (p *painter) sgr(out *strings.Builder, s Style) {
 	out.WriteString(b.String())
 }
 
-// safeURL drops URLs that could terminate an OSC 8 sequence early.
-const maxURL = md.MaxURL // the longest link target kmd emits or resolves
+// maxURL is the longest link target kmd emits or resolves.
+const maxURL = md.MaxURL
 
+// safeURL returns u when it may be an OSC 8 target, or "": valid UTF-8 of
+// reasonable length, without the characters styled.Hidden reports (a
+// control would end the sequence early, an invisible one would spoof the
+// target a terminal shows on hover) and without zero-width joiners, which
+// text needs but no URL does.
 func safeURL(u string) string {
-	if len(u) > maxURL {
+	if len(u) > maxURL || !utf8.ValidString(u) || strings.ContainsFunc(u, hiddenInURL) {
 		return ""
-	}
-	if !utf8.ValidString(u) || hasInvisible(u) {
-		return ""
-	}
-	for i := 0; i < len(u); i++ {
-		if c := u[i]; c < 0x20 || c == 0x7f || (c == 0xc2 && i+1 < len(u) && u[i+1] < 0xa0) {
-			return ""
-		}
 	}
 	return u
 }
 
-// isBidiControl reports Unicode bidi embedding/override/isolate controls,
-// which can visually reorder text (CVE-2021-42574, "Trojan Source").
-func isBidiControl(r rune) bool { return (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) }
+func hiddenInURL(r rune) bool { return styled.Hidden(r) || r == 0x200c || r == 0x200d }
 
-// hasInvisible reports bidi controls and zero-width/format characters that
-// have no business in a URL (spoofing the hover target).
-func hasInvisible(s string) bool {
-	for _, r := range s {
-		if isBidiControl(r) || (r >= 0x200b && r <= 0x200f) || r == 0xfeff {
-			return true
-		}
-	}
-	return false
-}
-
-// clean removes characters that could drive the terminal (C0/C1 controls,
-// DEL, invalid UTF-8) or visually reorder it (bidi controls) from document
-// text. Tabs become spaces.
+// clean removes from document text the characters that could drive the
+// terminal (C0/C1 controls, DEL, invalid UTF-8), visually reorder it (bidi
+// controls) or hide in it (zero-width and other format characters); see
+// styled.Hidden. Tabs become spaces.
 func clean(s string) string {
-	dirty, high := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		high = high || c >= 0x80
-		if c < 0x20 || c == 0x7f || (c == 0xc2 && i+1 < len(s) && s[i+1] < 0xa0) ||
-			(c == 0xe2 && i+2 < len(s) && ((s[i+1] == 0x80 && s[i+2] >= 0xaa && s[i+2] <= 0xae) || (s[i+1] == 0x81 && s[i+2] >= 0xa6 && s[i+2] <= 0xa9))) {
-			dirty = true
-			break
-		}
+	s = styled.Strip(s, "\t")
+	if strings.IndexByte(s, '\t') >= 0 {
+		s = strings.ReplaceAll(s, "\t", " ")
 	}
-	// invalid UTF-8 (a lone 0x9b is an 8-bit CSI to terminals that honour
-	// C1 controls) is rewritten too: range turns it into U+FFFD
-	if !dirty && (!high || utf8.ValidString(s)) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\t':
-			b.WriteByte(' ')
-		case r < 0x20 || (r >= 0x7f && r < 0xa0) || isBidiControl(r):
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return s
 }
 
 // Clean is clean for other packages (e.g. file names in error messages).
@@ -228,9 +195,10 @@ func (p *painter) line(b *strings.Builder, l rline, col int) {
 			p.sgr(b, r.st)
 			cur, reset = r.st, false
 		}
-		if u := safeURL(r.st.URL); p.links && u != url {
-			switchLink(b, url, u)
-			url = u
+		// Style.URL is only ever set from target, which validated it
+		if p.links && r.st.URL != url {
+			switchLink(b, url, r.st.URL)
+			url = r.st.URL
 		}
 		text := clean(r.text)
 		if i <= lastLink {
@@ -243,7 +211,7 @@ func (p *painter) line(b *strings.Builder, l rline, col int) {
 		b.WriteString(text)
 	}
 	if p.nav != nil {
-		p.nav.row++
+		p.nav.endRow()
 	}
 	if url != "" {
 		b.WriteString("\x1b]8;;\x1b\\")

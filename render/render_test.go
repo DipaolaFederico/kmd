@@ -62,6 +62,13 @@ func TestOptions(t *testing.T) {
 	if out := mustRender(t, src, render.Options{Hyperlinks: true}); !strings.Contains(out, "\x1b]8;;https://example.com") {
 		t.Errorf("Hyperlinks: no OSC 8:\n%q", out)
 	}
+	// a service must not disclose its working directory (SR-25)
+	if out := mustRender(t, "[guide](guide.md)", render.Options{Hyperlinks: true}); strings.Contains(out, "\x1b]8;;f") {
+		t.Errorf("Hyperlinks without BaseDir: relative link resolved:\n%q", out)
+	}
+	if out := mustRender(t, "[guide](guide.md)", render.Options{Hyperlinks: true, BaseDir: "/docs"}); !strings.Contains(out, "\x1b]8;;file:///docs/guide.md\x1b") {
+		t.Errorf("Hyperlinks with BaseDir: %q", out)
+	}
 	if out := mustRender(t, src, render.Options{NoMath: true}); !strings.Contains(out, "$x^2$") {
 		t.Errorf("NoMath: math was rendered:\n%s", out)
 	}

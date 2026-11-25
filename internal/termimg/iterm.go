@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// renderITerm2 emits an OSC 1337 inline file with the original bytes sized
-// to a cols×rows cell box. The terminal moves the cursor past the image, so
-// the frame is a single line.
+// renderITerm2 emits an OSC 1337 inline file with the original bytes, whose
+// structure Load checked (see checkStructure), sized to a cols×rows cell
+// box. The terminal moves the cursor past the image, so the frame is a
+// single line.
 func renderITerm2(img *Image, l layout) Frame {
 	var b strings.Builder
 	b.Grow(base64.StdEncoding.EncodedLen(len(img.data)) + 96)

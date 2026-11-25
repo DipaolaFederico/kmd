@@ -70,14 +70,15 @@ jobs:
             exit 0
           fi
           echo "$files" | sed 's/^/  /'
-          # a file turned into a symlink could pull runner files into a release
-          for f in $files; do
-            if [ "$(git ls-tree "$AFTER" -- "$f" | cut -c1-6)" = 120000 ]; then
-              echo "Symlink changed ($f): full run."
-              echo "project=true" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-          done
+          # a file turned into a symlink could pull runner files into a
+          # release (modes from git, not from the names: 0 yes, 1 no, 2 error)
+          status=0
+          scripts/symlink-changed.sh "$range" || status=$?
+          if [ "$status" != 1 ]; then
+            echo "Symlink changed (or could not tell): full run."
+            echo "project=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           outside='^((README|CONTRIBUTING|SECURITY)\.md|LICENSE|\.gitignore|docs/PACKAGING\.md|docs/images/([^/]+/)*[^/]+\.(md|png|gif|tape)|\.github/(ISSUE_TEMPLATE/.*|pull_request_template\.md|CODEOWNERS|dependabot\.yml|workflows/(release|pr-conventions|verify-packages)\.yml))$'
           if grep -qvE "$outside" <<<"$files"; then
             echo "project=true" >> "$GITHUB_OUTPUT"
@@ -180,9 +181,9 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq groff appstream ruby lintian python3-yaml
       - name: Build and validate packaging metadata, manifests and .deb
         run: make packaging STRICT=1
-      - name: Cross-compile
+      - name: Cross-compile every released platform
         run: |
-          for t in linux/amd64 linux/arm64 darwin/arm64 freebsd/amd64 windows/amd64; do
+          for t in $(scripts/release-targets.sh); do
             GOOS=${t%/*} GOARCH=${t#*/} CGO_ENABLED=0 go build -trimpath -o /dev/null . && echo "$t ok"
           done
 

@@ -1,13 +1,18 @@
 package termimg
 
 import (
+	"bytes"
 	"encoding/base64"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/DipaolaFederico/kmd/internal/testlimit"
 )
 
 func TestLoadFiles(t *testing.T) {
@@ -35,7 +40,7 @@ func TestLoadFiles(t *testing.T) {
 		{"  a.png\n", dir, "png", 30, 20},
 	}
 	for _, c := range cases {
-		img, err := Load(c.src, c.base)
+		img, err := new(Loader).Load(c.src, c.base)
 		if err != nil {
 			t.Errorf("Load(%q): %v", c.src, err)
 			continue
@@ -92,12 +97,12 @@ func TestLoadRejects(t *testing.T) {
 		{"/dev/null", ErrNotRegular},
 	}
 	for _, c := range cases {
-		_, err := Load(c.src, dir)
+		_, err := new(Loader).Load(c.src, dir)
 		if !errors.Is(err, c.want) {
 			t.Errorf("Load(%q) = %v; want %v", c.src, err, c.want)
 		}
 	}
-	if _, err := Load("", dir); err == nil {
+	if _, err := new(Loader).Load("", dir); err == nil {
 		t.Error("empty source accepted")
 	}
 }
@@ -115,7 +120,7 @@ func TestDataURI(t *testing.T) {
 		"data:image/png;base64," + strings.ReplaceAll(b64, "+", "%2B"),
 	}
 	for _, s := range ok {
-		img, err := Load(s, "")
+		img, err := new(Loader).Load(s, "")
 		if err != nil || img.w != 7 || img.h != 3 {
 			t.Errorf("Load(%.40q): %v", s, err)
 		}
@@ -135,7 +140,7 @@ func TestDataURI(t *testing.T) {
 		{"data:image/png;base64," + strings.Repeat("AAAA", maxDataURIBytes/3+1), ErrTooLarge},
 	}
 	for _, c := range bad {
-		if _, err := Load(c.src, ""); !errors.Is(err, c.want) {
+		if _, err := new(Loader).Load(c.src, ""); !errors.Is(err, c.want) {
 			t.Errorf("Load(%.40q) = %v; want %v", c.src, err, c.want)
 		}
 	}
@@ -167,11 +172,11 @@ func TestLoadInConfined(t *testing.T) {
 
 	for _, src := range []string{"img/a.png", "./img/../img/a.png", "my%20image.png", " img/a.png ",
 		dataURI("image/png", encodePNG(t, gradient(2, 2)))} {
-		if _, err := LoadIn(src, dir); err != nil {
+		if _, err := new(Loader).LoadIn(src, dir); err != nil {
 			t.Errorf("LoadIn(%q): %v", src, err)
 		}
 	}
-	if _, err := LoadIn(dataURI("image/png", encodePNG(t, gradient(2, 2))), ""); err != nil {
+	if _, err := new(Loader).LoadIn(dataURI("image/png", encodePNG(t, gradient(2, 2))), ""); err != nil {
 		t.Errorf("data: URI without a directory: %v", err)
 	}
 
@@ -182,7 +187,7 @@ func TestLoadInConfined(t *testing.T) {
 		{secret, dir, ErrOutside},
 		{"file://" + secret, dir, ErrOutside},
 		{"/etc/passwd", dir, ErrOutside},
-		{`\\host\share\x.png`, dir, ErrOutside},
+		{`\\host\share\x.png`, dir, ErrRemote},
 		{"img/a.png", "", ErrOutside},
 		{"../secret.png", dir, nil},
 		{"img/../../secret.png", dir, nil},
@@ -207,7 +212,7 @@ func TestLoadInConfined(t *testing.T) {
 		}{"up/secret.png", dir, nil})
 	}
 	for _, c := range cases {
-		img, err := LoadIn(c.src, c.dir)
+		img, err := new(Loader).LoadIn(c.src, c.dir)
 		if err == nil {
 			t.Errorf("LoadIn(%q, %q) = %v, want an error", c.src, c.dir, img)
 			continue
@@ -216,4 +221,174 @@ func TestLoadInConfined(t *testing.T) {
 			t.Errorf("LoadIn(%q, %q) = %v, want %v", c.src, c.dir, err, c.want)
 		}
 	}
+}
+
+// TestNetworkPath: network and device paths are recognised with either
+// separator on every platform (on Windows, os.Stat of one opens an SMB
+// connection).
+func TestNetworkPath(t *testing.T) {
+	for _, p := range []string{`//host/share/a.png`, `\\host\share\a.png`, `/\host/a.png`, `\/host/a.png`,
+		`\\?\UNC\host\share\a.png`, `\\.\pipe\x`, `\\?\C:\a.png`, `\??\UNC\host\a.png`, `/??/x`} {
+		if !NetworkPath(p) {
+			t.Errorf("NetworkPath(%q) = false", p)
+		}
+	}
+	for _, p := range []string{"a.png", "/tmp/a.png", `C:\a.png`, "C:/a.png", "./a.png", `\a.png`, "?/x", "/?", ""} {
+		if NetworkPath(p) {
+			t.Errorf("NetworkPath(%q) = true", p)
+		}
+	}
+}
+
+// TestLoadNetworkPaths: every spelling of a network path is refused before
+// any file system call, percent-encoded or inside a file: URL included.
+func TestLoadNetworkPaths(t *testing.T) {
+	dir := t.TempDir()
+	for _, src := range []string{`file:////host/share/a.png`, `file://localhost//host/share/a.png`,
+		`file:///%5C%5Chost/share/a.png`, `/\host/share/a.png`, `\\host\share\a.png`,
+		`%5C%5Chost%5Cshare%5Ca.png`, `%2F%2Fhost/share/a.png`, `\\.\pipe\x`, `\\?\UNC\host\share\a.png`} {
+		if _, err := new(Loader).Load(src, dir); !errors.Is(err, ErrRemote) {
+			t.Errorf("Load(%q) = %v; want ErrRemote", src, err)
+		}
+		if _, err := new(Loader).LoadIn(src, dir); err == nil {
+			t.Errorf("LoadIn(%q) succeeded", src)
+		}
+	}
+}
+
+// TestCheckPNG: a PNG must be well formed chunk by chunk, as kitty and
+// iTerm2 get its bytes as they are; nothing may follow IEND.
+func TestCheckPNG(t *testing.T) {
+	good := encodePNG(t, gradient(4, 4))
+	if _, err := validate(good); err != nil {
+		t.Fatal(err)
+	}
+	badCRC := bytes.Clone(good)
+	badCRC[len(badCRC)-20] ^= 1 // inside the IDAT data
+	head := pngHeader(4, 4)
+	bad := map[string][]byte{
+		"no IEND":         head,
+		"data after IEND": append(bytes.Clone(good), make([]byte, 1000)...),
+		"bad checksum":    badCRC,
+		"truncated":       good[:len(good)-5],
+		"long chunk":      append(bytes.Clone(head), 0x7f, 0xff, 0xff, 0xff, 'I', 'D', 'A', 'T', 0, 0, 0, 0),
+		"bad type":        pngChunk(bytes.Clone(head), "ID4T", nil),
+		"second IHDR":     pngChunk(pngChunk(bytes.Clone(head), "IHDR", nil), "IEND", nil),
+	}
+	for name, data := range bad {
+		if _, err := validate(data); !errors.Is(err, ErrUnsupported) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if err := checkPNG([]byte("GIF89a")); err == nil {
+		t.Error("signature not checked")
+	}
+	if err := checkPNG(pngChunk([]byte("\x89PNG\r\n\x1a\n"), "IEND", nil)); err == nil {
+		t.Error("PNG without IHDR accepted")
+	}
+}
+
+// TestLoaderReadsFileOnce: every name of one file (./a.png, x/../a.png, an
+// absolute path, a file: URL, links) gets the same image, read once.
+func TestLoaderReadsFileOnce(t *testing.T) {
+	dir := t.TempDir()
+	data := encodePNG(t, gradient(8, 8))
+	p := writeFile(t, dir, "a.png", data)
+	relative := []string{"a.png", "./a.png", "././a.png", "x/../a.png"}
+	if os.Symlink("a.png", filepath.Join(dir, "sym.png")) == nil {
+		relative = append(relative, "sym.png")
+	}
+	if os.Link(p, filepath.Join(dir, "hard.png")) == nil {
+		relative = append(relative, "hard.png")
+	}
+	var anywhere, confined Loader
+	check := func(l *Loader, load func(string, string) (*Image, error), names []string) {
+		t.Helper()
+		var first *Image
+		for _, name := range names {
+			img, err := load(name, dir)
+			if first == nil {
+				first = img
+			}
+			if err != nil || img != first {
+				t.Errorf("%q: %v, loaded again: %v", name, err, img != first)
+			}
+		}
+		if l.read != len(data) {
+			t.Errorf("read %d bytes, want %d", l.read, len(data))
+		}
+	}
+	check(&anywhere, anywhere.Load, append(relative, p, "file://"+p))
+	check(&confined, confined.LoadIn, relative)
+}
+
+// TestLoaderBudget: what a Loader reads is bounded per document, failed
+// files included; a file already read is still found past the budget.
+func TestLoaderBudget(t *testing.T) {
+	dir := t.TempDir()
+	data := encodePNG(t, gradient(8, 8))
+	writeFile(t, dir, "a.png", data)
+	writeFile(t, dir, "b.png", data)
+	writeFile(t, dir, "text.png", []byte("not an image"))
+	l := Loader{read: maxLoaderBytes - len(data) - 12}
+	if _, err := l.Load("text.png", dir); !errors.Is(err, ErrUnsupported) || l.read != maxLoaderBytes-len(data) {
+		t.Fatalf("failed file: %v, read %d", err, l.read)
+	}
+	a, err := l.Load("a.png", dir)
+	if err != nil || l.read != maxLoaderBytes {
+		t.Fatalf("a.png within the budget: %v, read %d", err, l.read)
+	}
+	if _, err := l.Load("b.png", dir); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("b.png past the budget: %v", err)
+	}
+	if _, err := l.Load(dataURI("image/png", data), dir); !errors.Is(err, ErrTooLarge) {
+		t.Errorf("data: URI past the budget: %v", err)
+	}
+	if img, err := l.Load("./a.png", dir); err != nil || img != a {
+		t.Errorf("a.png again: %v", err)
+	}
+	if l.read != maxLoaderBytes {
+		t.Errorf("read %d bytes past the budget", l.read-maxLoaderBytes)
+	}
+}
+
+// TestLoaderLookups: a document naming thousands of image files, empty or
+// not images at all, costs the Loader linear time: it stops looking files
+// up after maxLoaderFiles (before, each new file was compared with every
+// one read before it).
+func TestLoaderLookups(t *testing.T) {
+	dir := t.TempDir()
+	const files = 64 * maxLoaderFiles
+	for i := range files {
+		writeFile(t, dir, strconv.Itoa(i), nil)
+	}
+	var l Loader
+	start := time.Now()
+	for i := range files {
+		want := ErrUnsupported // empty
+		if i >= maxLoaderFiles {
+			want = ErrTooLarge
+		}
+		if _, err := l.Load(strconv.Itoa(i), dir); !errors.Is(err, want) {
+			t.Fatalf("file %d: %v, want %v", i, err, want)
+		}
+	}
+	if d := time.Since(start); d > testlimit.Scale()*2*time.Second {
+		t.Errorf("%d lookups took %v", files, d)
+	}
+	if _, err := l.Load("data:image/png;base64,"+base64.StdEncoding.EncodeToString(encodePNG(t, gradient(2, 2))), dir); err != nil {
+		t.Errorf("data: URIs read no file and still load: %v", err)
+	}
+	testlimit.Linear(t, "image lookups", files, func(n int) func() {
+		names := make([]string, n)
+		for i := range names {
+			names[i] = strconv.Itoa(i % files)
+		}
+		return func() {
+			var l Loader
+			for _, name := range names {
+				_, _ = l.Load(name, dir)
+			}
+		}
+	})
 }

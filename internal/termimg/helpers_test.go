@@ -84,19 +84,22 @@ func dataURI(mime string, data []byte) string {
 }
 
 // pngHeader returns a PNG signature plus a valid IHDR claiming w×h pixels
-// and no image data: enough for DecodeConfig, nothing to decode.
+// and no image data: enough for the dimension limits, which are checked
+// first, but not for validate's chunk walk (no IEND; see pngChunk).
 func pngHeader(w, h uint32) []byte {
-	var b bytes.Buffer
-	b.WriteString("\x89PNG\r\n\x1a\n")
 	ihdr := make([]byte, 13)
 	binary.BigEndian.PutUint32(ihdr[0:], w)
 	binary.BigEndian.PutUint32(ihdr[4:], h)
 	ihdr[8], ihdr[9] = 8, 6 // 8-bit RGBA
-	_ = binary.Write(&b, binary.BigEndian, uint32(len(ihdr)))
-	chunk := append([]byte("IHDR"), ihdr...)
-	b.Write(chunk)
-	_ = binary.Write(&b, binary.BigEndian, crc32.ChecksumIEEE(chunk))
-	return b.Bytes()
+	return pngChunk([]byte("\x89PNG\r\n\x1a\n"), "IHDR", ihdr)
+}
+
+// pngChunk appends a PNG chunk, with its length and CRC, to b.
+func pngChunk(b []byte, typ string, body []byte) []byte {
+	b = binary.BigEndian.AppendUint32(b, uint32(len(body))) // #nosec G115 -- test data
+	start := len(b)
+	b = append(append(b, typ...), body...)
+	return binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(b[start:]))
 }
 
 func mustLoadBytes(t testing.TB, data []byte) *Image {

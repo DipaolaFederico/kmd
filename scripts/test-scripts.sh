@@ -38,6 +38,67 @@ eq patch "$(bump "$(printf 'fix: x\n\n* feat: y\n\nBREAKING CHANGE: quoted\n\nmo
 eq major "$(bump "$(printf 'fix: x\n\nbody\n\nRefs: #1\nBREAKING CHANGE: real footer')")" "footer with other trailers"
 eq "" "$(bump 'BREAKING CHANGE: subject only')" "not conventional"
 eq "" "$(bump 'Update stuff' 'feat:x' 'Feat: x' 'feat : x' 'wip: x')" "not conventional"
+eq major "$(bump "$(printf 'docs: fix a typo (#99)\r\n\r\nText.\r\n\r\nBREAKING CHANGE: none\r\n')")" "CRLF squash body"
+# the PR conventions check reads title and description as the squash
+# commit will be (pr-conventions.yml): a footer in the description counts
+pr_bump() { printf '%s\n\n%s\0' "$1" "$2" | scripts/release-bump.sh 2>/dev/null; }
+eq major "$(pr_bump 'docs: fix a typo' "$(printf 'Text.\n\nBREAKING CHANGE: x')")" "PR: breaking footer in the description"
+eq major "$(pr_bump 'chore!: drop x' '')" "PR: bang, no description"
+eq "" "$(pr_bump 'docs: fix a typo' '')" "PR: no description"
+eq patch "$(pr_bump 'fix: x' "$(printf 'BREAKING CHANGE: quoted\n\nmore text')")" "PR: BREAKING CHANGE not in the last paragraph"
+
+# git in scratch repository $1, without the user's configuration (hooks,
+# signing)
+tgit() {
+  local dir=$1
+  shift
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$dir" -c user.name=t -c user.email=t@t "$@" >/dev/null
+}
+# subst EXPR FILE: sed -i, which BSD and GNU sed spell differently
+subst() { sed "$1" "$2" >"$2.tmp" && mv "$2.tmp" "$2"; }
+
+# symlink-changed.sh, in a scratch repository: modes, not names, so a link
+# whose name has a space or a newline is found
+top=$PWD sl=$(scratch)
+sl_git() { tgit "$sl" "$@"; }
+sl_check() { (cd "$sl" && "$top/scripts/symlink-changed.sh" HEAD~1..HEAD) && echo yes || echo "no($?)"; }
+sl_git init -q
+mkdir -p "$sl/docs/images" && echo a >"$sl/README.md" && sl_git add -A && sl_git commit -qm base
+echo b >"$sl/docs/images/a b.png" && sl_git add -A && sl_git commit -qm file
+eq "no(1)" "$(sl_check)" "symlink-changed: a regular file with a space"
+ln -s /etc/passwd "$sl/docs/images/c d.png" && sl_git add -A && sl_git commit -qm link
+eq yes "$(sl_check)" "symlink-changed: a new link with a space"
+ln -s /etc/passwd "$sl/docs/images/e"$'\n'"f.png" && sl_git add -A && sl_git commit -qm link2
+eq yes "$(sl_check)" "symlink-changed: a new link with a newline"
+rm "$sl/README.md" && ln -s /etc/passwd "$sl/README.md" && sl_git add -A && sl_git commit -qm retype
+eq yes "$(sl_check)" "symlink-changed: a file turned into a link"
+rm "$sl/README.md" && sl_git add -A && sl_git commit -qm unlink
+eq "no(1)" "$(sl_check)" "symlink-changed: a link removed"
+eq "no(2)" "$(cd "$sl" && "$top/scripts/symlink-changed.sh" nosuchref..HEAD 2>/dev/null && echo yes || echo "no($?)")" "symlink-changed: bad range"
+
+# binary-changed.sh, in a scratch module built for two targets: a change
+# only another platform compiles is a change; a test is not
+if command -v go >/dev/null; then
+  bc=$(scratch)
+  bc_git() { tgit "$bc" "$@"; }
+  mkdir -p "$bc/scripts"
+  cp scripts/binary-changed.sh "$bc/scripts/"
+  printf '#!/bin/sh\nprintf "linux/amd64\\ndarwin/arm64\\n"\n' >"$bc/scripts/release-targets.sh"
+  chmod +x "$bc/scripts/release-targets.sh"
+  printf 'module example.com/bc\n\ngo 1.21\n' >"$bc/go.mod"
+  printf 'package main\n\nfunc main() { println(msg) }\n' >"$bc/main.go"
+  printf 'package main\n\nconst msg = "a"\n' >"$bc/msg_darwin.go"
+  printf '//go:build !darwin\n\npackage main\n\nconst msg = "x"\n' >"$bc/msg_other.go"
+  bc_git init -q && bc_git add -A && bc_git commit -qm a
+  subst 's/"a"/"b"/' "$bc/msg_darwin.go" && bc_git commit -qam b
+  bc_run() { (cd "$bc" && GOFLAGS= scripts/binary-changed.sh "$1" "$2" 2>&1) && echo "|rc=0" || echo "|rc=$?"; }
+  eq "binary changed between HEAD~1 and HEAD: darwin/arm64|rc=0" "$(bc_run HEAD~1 HEAD | paste -sd'\0')" "binary-changed: darwin only"
+  printf 'package main\n' >"$bc/main_test.go" && bc_git add -A && bc_git commit -qm c
+  eq "binaries unchanged between HEAD~1 and HEAD (linux/amd64 darwin/arm64)|rc=1" "$(bc_run HEAD~1 HEAD | paste -sd'\0')" "binary-changed: test only"
+  eq "rc=2" "$(bc_run nosuchref HEAD | tail -1 | sed 's/^|//')" "binary-changed: bad revision"
+else
+  echo "  binary-changed: go not found, skipped"
+fi
 
 # build-version.sh, in a scratch repository: the spec's version, the commits
 # since it was stamped, the commit, -dirty; the tag on a release tag
@@ -46,9 +107,7 @@ mkdir -p "$bv/scripts" "$bv/packaging"
 cp scripts/build-version.sh "$bv/scripts/"
 printf 'Name: kmd\nVersion:                1.2.3\n' > "$bv/packaging/kmd.spec"
 bv_version() { "$bv/scripts/build-version.sh" 2>/dev/null; }
-bv_git() { # without the user's configuration (hooks, signing)
-  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 git -C "$bv" -c user.name=t -c user.email=t@t "$@" >/dev/null
-}
+bv_git() { tgit "$bv" "$@"; }
 bv_head() { git -C "$bv" rev-parse --short HEAD; }
 eq v1.2.3 "$(bv_version)" "build-version outside git (source tarball)"
 bv_git init -q
@@ -61,7 +120,7 @@ eq "v1.2.3-2-g$(bv_head)" "$(bv_version)" "build-version: commits since the rele
 echo '# x' >> "$bv/packaging/kmd.spec"
 eq "v1.2.3-2-g$(bv_head)-dirty" "$(bv_version)" "build-version: uncommitted changes"
 bv_git checkout -q -- packaging/kmd.spec
-sed -i 's/1\.2\.3/1.3.0/' "$bv/packaging/kmd.spec"
+subst 's/1\.2\.3/1.3.0/' "$bv/packaging/kmd.spec"
 bv_git commit -qam 'chore(release): v1.3.0 (#9)'
 eq "v1.3.0-0-g$(bv_head)" "$(bv_version)" "build-version: the next release restarts the count"
 bv_git tag v1.3.0

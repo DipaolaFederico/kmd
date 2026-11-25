@@ -121,7 +121,7 @@ func runNotes(env Env, o options, s settings) error {
 	}
 	st := &notesState{path: stateFile(dir, name)}
 	st.changed()
-	in := &stdinCache{} // loadDoc's; --notes never reads standard input
+	in := newSources(name)
 	load := func(path string, cols int) (*view.Page, error) {
 		if path != name {
 			return nil, errors.New("documents do not open in the notes")

@@ -5,6 +5,21 @@ import (
 	"unicode"
 )
 
+// binding names k as the viewer's key bindings do: a printable key by its
+// character, any other by its name ("ctrl-c", "pgdn").
+func (k key) binding() string {
+	if k.name == "char" {
+		return string(k.r)
+	}
+	return k.name
+}
+
+// isQuit reports whether the key binding name ends the viewer, also while
+// a document is loading (session.await).
+func isQuit(name string) bool {
+	return name == "q" || name == "Q" || name == "ctrl-c"
+}
+
 // handle applies one input event to the model.
 func (m *model) handle(k key) {
 	if m.prompt {
@@ -29,16 +44,15 @@ func (m *model) handle(k key) {
 	}
 	m.msg = ""
 	half := max(m.viewH()/2, 1)
-	name := k.name
-	if name == "char" {
-		name = string(k.r)
-	}
+	name := k.binding()
 	if m.slides != nil && m.handleSlide(name) {
 		return
 	}
-	switch name {
-	case "q", "Q", "ctrl-c":
+	if isQuit(name) {
 		m.quit = true
+		return
+	}
+	switch name {
 	case "j", "down", "ctrl-n", "ctrl-e":
 		m.scroll(1)
 	case "k", "up", "ctrl-p", "ctrl-y", "y":

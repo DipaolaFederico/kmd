@@ -174,8 +174,9 @@ func (m *model) status(b *strings.Builder) {
 	case m.msg != "":
 		left = m.msg
 	case m.visible(m.sel):
-		left = "→ " + m.target(m.page.Links[m.sel].Href)
 		right = "Enter open · Esc clear"
+		// the columns left of right, its padding and the percentage
+		left = "→ " + m.target(m.page.Links[m.sel].Href, m.cols-styled.Width(right+m.percent())-8)
 	case m.slides != nil && m.deck.NoFooter:
 		b.WriteString("\x1b[2K\x1b[?25l")
 		return
@@ -220,19 +221,69 @@ func (m *model) percent() string {
 	return strconv.Itoa((m.top+m.viewH())*100/n) + "%"
 }
 
-// target describes a link destination for the status bar.
-func (m *model) target(href string) string {
+// target describes a link destination for the status bar, in n columns.
+func (m *model) target(href string, n int) string {
 	if strings.HasPrefix(href, "#") {
 		return href
 	}
-	if u, err := url.Parse(href); err == nil && u.Scheme == "file" {
+	u, err := url.Parse(href)
+	switch {
+	case err != nil:
+	case u.Scheme == "file":
 		s := m.rel(u.Path)
 		if u.Fragment != "" {
 			s += "#" + u.Fragment
 		}
 		return s
+	case isWeb(u) && u.Host != "":
+		return webTarget(u, n) // a user name shows as "…@"
+	case isWeb(u):
+		return clip("invalid web link: "+href, n)
 	}
 	return href
+}
+
+// isWeb reports whether u is an http or https URL.
+func isWeb(u *url.URL) bool {
+	s := strings.ToLower(u.Scheme)
+	return s == "http" || s == "https"
+}
+
+// webURL reports whether the web URL u names its host plainly: with "//",
+// a host and no user name. Go parses "https:github.com%2F…@evil.example/"
+// and "https:/…@evil.example" without a host, but browsers read a user
+// name and the host evil.example in them; a user name hides the real host
+// behind one that looks trusted ("https://github.com%2Flogin@evil.example/").
+func webURL(u *url.URL) bool {
+	return u.Opaque == "" && u.Host != "" && u.User == nil
+}
+
+// webTarget shows a web URL in n columns, keeping what tells where it
+// leads, the scheme and the whole host: selecting a link to see its
+// target before opening it is the defence against phishing. The path is
+// shortened first; a host too long to fit loses its left side, so the
+// registrable domain stays visible ("https://…aaaa.evil.example"), and a
+// user name, which can pose as a host, shows as "…@".
+func webTarget(u *url.URL, n int) string {
+	head := u.Scheme + "://"
+	if u.User != nil {
+		head += "…@"
+	}
+	host := render.Clean(u.Host)
+	rest := u.EscapedPath()
+	if u.RawQuery != "" {
+		rest += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		rest += "#" + u.EscapedFragment()
+	}
+	if w := styled.Width(head + host); w < n {
+		return head + host + clip(rest, n-w)
+	}
+	if k := n - styled.Width(head); k > 1 {
+		return head + styled.ElideLeft(host, k)
+	}
+	return clip(head+host, n)
 }
 
 // breadcrumb shows the documents visited to get here.

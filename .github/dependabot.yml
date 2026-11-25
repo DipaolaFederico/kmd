@@ -5,5 +5,10 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # a new action release is proposed only after a week: time for a
+    # compromised one to be found and pulled before it can reach a release
+    # (release.yml's actions run for the first time inside a real release)
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: ci

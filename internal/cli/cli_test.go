@@ -252,7 +252,7 @@ func TestErrorsAreSanitized(t *testing.T) {
 // injected by a newline.
 func TestFileTitlesAreLiteral(t *testing.T) {
 	dir := t.TempDir()
-	names := []string{"www.evil.example.md", "a\n\n[x](http:__evil).md", "<b>.md"}
+	names := []string{"www.evil.example.md", "a@evil.example.md", "a\n\n[x](http:__evil).md", "<b>.md"}
 	var paths []string
 	for _, n := range names {
 		p := filepath.Join(dir, n)
@@ -266,7 +266,7 @@ func TestFileTitlesAreLiteral(t *testing.T) {
 		t.Errorf("a file name became a link: %q", r.out)
 	}
 	plain := stripTest(r.out)
-	for _, want := range []string{"www.evil.example.md", "a[x](http:__evil).md", "<b>.md"} {
+	for _, want := range []string{"www.evil.example.md", "a@evil.example.md", "a[x](http:__evil).md", "<b>.md"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("title %q not shown literally:\n%s", want, plain)
 		}

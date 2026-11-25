@@ -42,7 +42,20 @@ type nav struct {
 	links  []Link
 	code   []CodeBlock
 	images []Placement
+
+	// The span being painted: the runs of a link that follow each other
+	// on a row are one span, whose text is built here and set when the
+	// span ends (concatenating strings would be quadratic in the runs).
+	open   *Span
+	openID int32
+	text   strings.Builder
+	full   bool // text reached maxSpanText: the rest is dropped
 }
+
+// maxSpanText bounds the text of a span. A row is at most MaxWidth
+// columns, but zero-width characters (a link of thousands of &#x200b;)
+// take none, and the text is only drawn over the selected link.
+const maxSpanText = 8 << 10
 
 // place records the image of run r (Options.Placements) at column col of
 // the current row.
@@ -61,13 +74,37 @@ func (n *nav) span(id int32, col, w int, text string) {
 		c.End = n.row
 		return
 	}
-	l := &n.links[id-1]
-	if k := len(l.Spans) - 1; k >= 0 && l.Spans[k].Line == n.row && l.Spans[k].Col+l.Spans[k].Width == col {
-		l.Spans[k].Width += w
-		l.Spans[k].Text += text
+	if s := n.open; s != nil && n.openID == id && s.Col+s.Width == col {
+		s.Width += w
+		n.addText(text)
 		return
 	}
-	l.Spans = append(l.Spans, Span{Line: n.row, Col: col, Width: w, Text: text})
+	n.closeSpan()
+	l := &n.links[id-1]
+	l.Spans = append(l.Spans, Span{Line: n.row, Col: col, Width: w})
+	n.open, n.openID = &l.Spans[len(l.Spans)-1], id
+	n.addText(text)
+}
+
+func (n *nav) addText(s string) {
+	if n.full = n.full || n.text.Len()+len(s) > maxSpanText; !n.full {
+		n.text.WriteString(s)
+	}
+}
+
+// closeSpan sets the text of the span being painted, if any.
+func (n *nav) closeSpan() {
+	if n.open != nil {
+		n.open.Text = n.text.String()
+		n.text.Reset()
+		n.open, n.full = nil, false
+	}
+}
+
+// endRow ends the row being painted: a span never continues on the next.
+func (n *nav) endRow() {
+	n.closeSpan()
+	n.row++
 }
 
 // hasScheme reports whether s starts with a URL scheme ("https:", "mailto:").
@@ -90,10 +127,11 @@ func hasScheme(s string) bool {
 // href resolves a link destination for hyperlinks and navigation: a relative
 // path becomes an absolute file:// URL (terminals cannot resolve relative
 // targets, they do not know which directory the document came from), or,
-// with Options.BaseURL, an absolute URL under it.
+// with Options.BaseURL, an absolute URL under it. With NoWorkingDir and no
+// BaseDir, relative paths are kept as written.
 //
 // local reports whether the result is a resolved file:// URL of a Markdown
-// or document file (see openable).
+// or document file (see docPath).
 func (r *renderer) href(dest string) (h string, local bool) {
 	// longer targets are never emitted (safeURL) and would be re-processed
 	// for every use of a reference link: a hostile document could make that
@@ -122,6 +160,9 @@ func (r *renderer) href(dest string) (h string, local bool) {
 	if !filepath.IsAbs(p) {
 		if r.absDir == "" {
 			dir := r.opt.BaseDir
+			if dir == "" && r.opt.NoWorkingDir {
+				return dest, false
+			}
 			if dir == "" {
 				dir = "."
 			}
@@ -134,8 +175,56 @@ func (r *renderer) href(dest string) (h string, local bool) {
 		p = filepath.Join(r.absDir, p)
 	}
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(p), Fragment: frag}
-	ext := strings.ToLower(filepath.Ext(p))
-	return u.String(), MarkdownExt[ext] || DocumentExt[ext]
+	return u.String(), docPath(p)
+}
+
+// target returns the OSC 8 target of a link or image whose destination
+// href resolved to h (local: see href), or "" for none. A terminal hands a
+// clicked target to the desktop, past the viewer's checks, so only these
+// become targets: http(s) URLs with a host and no user name, mailto: with
+// only a subject and body, and file:// URLs of Markdown and document files
+// on this machine. Other schemes (ssh:, smb:, javascript:, app handlers),
+// paths kmd did not resolve, scripts and .desktop files get none.
+func target(h string, local bool) string {
+	if local {
+		return safeURL(h)
+	}
+	if !hasScheme(h) {
+		return ""
+	}
+	u, err := url.Parse(h)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		if u.Host == "" || u.User != nil {
+			return ""
+		}
+		return safeURL(h)
+	case "mailto":
+		return safeURL(Mailto(u))
+	case "file":
+		if !openable(u) {
+			return ""
+		}
+		return safeURL((&url.URL{Scheme: "file", Path: u.Path, Fragment: u.Fragment}).String())
+	}
+	return ""
+}
+
+// Mailto returns the mailto: URL u with only its subject and body: some
+// mail clients honour parameters such as attach=/path/to/secret.
+func Mailto(u *url.URL) string {
+	q := url.Values{}
+	for _, k := range []string{"subject", "body"} {
+		if v := u.Query().Get(k); v != "" {
+			q.Set(k, v)
+		}
+	}
+	m := *u
+	m.RawQuery = q.Encode()
+	return m.String()
 }
 
 // IndexNames are the documents that stand for a folder, in order.
@@ -153,16 +242,22 @@ var DocumentExt = map[string]bool{
 	// not .html or .svg: a browser would run the document author's scripts
 }
 
-// openable reports whether a resolved file:// href names a Markdown or
-// document file. Only those become absolute OSC 8 targets: a terminal opens
-// a clicked file:// link with the desktop, which would run a script or a
-// .desktop file (relative targets are inert, terminals cannot resolve them).
-func openable(href string) bool {
-	u, err := url.Parse(href)
-	if err != nil {
+// openable reports whether a file:// URL names a Markdown or document file
+// on this machine (no host but localhost). Only those become OSC 8
+// targets: a terminal opens a clicked file:// link with the desktop, which
+// would run a script or a .desktop file, or reach a remote host.
+func openable(u *url.URL) bool {
+	return (u.Host == "" || strings.EqualFold(u.Host, "localhost")) && docPath(u.Path)
+}
+
+// docPath reports whether path names a Markdown or document file and has
+// no control characters ("evil.desktop%00.md" decodes to a name whose
+// extension is .desktop for programs that stop at the NUL).
+func docPath(path string) bool {
+	if strings.ContainsFunc(path, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
 		return false
 	}
-	ext := strings.ToLower(filepath.Ext(u.Path))
+	ext := strings.ToLower(filepath.Ext(path))
 	return MarkdownExt[ext] || DocumentExt[ext]
 }
 

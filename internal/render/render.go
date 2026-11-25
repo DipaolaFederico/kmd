@@ -27,6 +27,11 @@ type Options struct {
 	// Images are not affected: they are never downloaded.
 	BaseURL *url.URL
 
+	// NoWorkingDir leaves relative links unresolved when BaseDir is empty,
+	// instead of resolving them against the working directory: a service
+	// embedding the render package must not disclose it in OSC 8 targets.
+	NoWorkingDir bool
+
 	// AnyImagePath lets images be read from anywhere: absolute paths, file:
 	// URLs and paths leaving BaseDir. Off, local images are confined to
 	// BaseDir (none without it). Only for documents the user chose to open.
@@ -355,27 +360,19 @@ func (r *renderer) runs(parent *md.Node, base Style, out []run) []run {
 	return out
 }
 
-// link appends the runs of a link: underlined, with its OSC 8 target and,
-// for the viewer, its resolved destination; without hyperlinks the
-// destination follows the text in parentheses.
+// link appends the runs of a link: underlined, with its OSC 8 target (see
+// target) and, for the viewer, its resolved destination; without
+// hyperlinks the destination follows the text in parentheses.
 func (r *renderer) link(n *md.Node, base Style, out []run) []run {
 	th := r.th
 	st := base
-	st.Fg, st.URL = th.Link, n.Dest
-	href := n.Dest
+	st.Fg = th.Link
+	href, local := n.Dest, false
 	if r.opt.Hyperlinks || r.links != nil || r.opt.BaseURL != nil {
-		var local bool
 		href, local = r.href(n.Dest)
-		switch {
-		// a link resolved against BaseURL is a web link; file: links are
-		// left as written and still checked below
-		case local, r.opt.BaseURL != nil && href != n.Dest:
-			st.URL = href
-		case strings.HasPrefix(strings.ToLower(n.Dest), "file:") && !openable(n.Dest):
-			// a clicked file:// link is opened by the desktop: never a
-			// script or .desktop file
-			st.URL = ""
-		}
+	}
+	if r.opt.Hyperlinks { // validated once per link, not per painted run
+		st.URL = target(href, local)
 	}
 	if r.links != nil {
 		if k := len(r.links.links); k < maxLinks {
@@ -405,7 +402,11 @@ func (r *renderer) imageRef(alt, dest string, base Style, out []run) []run {
 	if alt == "" {
 		alt = "image"
 	}
-	st := Style{Fg: r.th.Image, Attr: base.Attr | Italic, URL: dest}
+	st := Style{Fg: r.th.Image, Attr: base.Attr | Italic}
+	// with BaseURL the image is on the web, and images are never fetched
+	if r.opt.Hyperlinks && r.opt.BaseURL == nil {
+		st.URL = target(r.href(dest))
+	}
 	out = append(out, run{text: "▣ " + alt, st: st})
 	if !r.opt.Hyperlinks && dest != "" {
 		out = append(out, run{text: " (" + dest + ")", st: Style{Fg: r.th.Muted, Attr: Faint}})

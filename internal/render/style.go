@@ -33,7 +33,9 @@ type Style struct {
 	// index of a code block on its box border (0: none), for navigation;
 	// it fits in Attr's padding.
 	Link int32
-	URL  string
+	// URL is the OSC 8 target, set only from target (validated, and only
+	// with Options.Hyperlinks); "" for none.
+	URL string
 }
 
 func (s Style) sgrEqual(o Style) bool { return s.Fg == o.Fg && s.Bg == o.Bg && s.Attr == o.Attr }
@@ -209,9 +211,10 @@ func (p *painter) line(b *strings.Builder, l rline, col int) {
 			p.sgr(b, r.st)
 			cur, reset = r.st, false
 		}
-		if u := safeURL(r.st.URL); p.links && u != url {
-			switchLink(b, url, u)
-			url = u
+		// Style.URL is only ever set from target, which validated it
+		if p.links && r.st.URL != url {
+			switchLink(b, url, r.st.URL)
+			url = r.st.URL
 		}
 		text := clean(r.text)
 		if i <= lastLink {
@@ -224,7 +227,7 @@ func (p *painter) line(b *strings.Builder, l rline, col int) {
 		b.WriteString(text)
 	}
 	if p.nav != nil {
-		p.nav.row++
+		p.nav.endRow()
 	}
 	if url != "" {
 		b.WriteString("\x1b]8;;\x1b\\")

@@ -214,10 +214,8 @@ func TestOSC8OnlyForOpenableFiles(t *testing.T) {
 	src := "[a](doc.md) [b](run.sh) [c](evil.desktop) [d](sub/) [e](pic.png#x)"
 	res := Render(md.Parse(src, md.GFM), Options{Width: 80, Color: true, Hyperlinks: true, Navigate: true, BaseDir: dir})
 	abs := "file://" + filepath.ToSlash(dir)
-	for _, want := range []string{"\x1b]8;;" + abs + "/doc.md\x1b", "\x1b]8;;run.sh\x1b", "\x1b]8;;evil.desktop\x1b", "\x1b]8;;sub/\x1b", "\x1b]8;;" + abs + "/pic.png#x\x1b"} {
-		if !strings.Contains(res.Text, want) {
-			t.Errorf("missing OSC 8 %q", want)
-		}
+	if got := osc8Targets(res.Text); strings.Join(got, " ") != abs+"/doc.md "+abs+"/pic.png#x" {
+		t.Errorf("OSC 8 targets %q", got)
 	}
 	// the viewer still gets resolved targets (it applies its own checks)
 	if !strings.HasSuffix(res.Links[1].Href, "/run.sh") || !strings.HasPrefix(res.Links[1].Href, "file://") {
@@ -307,13 +305,9 @@ func TestBaseURL(t *testing.T) {
 	if strings.Join(hrefs, " ") != strings.Join(want, " ") {
 		t.Errorf("links: %q", hrefs)
 	}
-	for _, s := range []string{"\x1b]8;;https://example.com/docs/guide.md#Setup\x1b\\", "\x1b]8;;#top\x1b\\", "\x1b]8;;i.png\x1b\\"} {
-		if !strings.Contains(res.Text, s) {
-			t.Errorf("missing OSC 8 %q in %q", s, res.Text)
-		}
-	}
-	if strings.Contains(res.Text, "]8;;file:") || strings.Contains(res.Text, "example.com/docs/i.png") {
-		t.Errorf("file: link clickable or image resolved: %q", res.Text)
+	// anchors and images (never fetched) get no target
+	if got := osc8Targets(res.Text); strings.Join(got, " ") != "https://example.com/docs/guide.md#Setup https://a.b/ https://other.org/x" {
+		t.Errorf("OSC 8 targets %q", got)
 	}
 	plain := Render(md.Parse(src+"[guide.md](guide.md)", md.GFM), Options{Width: 120, BaseURL: base}).Text
 	if !strings.Contains(plain, "g (https://example.com/docs/guide.md#Setup)") ||

@@ -40,7 +40,12 @@ type Options struct {
 	Color bool
 	// TrueColor uses 24-bit colours instead of the 256-colour palette.
 	TrueColor bool
-	// Hyperlinks emits OSC 8 hyperlinks for links.
+	// Hyperlinks emits OSC 8 hyperlinks for links and images. Only http,
+	// https and mailto URLs (with just a subject and body) and file URLs
+	// of Markdown and document files become targets: a terminal hands a
+	// clicked target to the desktop. Relative links become absolute file
+	// URLs under BaseDir, so BaseDir's absolute path appears in the
+	// output; with BaseDir == "" they get no target.
 	Hyperlinks bool
 
 	// Images selects how images are drawn; the default, ImagesNone, shows
@@ -175,8 +180,10 @@ func (o Options) resolve() (bridge.Config, error) {
 			Cell:       termimg.Cell{W: o.CellWidth, H: o.CellHeight},
 			ImageRows:  o.ImageRows,
 			BaseDir:    o.BaseDir,
-			Math:       !o.NoMath,
-			Diagrams:   !o.NoDiagrams,
+			// never the process's working directory in OSC 8 targets
+			NoWorkingDir: true,
+			Math:         !o.NoMath,
+			Diagrams:     !o.NoDiagrams,
 		},
 		Parse: parseOptions(o.CommonMark, o.NoMath),
 	}, nil

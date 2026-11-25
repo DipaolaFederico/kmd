@@ -9,6 +9,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-11-25
+
 ### Security
 
 - Hostile inline text can no longer make the parser quadratic: nested
@@ -281,7 +283,8 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 - `--follow`, `--toc`, `--html` (safe by default), shell completions and a
   man page.
 
-[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/DipaolaFederico/kmd/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/DipaolaFederico/kmd/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/DipaolaFederico/kmd/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/DipaolaFederico/kmd/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/DipaolaFederico/kmd/compare/v0.14.0...v0.15.0

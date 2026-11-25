@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/md"
+	"github.com/DipaolaFederico/kmd/internal/styled"
 )
 
 // Color is a 24-bit RGB color. The zero value means "terminal default".
@@ -139,36 +140,16 @@ func hasInvisible(s string) bool {
 	return false
 }
 
-// clean removes characters that could drive the terminal (C0/C1 controls,
-// DEL, invalid UTF-8) or visually reorder it (bidi controls) from document
-// text. Tabs become spaces.
+// clean removes from document text the characters that could drive the
+// terminal (C0/C1 controls, DEL, invalid UTF-8), visually reorder it (bidi
+// controls) or hide in it (zero-width and other format characters); see
+// styled.Hidden. Tabs become spaces.
 func clean(s string) string {
-	dirty, high := false, false
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		high = high || c >= 0x80
-		if c < 0x20 || c == 0x7f || (c == 0xc2 && i+1 < len(s) && s[i+1] < 0xa0) ||
-			(c == 0xe2 && i+2 < len(s) && ((s[i+1] == 0x80 && s[i+2] >= 0xaa && s[i+2] <= 0xae) || (s[i+1] == 0x81 && s[i+2] >= 0xa6 && s[i+2] <= 0xa9))) {
-			dirty = true
-			break
-		}
+	s = styled.Strip(s, "\t")
+	if strings.IndexByte(s, '\t') >= 0 {
+		s = strings.ReplaceAll(s, "\t", " ")
 	}
-	// invalid UTF-8 (a lone 0x9b is an 8-bit CSI to terminals that honour
-	// C1 controls) is rewritten too: range turns it into U+FFFD
-	if !dirty && (!high || utf8.ValidString(s)) {
-		return s
-	}
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r == '\t':
-			b.WriteByte(' ')
-		case r < 0x20 || (r >= 0x7f && r < 0xa0) || isBidiControl(r):
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
+	return s
 }
 
 // Clean is clean for other packages (e.g. file names in error messages).

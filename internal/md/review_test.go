@@ -52,3 +52,25 @@ func TestHTMLDropsControls(t *testing.T) {
 		t.Error("tabs must be kept")
 	}
 }
+
+// TestHTMLDropsHiddenCharacters: bidi controls ("Trojan Source"), zero-width
+// characters and carriage returns are dropped from the export, as the
+// terminal renderer drops them, in prose, code, titles, alt text and
+// footnote labels; --unsafe-html keeps them.
+func TestHTMLDropsHiddenCharacters(t *testing.T) {
+	trojan := "if access != \"user\u202e \u2066// check admin\u2069 \u2066\" {"
+	src := "# title\u200b\n\nprose \u202e and &#x202e; and &#13; `code\u2066`\n\n" +
+		"[l](/u \"t\u2067\") ![alt\u200f](/i)[^n\u2068]\n\n[^n\u2068]: note\n\n```\n" + trojan + "\n```\n\n    indented\u2069\n"
+	out := HTML(Parse(src, GFM), HTMLOptions{})
+	for _, bad := range []string{"\u202e", "\u2066", "\u2067", "\u2068", "\u2069", "\u200b", "\u200f", "\r"} {
+		if strings.Contains(out, bad) {
+			t.Errorf("HTML contains %q:\n%q", bad, out)
+		}
+	}
+	if !strings.Contains(out, `if access != &quot;user // check admin &quot; {`) {
+		t.Errorf("code lost more than its bidi controls:\n%s", out)
+	}
+	if unsafe := HTML(Parse(src, GFM), HTMLOptions{Unsafe: true}); !strings.Contains(unsafe, "\u202e") {
+		t.Errorf("--unsafe-html must keep bidi controls:\n%q", unsafe)
+	}
+}

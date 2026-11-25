@@ -13,7 +13,7 @@ func TestCopyCode(t *testing.T) {
 	lines := make([]string, 100)
 	page := &Page{Lines: lines, Code: []render.CodeBlock{
 		{Lang: "go", Text: "a := 1\nb := 2", Start: 2, End: 5},
-		{Text: "evil\x1b]52;c;x\x07\u202etxt\r\n\tok", Start: 6, End: 8},
+		{Text: "evil\x1b]52;c;x\x07\u202et\u200bx\U000E0041t\ufeff\r\n\tok", Start: 6, End: 8}, // controls, bidi, zero-width, tag
 		{Lang: "sh", Text: "ls", Start: 50, End: 52},
 	}}
 	var got []string

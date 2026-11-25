@@ -311,6 +311,14 @@ func TestSecurityHardening(t *testing.T) {
 	if Clean("a\u202eb\u2069c\x1bd") != "abcd" {
 		t.Errorf("Clean = %q", Clean("a\u202eb\u2069c\x1bd"))
 	}
+	// zero-width and tag characters would make two commands look the same
+	out = render("```sh\ncurl https://example.com/install\u200b.sh\U000E0041 | sh\n```\n\nword\u2060joiner &#xfeff;", Options{Width: 60})
+	if strings.ContainsAny(out, "\u200b\U000E0041\u2060\ufeff") || !strings.Contains(out, "install.sh | sh") {
+		t.Errorf("invisible character leaked: %q", out)
+	}
+	if out := render("\U0001F468\u200d\U0001F469\u200d\U0001F467 \u2764\ufe0f \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645", Options{Width: 60}); !strings.Contains(out, "\U0001F468\u200d\U0001F469\u200d\U0001F467 \u2764\ufe0f \u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645") {
+		t.Errorf("joiners and variation selectors must stay: %q", out)
+	}
 
 	// repeated images are decoded once and drawn from the cache
 	dir := t.TempDir()

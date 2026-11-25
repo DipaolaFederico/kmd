@@ -487,36 +487,6 @@ func (s settings) width(cols int) int {
 	return 80
 }
 
-// readSource reads a document; a directory reads as its listing (dir true).
-func readSource(name string, stdin io.Reader) (src string, dir bool, err error) {
-	var r io.Reader = stdin
-	if name != "-" {
-		// #nosec G304 -- reading the file the user asked for is the point of the tool.
-		f, err := os.Open(filepath.Clean(name))
-		if err != nil {
-			return "", false, err
-		}
-		defer func() { _ = f.Close() }()
-		st, err := f.Stat()
-		if err != nil {
-			return "", false, err
-		}
-		if st.IsDir() {
-			src, err := dirListing(name, f)
-			return src, true, err
-		}
-		r = f
-	}
-	data, err := io.ReadAll(io.LimitReader(r, maxInput+1))
-	if err != nil {
-		return "", false, err
-	}
-	if len(data) > maxInput {
-		return "", false, fmt.Errorf("%s: larger than %d MiB", name, maxInput>>20)
-	}
-	return string(data), false, nil
-}
-
 // printErr prints err as kmd's error message. Errors quote arguments, file
 // and theme names and configuration values, which can hold anything (Go's
 // flag and os errors quote them raw): Clean keeps them from driving the
@@ -588,13 +558,13 @@ func Run(env Env) int {
 	viewable := !o.html && !o.toc && env.StdoutTTY && (s.pager == builtinPager || s.alwaysView)
 	if o.follow {
 		// live preview in the viewer: links stay navigable, position is kept
-		if viewable && o.files[0] != "-" && runViewer(env, o, s, &stdinCache{}, true, nil, 0) == nil {
+		if viewable && o.files[0] != "-" && runViewer(env, o, s, newSources(o.files...), true, nil, 0) == nil {
 			return 0
 		}
 		return follow(env, o, s)
 	}
 
-	in := &stdinCache{}
+	in := newSources(o.files...)
 	var res output
 	vs := viewerSettings(s, env.Cols)
 	if viewable {
@@ -646,13 +616,6 @@ func singleFolder(files []string) bool {
 	return len(files) == 1 && files[0] != "-" && isDir(files[0])
 }
 
-// stdinCache keeps stdin, which can only be read once ("kmd - -", and the
-// viewer re-rendering on resize or when going back).
-type stdinCache struct {
-	src  string
-	read bool
-}
-
 // output is the result of rendering the documents of a run.
 type output struct {
 	text     string
@@ -664,7 +627,7 @@ type output struct {
 	blocks   []render.CodeBlock
 }
 
-func renderFiles(env Env, o options, s settings, in *stdinCache) output {
+func renderFiles(env Env, o options, s settings, in *sources) output {
 	var out strings.Builder
 	res := output{}
 	if s.opts.Navigate {
@@ -755,17 +718,8 @@ func (res *output) addNav(r render.Result, offset int) {
 // loadDoc reads and parses a document (a file, a folder listing or stdin,
 // "-") and keeps only the section named sec, if any. base is the directory
 // its relative links resolve against.
-func loadDoc(env Env, name, sec string, s settings, in *stdinCache) (doc *md.Node, base string, err error) {
-	var src string
-	folder := false
-	if name == "-" && in.read {
-		src = in.src
-	} else {
-		src, folder, err = readSource(name, env.Stdin)
-		if name == "-" {
-			in.src, in.read = src, true
-		}
-	}
+func loadDoc(env Env, name, sec string, s settings, in *sources) (doc *md.Node, base string, err error) {
+	src, folder, err := in.read(name, env.Stdin)
 	if err != nil {
 		return nil, "", err
 	}
@@ -901,11 +855,12 @@ func follow(env Env, o options, s settings) int {
 		printErr(env.Stderr, err)
 		return 1
 	}
+	in := newSources(name)
 	for {
 		// a failed stat is usually an editor replacing the file: keep polling
 		if st, err := os.Stat(name); err == nil && (!st.ModTime().Equal(lastMod) || st.Size() != lastSize) {
 			lastMod, lastSize = st.ModTime(), st.Size()
-			content := renderFiles(env, o, s, &stdinCache{}).text
+			content := renderFiles(env, o, s, in).text
 			if env.StdoutTTY {
 				content = "\x1b[H\x1b[2J\x1b[3J" + content
 			}
@@ -952,7 +907,7 @@ func pageOf(res output) *view.Page {
 
 // runViewer opens the viewer; first (rendered for a terminal firstCols
 // wide) is its first page, or nil to render it.
-func runViewer(env Env, o options, s settings, in *stdinCache, watch bool, first *view.Page, firstCols int) error {
+func runViewer(env Env, o options, s settings, in *sources, watch bool, first *view.Page, firstCols int) error {
 	start := ""
 	if len(o.files) == 1 && o.files[0] != "-" {
 		start = o.files[0]

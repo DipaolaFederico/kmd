@@ -151,7 +151,7 @@ func TestErrors(t *testing.T) {
 	if r := run(t, func(e *Env) { e.Stdout = errWriter{} }, p); r.code != 1 {
 		t.Errorf("write error: %+v", r)
 	}
-	if _, _, err := readSource("-", strings.NewReader(strings.Repeat("a", maxInput+1))); err == nil {
+	if _, _, err := newSources().read("-", strings.NewReader(strings.Repeat("a", maxInput+1))); err == nil {
 		t.Error("oversized input accepted")
 	}
 }

@@ -20,8 +20,8 @@ const slideWidth = 80
 
 // runSlides presents the document as slides in the viewer (--slides).
 func runSlides(env Env, o options, s settings) error {
-	in := &stdinCache{}
 	name := o.files[0]
+	in := newSources(name)
 	slides := func(cols, rows int) (*view.Deck, error) {
 		vs := slideSettings(s, cols, rows)
 		parts, front, base, err := readDeck(env, name, o.section, vs, in)
@@ -78,7 +78,7 @@ func runSlides(env Env, o options, s settings) error {
 // of the presenter's pauses and notes.
 func exportSlides(env Env, o options, s settings) error {
 	name := o.files[0]
-	slides, front, base, err := readDeck(env, name, o.section, s, &stdinCache{})
+	slides, front, base, err := readDeck(env, name, o.section, s, newSources(name))
 	if err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func slideImages(s settings) termimg.Protocol {
 // readDeck reads the deck at name and splits it into slides, the same way
 // for the presentation and its notes window so that their numbers agree.
 // front is the front matter, which a section (sec) leaves out.
-func readDeck(env Env, name, sec string, vs settings, in *stdinCache) (slides []*md.Node, front, base string, err error) {
+func readDeck(env Env, name, sec string, vs settings, in *sources) (slides []*md.Node, front, base string, err error) {
 	doc, base, err := loadDoc(env, name, "", vs, in)
 	if err != nil {
 		return nil, "", "", err

@@ -36,7 +36,7 @@ APPID       := io.github.dipaolafederico.kmd
 DATADIR     ?= $(PREFIX)/share
 
 .PHONY: ci fmt fmt-check lint vet staticcheck complexity dupl deadcode scripts-test test spec cover api api-update security vuln gosec \
-        build perf build-ai test-ai fuzz bench install uninstall tools hooks clean packaging dist srpm rpm docs-images
+        build perf build-ai test-ai fuzz fuzz-list bench install uninstall tools hooks clean packaging dist srpm rpm docs-images
 
 ci: fmt-check lint scripts-test test cover security build packaging perf
 	@printf '\n\033[1;32m✔ local CI passed\033[0m\n'
@@ -112,15 +112,28 @@ api:
 api-update:
 	$(GO) test -count=1 -run '^TestAPI$$' ./render/ -update-api
 
+# Every fuzzer, as package/FuzzName, found in the tests so a new one is never
+# left out. `make fuzz` runs them one after another, or those matching FUZZ
+# (internal/md/FuzzParse, or internal/render/% for a package's).
+FUZZERS  = $(shell grep -rEo '^func Fuzz[A-Za-z0-9_]+' --include='*_test.go' internal render | \
+             sed -E 's|/[^/]+_test\.go:func |/|' | sort)
+FUZZ    ?= %
+
 fuzz:
-	$(GO) test -run='^$$' -fuzz=FuzzParse -fuzztime=$(FUZZ_TIME) ./internal/md/
-	$(GO) test -run='^$$' -fuzz=FuzzRender -fuzztime=$(FUZZ_TIME) ./internal/render/
-	$(GO) test -run='^$$' -fuzz=FuzzHighlight -fuzztime=$(FUZZ_TIME) ./internal/render/
-	$(GO) test -run='^$$' -fuzz=FuzzMermaid -fuzztime=$(FUZZ_TIME) ./internal/diagram/
-	$(GO) test -run='^$$' -fuzz=FuzzDisplay -fuzztime=$(FUZZ_TIME) ./internal/tex/
-	$(GO) test -run='^$$' -fuzz=FuzzDataURI -fuzztime=$(FUZZ_TIME) ./internal/termimg/
-	$(GO) test -run='^$$' -fuzz=FuzzBackground -fuzztime=$(FUZZ_TIME) ./internal/term/
-	$(GO) test -tags kmdai -run='^$$' -fuzz=FuzzResponse -fuzztime=$(FUZZ_TIME) ./internal/ai/
+	@# a FUZZ that matches nothing (a typo, a renamed fuzzer) must not pass
+	@[ -n "$(filter $(FUZZ),$(FUZZERS))" ] || { echo 'no fuzzer matches FUZZ=$(FUZZ)'; exit 1; }
+	@# internal/ai only exists in -tags kmdai builds
+	@for f in $(filter $(FUZZ),$(FUZZERS)); do \
+		pkg=$${f%/*}; name=$${f##*/}; tags=; \
+		[ "$$pkg" = internal/ai ] && tags='-tags kmdai'; \
+		echo "» fuzz $$name ($(FUZZ_TIME))"; \
+		$(GO) test $$tags -run='^$$' -fuzz="^$$name\$$" -fuzztime=$(FUZZ_TIME) ./$$pkg/ || exit 1; \
+	done
+
+# The packages with fuzzers, as a JSON array for the CI matrix: one runner
+# per package, whose fuzzers share one instrumented build
+fuzz-list:
+	@printf '[%s]\n' "$$(printf '"%s",' $(patsubst %/,%,$(sort $(dir $(FUZZERS)))) | sed 's/,$$//')"
 
 bench:
 	$(GO) test -run='^$$' -bench=. -benchmem ./internal/render/
@@ -154,7 +167,9 @@ build-ai:
 	@CGO_ENABLED=0 $(GO) build -trimpath -tags kmdai -ldflags '$(LDFLAGS)+kmdai' -o $(BIN_AI) .
 	@ls -lh $(BIN_AI) | awk '{ print "  binary size: " $$5 }'
 
-# the gates that depend on build tags, run on the tagged build
+# the gates that depend on build tags, run on the tagged build (CI runs them
+# side by side: keep the ai matrix in .github/workflows/ci.yml, which also
+# runs build-ai, in step)
 test-ai:
 	@echo '» experimental AI (-tags kmdai)'
 	@$(MAKE) --no-print-directory vet staticcheck deadcode test cover security GOTAGS=kmdai

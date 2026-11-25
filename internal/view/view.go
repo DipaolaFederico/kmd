@@ -14,6 +14,7 @@ import (
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
+	"github.com/DipaolaFederico/kmd/internal/termimg"
 )
 
 // Page is a rendered document.
@@ -449,7 +450,7 @@ func (m *model) follow(href string) {
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "file":
-		if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+		if !termimg.LocalHost(u.Host) || termimg.NetworkPath(u.Path) {
 			m.msg = "not a local file: " + clip(href, 50)
 			return
 		}

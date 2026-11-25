@@ -735,6 +735,8 @@ func TestFollowHardening(t *testing.T) {
 		"https:/github.com%2Flogin%2Foauth@evil.example/x":                                                            "refused: hidden or missing host: https:/github.com",
 		"https:///github.com%2Flogin@evil.example/x":                                                                  "refused: hidden or missing host: https:///github.com",
 		"file://attacker.example/share/x.md":                                                                          "not a local file",
+		"file://LOCALHOST//attacker.example/share/x.md":                                                               "not a local file",
+		"file:////attacker.example/share/x.md":                                                                        "not a local file",
 	} {
 		h.follow(href)
 		if !strings.HasPrefix(h.msg, want) {

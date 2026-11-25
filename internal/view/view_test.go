@@ -617,8 +617,8 @@ func TestHelpers(t *testing.T) {
 	if b := m.breadcrumb(); !strings.HasPrefix(b, "… › ") || !strings.HasSuffix(b, "etapa-5/README.md") {
 		t.Errorf("breadcrumb %q", b)
 	}
-	if m.target("#x") != "#x" || m.target("https://a") != "https://a" || m.target("file:///a/b/c/etapa-5/b.md#s") != "b.md#s" {
-		t.Errorf("target %q", m.target("file:///a/b/c/etapa-5/b.md#s"))
+	if m.target("#x", 40) != "#x" || m.target("https://a", 40) != "https://a" || m.target("file:///a/b/c/etapa-5/b.md#s", 40) != "b.md#s" {
+		t.Errorf("target %q", m.target("file:///a/b/c/etapa-5/b.md#s", 40))
 	}
 	if m.rel("/elsewhere/very/far/x.md") != "/elsewhere/very/far/x.md" {
 		t.Errorf("rel far: %q", m.rel("/elsewhere/very/far/x.md"))
@@ -714,6 +714,53 @@ func TestFollowHardening(t *testing.T) {
 	h.follow("https://exa\u200bmple.com")
 	if h.msg != "invalid link" {
 		t.Errorf("invisible characters: %q", h.msg)
+	}
+	// a user name poses as the host; a file:// host is not this machine
+	for _, href := range []string{
+		"https://github.com%2Flogin%2Foauth%2Fauthorize%3Fclient_id%3D0123456789abcdef%26scope%3Drepo@evil.example/x",
+		"file://attacker.example/share/x.md",
+	} {
+		h.follow(href)
+		if !strings.Contains(h.msg, "evil.example") && !strings.Contains(h.msg, "not a local file") {
+			t.Errorf("%s: %q", href, h.msg)
+		}
+	}
+	if len(h.opened) != 1 || h.path != filepath.Join(dir, "alias.md") {
+		t.Errorf("followed: %v, %q", h.opened, h.path)
+	}
+}
+
+// The status bar shows the scheme and the whole host of a selected web
+// link, whatever the width: a long path or user name must not push the
+// real host out of view (SR-18).
+func TestWebTarget(t *testing.T) {
+	m := &model{}
+	long := "https://docs.github.com." + strings.Repeat("a", 200) + ".evil.example/"
+	for _, c := range []struct {
+		href string
+		n    int
+		want string
+	}{
+		{"https://example.com/a/b?c=d#e", 40, "https://example.com/a/b?c=d#e"},
+		{"https://example.com/" + strings.Repeat("p", 100), 30, "https://example.com/" + strings.Repeat("p", 9) + "…"},
+		{"https://github.com%2Flogin%2Foauth%2Fauthorize%3Fclient_id%3D0123456789abcdef%26scope%3Drepo@evil.example/x", 72, "https://…@evil.example/x"},
+		{long, 40, "https://…" + strings.Repeat("a", 18) + ".evil.example"},
+		{long, 120, "https://…" + strings.Repeat("a", 98) + ".evil.example"},
+		{"https://example.com/", 5, "http…"},
+	} {
+		if got := m.target(c.href, c.n); got != c.want || styled.Width(got) > max(c.n, 5) {
+			t.Errorf("target(%.40q, %d) = %q, want %q", c.href, c.n, got, c.want)
+		}
+	}
+	// the status bar gives it the room the hints leave
+	h := newHarness(t, fixture(t))
+	h.cols = 80
+	h.page.Links = append(h.page.Links, render.Link{Href: long, Spans: []render.Span{{Line: h.top, Width: 1}}})
+	h.sel = len(h.page.Links) - 1
+	var b strings.Builder
+	h.status(&b)
+	if !strings.Contains(b.String(), ".evil.example ") {
+		t.Errorf("status bar hides the host: %q", b.String())
 	}
 }
 

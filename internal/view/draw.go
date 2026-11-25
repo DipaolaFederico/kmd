@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/render"
 	"github.com/DipaolaFederico/kmd/internal/styled"
@@ -174,8 +175,9 @@ func (m *model) status(b *strings.Builder) {
 	case m.msg != "":
 		left = m.msg
 	case m.visible(m.sel):
-		left = "→ " + m.target(m.page.Links[m.sel].Href)
 		right = "Enter open · Esc clear"
+		// the columns left of right, its padding and the percentage
+		left = "→ " + m.target(m.page.Links[m.sel].Href, m.cols-styled.Width(right+m.percent())-8)
 	case m.slides != nil && m.deck.NoFooter:
 		b.WriteString("\x1b[2K\x1b[?25l")
 		return
@@ -220,19 +222,65 @@ func (m *model) percent() string {
 	return strconv.Itoa((m.top+m.viewH())*100/n) + "%"
 }
 
-// target describes a link destination for the status bar.
-func (m *model) target(href string) string {
+// target describes a link destination for the status bar, in n columns.
+func (m *model) target(href string, n int) string {
 	if strings.HasPrefix(href, "#") {
 		return href
 	}
-	if u, err := url.Parse(href); err == nil && u.Scheme == "file" {
+	u, err := url.Parse(href)
+	switch {
+	case err != nil:
+	case u.Scheme == "file":
 		s := m.rel(u.Path)
 		if u.Fragment != "" {
 			s += "#" + u.Fragment
 		}
 		return s
+	case (u.Scheme == "http" || u.Scheme == "https") && u.Host != "":
+		return webTarget(u, n)
 	}
 	return href
+}
+
+// webTarget shows a web URL in n columns, keeping what tells where it
+// leads, the scheme and the whole host: selecting a link to see its
+// target before opening it is the defence against phishing. The path is
+// shortened first; a host too long to fit loses its left side, so the
+// registrable domain stays visible ("https://…aaaa.evil.example"), and a
+// user name, which can pose as a host, shows as "…@".
+func webTarget(u *url.URL, n int) string {
+	head := u.Scheme + "://"
+	if u.User != nil {
+		head += "…@"
+	}
+	host := render.Clean(u.Host)
+	rest := u.EscapedPath()
+	if u.RawQuery != "" {
+		rest += "?" + u.RawQuery
+	}
+	if u.Fragment != "" {
+		rest += "#" + u.EscapedFragment()
+	}
+	if w := styled.Width(head + host); w < n {
+		return head + host + clip(rest, n-w)
+	}
+	if k := n - styled.Width(head) - 1; k > 0 {
+		return head + "…" + tail(host, k)
+	}
+	return clip(head+host, n)
+}
+
+// tail returns the end of s that fits in n columns.
+func tail(s string, n int) string {
+	w, i := 0, len(s)
+	for i > 0 {
+		r, size := utf8.DecodeLastRuneInString(s[:i])
+		if w += styled.RuneWidth(r); w > n {
+			break
+		}
+		i -= size
+	}
+	return s[i:]
 }
 
 // breadcrumb shows the documents visited to get here.

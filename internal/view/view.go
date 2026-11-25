@@ -449,20 +449,23 @@ func (m *model) follow(href string) {
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "file":
+		if u.Host != "" && !strings.EqualFold(u.Host, "localhost") {
+			m.msg = "not a local file: " + clip(href, 50)
+			return
+		}
 		m.followFile(u.Path, u.Fragment)
 	case "http", "https":
-		m.external(href, clip(href, 60))
-	case "mailto":
-		// only the address, subject and body: some mail clients honour
-		// parameters such as attach=/path/to/secret
-		q := url.Values{}
-		for _, k := range []string{"subject", "body"} {
-			if v := u.Query().Get(k); v != "" {
-				q.Set(k, v)
-			}
+		// a user name hides the real host behind one that looks trusted
+		// (https://github.com%2Flogin@evil.example/)
+		if u.User != nil {
+			m.msg = "refused: a user name hides the host " + webTarget(u, 40)
+			return
 		}
-		u.RawQuery = q.Encode()
-		m.external(u.String(), clip(u.String(), 60))
+		m.external(href, webTarget(u, 60))
+	case "mailto":
+		// only the address, subject and body
+		s := render.Mailto(u)
+		m.external(s, clip(s, 60))
 	default:
 		m.msg = "unsupported link: " + clip(href, 50)
 	}

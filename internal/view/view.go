@@ -455,10 +455,12 @@ func (m *model) follow(href string) {
 		}
 		m.followFile(u.Path, u.Fragment)
 	case "http", "https":
-		// a user name hides the real host behind one that looks trusted
-		// (https://github.com%2Flogin@evil.example/)
-		if u.User != nil {
-			m.msg = "refused: a user name hides the host " + webTarget(u, 40)
+		if !webURL(u) {
+			shown := clip(href, 40)
+			if u.Host != "" {
+				shown = webTarget(u, 40) // the real host, after "…@"
+			}
+			m.msg = "refused: hidden or missing host: " + shown
 			return
 		}
 		m.external(href, webTarget(u, 60))

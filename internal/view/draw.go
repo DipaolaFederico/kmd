@@ -235,10 +235,27 @@ func (m *model) target(href string, n int) string {
 			s += "#" + u.Fragment
 		}
 		return s
-	case (u.Scheme == "http" || u.Scheme == "https") && u.Host != "":
-		return webTarget(u, n)
+	case isWeb(u) && u.Host != "":
+		return webTarget(u, n) // a user name shows as "…@"
+	case isWeb(u):
+		return clip("invalid web link: "+href, n)
 	}
 	return href
+}
+
+// isWeb reports whether u is an http or https URL.
+func isWeb(u *url.URL) bool {
+	s := strings.ToLower(u.Scheme)
+	return s == "http" || s == "https"
+}
+
+// webURL reports whether the web URL u names its host plainly: with "//",
+// a host and no user name. Go parses "https:github.com%2F…@evil.example/"
+// and "https:/…@evil.example" without a host, but browsers read a user
+// name and the host evil.example in them; a user name hides the real host
+// behind one that looks trusted ("https://github.com%2Flogin@evil.example/").
+func webURL(u *url.URL) bool {
+	return u.Opaque == "" && u.Host != "" && u.User == nil
 }
 
 // webTarget shows a web URL in n columns, keeping what tells where it

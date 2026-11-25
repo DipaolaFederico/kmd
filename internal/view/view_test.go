@@ -715,14 +715,18 @@ func TestFollowHardening(t *testing.T) {
 	if h.msg != "invalid link" {
 		t.Errorf("invisible characters: %q", h.msg)
 	}
-	// a user name poses as the host; a file:// host is not this machine
-	for _, href := range []string{
-		"https://github.com%2Flogin%2Foauth%2Fauthorize%3Fclient_id%3D0123456789abcdef%26scope%3Drepo@evil.example/x",
-		"file://attacker.example/share/x.md",
+	// a user name poses as the host, also where Go sees no host but a
+	// browser reads one (#72 SR-18); a file:// host is not this machine
+	for href, want := range map[string]string{
+		"https://github.com%2Flogin%2Foauth%2Fauthorize%3Fclient_id%3D0123456789abcdef%26scope%3Drepo@evil.example/x": "refused: hidden or missing host: https://…@evil.example",
+		"https:github.com%2Flogin%2Foauth@evil.example/x":                                                             "refused: hidden or missing host: https:github.com",
+		"https:/github.com%2Flogin%2Foauth@evil.example/x":                                                            "refused: hidden or missing host: https:/github.com",
+		"https:///github.com%2Flogin@evil.example/x":                                                                  "refused: hidden or missing host: https:///github.com",
+		"file://attacker.example/share/x.md":                                                                          "not a local file",
 	} {
 		h.follow(href)
-		if !strings.Contains(h.msg, "evil.example") && !strings.Contains(h.msg, "not a local file") {
-			t.Errorf("%s: %q", href, h.msg)
+		if !strings.HasPrefix(h.msg, want) {
+			t.Errorf("%s: %q, want prefix %q", href, h.msg, want)
 		}
 	}
 	if len(h.opened) != 1 || h.path != filepath.Join(dir, "alias.md") {
@@ -747,6 +751,8 @@ func TestWebTarget(t *testing.T) {
 		{long, 40, "https://…" + strings.Repeat("a", 18) + ".evil.example"},
 		{long, 120, "https://…" + strings.Repeat("a", 98) + ".evil.example"},
 		{"https://example.com/", 5, "http…"},
+		{"https:github.com%2Flogin@evil.example/x", 60, "invalid web link: https:github.com%2Flogin@evil.example/x"},
+		{"https:///github.com@evil.example/x", 30, "invalid web link: https:///gi…"},
 	} {
 		if got := m.target(c.href, c.n); got != c.want || styled.Width(got) > max(c.n, 5) {
 			t.Errorf("target(%.40q, %d) = %q, want %q", c.href, c.n, got, c.want)

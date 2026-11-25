@@ -5,7 +5,6 @@ package ai
 import (
 	"bufio"
 	"bytes"
-	"errors"
 	"io"
 )
 
@@ -16,17 +15,16 @@ import (
 // to on is reused: on must not keep it. An event cut off by the end of the
 // stream is dropped, as the specification says.
 func readEvents(r io.Reader, maxLine int, on func(data []byte) error) error {
+	// a second buffer over the one in Client.exchange: that one reads the
+	// framing, this one the decoded body, which is all readEvents sees
 	br := bufio.NewReaderSize(r, maxLine)
 	data := make([]byte, 0, 1024)
 	pending := false // a data field was seen since the last dispatch
 	for {
-		line, err := br.ReadSlice('\n')
-		if errors.Is(err, bufio.ErrBufferFull) {
-			return errLongLine
-		} else if err != nil {
+		line, err := rawLine(br)
+		if err != nil {
 			return err // io.EOF included: the caller decides if the stream was complete
 		}
-		line = bytes.TrimSuffix(line[:len(line)-1], []byte("\r"))
 		field, value, _ := bytes.Cut(line, []byte(":"))
 		switch {
 		case len(line) == 0:

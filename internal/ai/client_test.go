@@ -71,6 +71,7 @@ func TestChat(t *testing.T) {
 	c := newClient(t, srv.URL)
 	c.key = "s3cr3t"
 	answer, reasoning, err := collect(context.Background(), c, Request{
+		Model:     "lfm",
 		Messages:  []Message{{"system", "Be brief."}, {"user", "Hi"}},
 		MaxTokens: 2048,
 	})
@@ -83,7 +84,7 @@ func TestChat(t *testing.T) {
 	if got.host != strings.TrimPrefix(srv.URL, "http://") {
 		t.Errorf("Host = %q", got.host)
 	}
-	want := `{"max_tokens":2048,"messages":[{"content":"Be brief.","role":"system"},{"content":"Hi","role":"user"}],"stream":true}`
+	want := `{"max_tokens":2048,"messages":[{"content":"Be brief.","role":"system"},{"content":"Hi","role":"user"}],"model":"lfm","stream":true}`
 	if b, _ := json.Marshal(got.body); string(b) != want {
 		t.Errorf("request body\n got %s\nwant %s", b, want)
 	}
@@ -151,26 +152,45 @@ func TestInfo(t *testing.T) {
 }
 
 func TestInfoErrors(t *testing.T) {
-	for _, body := range []string{"not json", ""} {
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if body == "" {
-				http.Error(w, `{"error":{"message":"no model loaded"}}`, http.StatusServiceUnavailable)
-				return
-			}
-			fmt.Fprint(w, body)
+	for _, tc := range []struct {
+		status     int
+		body, want string
+	}{
+		{200, "not json", "invalid JSON for /v1/models"},
+		{503, `{"error":{"message":"no model loaded"}}`, "503: no model loaded"},
+		{200, `{"data":"` + strings.Repeat("x", maxInfoBody) + `"}`, "too large"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.status)
+			fmt.Fprint(w, tc.body)
 		}))
 		_, err := newClient(t, srv.URL).Info(context.Background())
 		srv.Close()
-		if err == nil {
-			t.Errorf("Info with %q: no error", body)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("status %d: Info error %v, want %q", tc.status, err, tc.want)
 		}
 	}
-	// nothing listening
-	ln, _ := net.Listen("tcp", "127.0.0.1:0")
+}
+
+func TestUnreachable(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
 	addr := ln.Addr().String()
-	ln.Close()
-	if _, err := newClient(t, "http://"+addr).Info(context.Background()); err == nil || !strings.Contains(err.Error(), "cannot reach") {
-		t.Errorf("Info with no server: %v", err)
+	ln.Close() // nothing listens there now
+	if _, err := newClient(t, "http://"+addr).Info(context.Background()); !errors.Is(err, ErrUnreachable) {
+		t.Errorf("Info with no server: %v, want %v", err, ErrUnreachable)
+	}
+}
+
+func TestInfoNoModel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"object":"list","data":[]}`)
+	}))
+	defer srv.Close()
+	if info, err := newClient(t, srv.URL).Info(context.Background()); err != nil || info != (ServerInfo{}) {
+		t.Errorf("Info = %+v, %v; want no model", info, err)
 	}
 }
 
@@ -252,7 +272,7 @@ func TestChatRejects(t *testing.T) {
 		{"short chunk", okChunked + "ff\r\nhello", "unexpected EOF"},
 		{"many trailers", okChunked + "0\r\n" + strings.Repeat("X: y\r\n", maxHeaders+1), "too many trailers"},
 		{"long event line", "HTTP/1.1 200 OK\r\n\r\ndata: " + long, "line too long"},
-		{"long event", "HTTP/1.1 200 OK\r\n\r\n" + strings.Repeat("data: "+long[:1000]+"\n", 70), "line too long"},
+		{"long event", "HTTP/1.1 200 OK\r\n\r\n" + strings.Repeat("data: "+long[:1000]+"\n", len(long)/1000+2), "line too long"},
 		{"no DONE", "HTTP/1.1 200 OK\r\n\r\n" + event, "ended before the server said it was done"},
 		{"error event", "HTTP/1.1 200 OK\r\n\r\n" + `data: {"error":{"message":"context too long"}}` + "\n\n", "failed: context too long"},
 		{"string error", "HTTP/1.1 200 OK\r\n\r\n" + `data: {"error":"boom"}` + "\n\n", "failed: boom"},
@@ -277,11 +297,42 @@ func TestChatEndlessStream(t *testing.T) {
 			}
 		}
 	})
-	c.lim.maxBody = 1 << 20
+	c.lim.maxBytes = 1 << 20
 	n := 0
 	err := c.Chat(context.Background(), Request{}, func(Delta) error { n++; return nil })
 	if !errors.Is(err, errTooLarge) || n == 0 {
 		t.Errorf("Chat = %v after %d events, want %v", err, n, errTooLarge)
+	}
+}
+
+// Chunk-size lines count toward the cap, so a server cannot stream endless
+// framing that decodes to almost nothing.
+func TestChatChunkExtensionFlood(t *testing.T) {
+	c := rawServer(t, func(conn net.Conn) {
+		_, _ = io.WriteString(conn, okChunked)
+		frame := []byte("1;" + strings.Repeat("x", 1000) + "\r\n:\r\n")
+		for {
+			if _, err := conn.Write(frame); err != nil {
+				return
+			}
+		}
+	})
+	c.lim.maxBytes = 1 << 20
+	if err := c.Chat(context.Background(), Request{}, func(Delta) error { return nil }); !errors.Is(err, errTooLarge) {
+		t.Errorf("Chat = %v, want %v", err, errTooLarge)
+	}
+}
+
+// An answer cut off at max_tokens is reported after its last piece.
+func TestChatTruncated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		sse(w, `{"choices":[{"delta":{"content":"half an ans"}}]}`,
+			`{"choices":[{"finish_reason":"length","delta":{}}]}`, `[DONE]`)
+	}))
+	defer srv.Close()
+	answer, _, err := collect(context.Background(), newClient(t, srv.URL), Request{MaxTokens: 4})
+	if !errors.Is(err, ErrTruncated) || answer != "half an ans" {
+		t.Errorf("Chat = %q, %v; want the partial answer and %v", answer, err, ErrTruncated)
 	}
 }
 
@@ -308,6 +359,8 @@ func TestTimeouts(t *testing.T) {
 		lim              func(*limits)
 	}{
 		{"headers", "HTTP/1.1 200 OK\r\n", "stopped responding", func(l *limits) { l.header = 50 * time.Millisecond }},
+		// an error body gets the header limit, not the idle one
+		{"error body", "HTTP/1.1 500 Oops\r\n\r\n{", "500: Oops", func(l *limits) { l.header = 50 * time.Millisecond }},
 		{"idle", stream, "stopped responding", func(l *limits) { l.idle = 50 * time.Millisecond }},
 		{"total", stream, "did not finish within", func(l *limits) { l.total = 100 * time.Millisecond }},
 	} {

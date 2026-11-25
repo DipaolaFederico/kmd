@@ -25,12 +25,12 @@ func FuzzResponse(f *testing.F) {
 	}
 	const maxLine, maxBody = 256, 1024
 	f.Fuzz(func(t *testing.T, b []byte) {
-		br := bufio.NewReaderSize(bytes.NewReader(b), maxLine)
+		br := bufio.NewReaderSize(&cappedReader{r: bytes.NewReader(b), left: maxBody}, maxLine)
 		h, err := readHeader(br)
 		if err != nil {
 			return
 		}
-		body := h.body(br, maxBody)
+		body := h.body(br)
 		if h.check(body) != nil {
 			return
 		}
@@ -40,7 +40,8 @@ func FuzzResponse(f *testing.F) {
 				t.Fatalf("event of %d bytes, cap %d", len(data), maxLine)
 			}
 			total += len(data)
-			return chunk(data, func(Delta) error { return nil })
+			var truncated bool
+			return decodeEvent(data, &truncated, func(Delta) error { return nil })
 		})
 		if total > maxBody {
 			t.Fatalf("%d bytes of events from a %d-byte body cap", total, maxBody)

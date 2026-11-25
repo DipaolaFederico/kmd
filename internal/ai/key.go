@@ -23,13 +23,21 @@ func readKey(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	f, err := os.Open(path) // #nosec G304 -- the user's configured key file, never a document's
+	// checked before opening too: opening a FIFO would wait for a writer
+	st, err := os.Stat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	} else if err != nil {
 		return "", fmt.Errorf("ai-key-file: %w", err)
+	} else if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("ai-key-file %s: not a regular file", path)
+	}
+	f, err := os.Open(path) // #nosec G304 -- the user's configured key file, never a document's
+	if err != nil {
+		return "", fmt.Errorf("ai-key-file: %w", err)
 	}
 	defer f.Close()
+	// and checked again on what was opened, in case the file was replaced
 	if err := checkKeyFile(f); err != nil {
 		return "", fmt.Errorf("ai-key-file %s: %w", path, err)
 	}

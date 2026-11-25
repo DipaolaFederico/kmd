@@ -13,8 +13,8 @@ talks to it. The plan is tracked in the GitHub issues labelled
 ## Status
 
 The build tag, the configuration keys, the CI job and the client in
-`internal/ai` exist. Nothing in kmd calls the client yet: the first users
-are `--ai-check` and `--ai-setup` (#48).
+`internal/ai` exist. Nothing in kmd calls the client yet: the first user
+is `--ai-check` (#48).
 
 ## Building
 
@@ -69,13 +69,14 @@ sometimes succeeds. These are the rules the coming pull requests implement
   | Limit | Value |
   |-------|-------|
   | connect | 5 s |
-  | from sending the request to the end of the headers | 5 s |
+  | from sending the request to the end of the headers (or of an error response) | 5 s |
   | between two reads of the body | 60 s (llama.cpp pings every 30 s) |
   | whole exchange | 180 s |
-  | response body | 8 MiB, an error past it (never a silently cut answer) |
+  | everything read from the server, framing included | 8 MiB, an error past it (never a silently cut answer) |
   | a header, chunk-size or event line, or one event's data | 64 KiB |
   | response headers, trailers | 100 lines |
 
+  An answer the server cut off at its token limit is reported as such.
   An `ai-url` with another host, TLS, credentials, a path or a query is a
   configuration error; a redirect is an error.
 - **Files.** The only files read are the configured key file and the images

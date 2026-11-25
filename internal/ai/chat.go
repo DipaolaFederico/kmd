@@ -10,7 +10,8 @@ import (
 	"io"
 )
 
-// Message is one turn of a conversation with the model.
+// Message is one turn of a conversation with the model. Images (#51) will
+// need OpenAI's array-of-parts form of content instead of a string.
 type Message struct {
 	Role    string `json:"role"` // "system", "user" or "assistant"
 	Content string `json:"content"`
@@ -25,11 +26,20 @@ type Request struct {
 	MaxTokens int // 0: the server's default
 }
 
-// Delta is a piece of the streamed answer.
+// Delta is a piece of the streamed answer. Both fields are the model's raw
+// output, which a hostile document can steer: show them only through kmd's
+// Markdown renderer, never print them as they are.
 type Delta struct {
 	Content   string // the answer
 	Reasoning string // the model's thinking, for servers that stream it apart
 }
+
+// ErrTruncated is returned after the last piece of an answer that the
+// server cut off at Request.MaxTokens: what was streamed is incomplete.
+var ErrTruncated = errors.New("the answer reached its length limit")
+
+// errDone stops reading at the stream's [DONE] marker.
+var errDone = errors.New("done")
 
 // Chat streams a chat completion and calls on with each piece as it arrives.
 // It returns when the server says the answer is done, on any error, or when
@@ -49,13 +59,16 @@ func (c *Client) Chat(ctx context.Context, req Request, on func(Delta) error) er
 		return err
 	}
 	defer resp.Close()
+	truncated := false
 	err = readEvents(resp.body, c.lim.maxLine, func(data []byte) error {
 		if string(data) == "[DONE]" {
 			return errDone
 		}
-		return chunk(data, on)
+		return decodeEvent(data, &truncated, on)
 	})
 	switch {
+	case errors.Is(err, errDone) && truncated:
+		return ErrTruncated
 	case errors.Is(err, errDone):
 		return nil
 	case errors.Is(err, io.EOF):
@@ -64,17 +77,17 @@ func (c *Client) Chat(ctx context.Context, req Request, on func(Delta) error) er
 	return c.explain(resp.ctx, err)
 }
 
-// errDone stops reading at the stream's [DONE] marker.
-var errDone = errors.New("done")
-
-// chunk decodes one streamed event and passes its text on.
-func chunk(data []byte, on func(Delta) error) error {
+// decodeEvent decodes one streamed event and passes its text on. kmd never
+// asks for more than one choice, so a fixed array keeps a hostile list of
+// thousands from costing an allocation each: the extra ones are skipped.
+func decodeEvent(data []byte, truncated *bool, on func(Delta) error) error {
 	var ev struct {
-		Choices []struct {
+		Choices [1]struct {
 			Delta struct {
 				Content          string `json:"content"`
 				ReasoningContent string `json:"reasoning_content"`
 			} `json:"delta"`
+			FinishReason string `json:"finish_reason"`
 		} `json:"choices"`
 		Error json.RawMessage `json:"error"`
 	}
@@ -84,20 +97,19 @@ func chunk(data []byte, on func(Delta) error) error {
 	if len(ev.Error) > 0 && string(ev.Error) != "null" {
 		return fmt.Errorf("the local AI server failed: %s", errorText(ev.Error))
 	}
-	for _, ch := range ev.Choices {
-		d := Delta{Content: ch.Delta.Content, Reasoning: ch.Delta.ReasoningContent}
-		if d == (Delta{}) {
-			continue
-		}
-		if err := on(d); err != nil {
-			return err
-		}
+	ch := ev.Choices[0]
+	if ch.FinishReason == "length" {
+		*truncated = true
 	}
-	return nil
+	d := Delta{Content: ch.Delta.Content, Reasoning: ch.Delta.ReasoningContent}
+	if d == (Delta{}) {
+		return nil
+	}
+	return on(d)
 }
 
-// errorMessage extracts {"error": …} from an error response body.
-func errorMessage(body []byte) string {
+// bodyError extracts {"error": …} from an error response's body.
+func bodyError(body []byte) string {
 	var v struct {
 		Error json.RawMessage `json:"error"`
 	}
@@ -119,7 +131,7 @@ func errorText(raw json.RawMessage) string {
 	} else if json.Unmarshal(raw, &s) != nil {
 		s = "unknown error"
 	}
-	return printable(s, 200)
+	return printable(s, longText)
 }
 
 // ServerInfo describes the model the server has loaded.
@@ -131,8 +143,7 @@ type ServerInfo struct {
 // maxInfoBody bounds /v1/models and /props, which include the chat template.
 const maxInfoBody = 1 << 20
 
-// Info asks the server for its model and whether it accepts images. /props
-// exists only on llama.cpp; elsewhere Vision stays false.
+// Info asks the server for its model and whether it accepts images.
 func (c *Client) Info(ctx context.Context) (ServerInfo, error) {
 	var models struct {
 		Data []struct {
@@ -144,13 +155,15 @@ func (c *Client) Info(ctx context.Context) (ServerInfo, error) {
 	}
 	var info ServerInfo
 	if len(models.Data) > 0 {
-		info.Model = printable(models.Data[0].ID, 200)
+		info.Model = printable(models.Data[0].ID, longText)
 	}
 	var props struct {
 		Modalities struct {
 			Vision bool `json:"vision"`
 		} `json:"modalities"`
 	}
+	// /props exists only on llama.cpp: any failure there means "no image
+	// support known", not an error, unless the caller gave up.
 	if err := c.getJSON(ctx, "/props", &props); err == nil {
 		info.Vision = props.Modalities.Vision
 	} else if ctx.Err() != nil {
@@ -165,7 +178,7 @@ func (c *Client) getJSON(ctx context.Context, path string, v any) error {
 		return err
 	}
 	defer resp.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.body, maxInfoBody))
+	b, err := io.ReadAll(&cappedReader{r: resp.body, left: maxInfoBody})
 	if err != nil {
 		return c.explain(resp.ctx, err)
 	}

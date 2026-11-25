@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/DipaolaFederico/kmd/internal/styled"
@@ -645,6 +646,37 @@ func TestWrapCombining(t *testing.T) {
 	got := wrap(l, 2)
 	if block(got) != "x\u0302y\u0302\nz " {
 		t.Errorf("wrap = %q", block(got))
+	}
+}
+
+// TestWrapForeignMarks: a mark from a later span joins the previous
+// character too, a bounded number of them.
+func TestWrapForeignMarks(t *testing.T) {
+	l := styled.Line{{Text: "x"}, {Text: "\u0302y", Class: styled.Muted}, {Text: strings.Repeat("\u0301", 100)}}
+	got := wrap(l, 2)
+	if len(got) != 1 || len(got[0]) != 2 || got[0][0].Text != "x\u0302" || !strings.HasPrefix(got[0][1].Text, "y\u0301") ||
+		len(got[0][1].Text) > 1+maxForeignMarks+2 {
+		t.Errorf("wrap = %q", got)
+	}
+}
+
+// TestWrapZeroWidthLinear: the verbatim fallback of a formula over
+// maxSource made of combining marks or zero-width spaces is wrapped in
+// linear time (each mark used to be appended to its cell by copying it).
+func TestWrapZeroWidthLinear(t *testing.T) {
+	for name, mark := range map[string]string{"combining": "\u0301", "zero-width space": "\u200b"} {
+		src := "a" + strings.Repeat(mark, 160_000)
+		start := time.Now()
+		if d := Display(src, 80); len(d) != 1 {
+			t.Errorf("%s: %d lines", name, len(d))
+		}
+		if d := time.Since(start); d > testlimit.Scale()*time.Second {
+			t.Errorf("%s: %v", name, d)
+		}
+		testlimit.Linear(t, name, 1<<20, func(n int) func() {
+			src := "a" + strings.Repeat(mark, n)
+			return func() { _ = Display(src, 80) }
+		})
 	}
 }
 

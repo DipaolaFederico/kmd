@@ -136,20 +136,36 @@ type cell struct {
 	w     int
 }
 
+// maxForeignMarks bounds the zero-width runes a cell takes from a later
+// span: they cannot be sliced from the cell's own span, so they are
+// copied, and copying an unbounded run of them would be quadratic.
+const maxForeignMarks = 64
+
 // wrap breaks l into lines at most width columns wide, preferring breaks
 // at spaces, and pads them to a common width.
 func wrap(l styled.Line, width int) []styled.Line {
 	var cells []cell
-	for _, s := range l {
+	owner, start := -1, 0 // span and offset where the last cell starts
+	for k, s := range l {
 		for i := 0; i < len(s.Text); {
 			r, size := utf8.DecodeRuneInString(s.Text[i:])
 			t := s.Text[i : i+size]
 			i += size
 			if n := len(cells); n > 0 && styled.RuneWidth(r) == 0 {
-				cells[n-1].text += t
+				// a zero-width rune (a combining mark) joins the previous
+				// character: a longer slice of the same span costs nothing,
+				// however many follow (the verbatim fallback of a hostile
+				// formula is one span of thousands of them)
+				switch c := &cells[n-1]; {
+				case owner == k:
+					c.text = s.Text[start:i]
+				case len(c.text) < maxForeignMarks:
+					c.text += t
+				}
 				continue
 			}
 			cells = append(cells, cell{text: t, class: s.Class})
+			owner, start = k, i-size
 		}
 	}
 	for i := range cells {

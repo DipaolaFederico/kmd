@@ -602,9 +602,10 @@ threat model:
   tracking pixels). Each file is read once per document, however it is
   named; at most 50 images, 64 MiB read from image files and `data:` URIs and
   64 MiB of image output per document; decoded pixels are not kept. Network
-  and device paths (`\\host\share`, `//host`) are refused. PNGs are checked
-  chunk by chunk before kitty or iTerm2 receive them; iTerm2 gets JPEG and
-  GIF re-encoded as PNG.
+  and device paths (`\\host\share`, `//host`) are refused. PNG, JPEG and GIF
+  files are checked chunk by chunk, marker by marker or block by block
+  before kitty or iTerm2 receive them as they are; at most 1,000 image files
+  are looked up per document.
 - **`--html` export**: safe by default, like cmark: raw HTML is omitted and
   `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs are dropped,
   and so are control characters, bidi overrides, invisible format characters
@@ -638,7 +639,8 @@ threat model:
   same kind (`notes.md → ~/.ssh/id_rsa` is refused); `mailto:` links keep
   only `subject` and `body`. OSC 8 targets are only `http(s)` URLs with a
   host and no user name, `mailto:` with only `subject` and `body`, and
-  absolute `file://` URLs of Markdown and document files on this computer, so
+  absolute `file://` URLs of Markdown and document files on this computer
+  (never a network share), so
   a terminal click never runs a script or `.desktop` file, reaches another
   host or starts another program's URL handler. Local `.html` and `.svg` files are not handed to
   the browser (their scripts would run). A click on a link that leaves kmd
@@ -687,7 +689,8 @@ threat model:
   search. File names and matching lines are sanitized like document text.
 
 Images cost what decoding costs: a large PNG adds a few milliseconds
-(`-i none` disables images; kitty passes PNGs through without decoding).
+(`-i none` disables images; kitty passes PNGs through without decoding, after checking their
+structure).
 
 To report a vulnerability, see [SECURITY.md](SECURITY.md).
 

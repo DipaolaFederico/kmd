@@ -418,7 +418,9 @@ link in the viewer, and only local images, PDFs and other data files (never
 programs) are handed to the desktop. Clickable OSC 8 targets are only
 \fBhttp\fR(\fBs\fR) URLs without a user name, \fBmailto:\fR with only a
 subject and body, and \fBfile://\fR URLs of local Markdown and document
-files. The viewer shows the scheme and whole host of a web link before
+files (never a network share). Images are checked chunk by chunk (PNG),
+marker by marker (JPEG) or block by block (GIF) before a terminal graphics
+protocol receives them. The viewer shows the scheme and whole host of a web link before
 opening it, and refuses web links with a user name or without a plainly
 written host. Reloads and linked documents are opened without blocking and
 must be regular files. The only query sent to the terminal

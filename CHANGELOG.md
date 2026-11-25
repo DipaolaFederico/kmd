@@ -52,9 +52,15 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
   `//host`, `/\host`, `\\.\pipe\…`, also inside `file:` URLs or
   percent-encoded) are refused before any file access, so on Windows an
   image can no longer make kmd open an SMB connection.
-- PNG images are checked chunk by chunk (checksums, nothing after the end)
-  before kitty or iTerm2 receive them, and iTerm2 gets JPEG and GIF images
-  re-encoded by kmd as PNG instead of the document's bytes.
+- Images are checked before kitty or iTerm2 receive them as they are: PNG
+  chunk by chunk (checksums, nothing after the end), JPEG marker by marker
+  and GIF block by block (frame size, at most 256 scans per JPEG and
+  200 megapixels across a GIF's frames); bytes after a JPEG's or GIF's end
+  are not sent. A document can make kmd look up at most 1,000 image files.
+- Clickable links and the viewer no longer lead to network shares
+  (`file:////host/share/a.md`, `%5C%5Chost%5Cshare`), and `mailto:` links
+  whose address hides a parameter (`mailto:%3Fattach=…@x`) are neither
+  clickable nor opened by the viewer.
 - Zero-width spaces, word joiners, byte order marks, tag characters and
   other invisible format characters are stripped from rendered text and
   from code copied with `c`, so a command or URL can no longer look like

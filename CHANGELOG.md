@@ -9,6 +9,75 @@ see CONTRIBUTING.md ("Changelog") for how to add one.
 
 ## [Unreleased]
 
+### Security
+
+- Hostile inline text can no longer make the parser quadratic: nested
+  `[^`, emphasis that closes out of order, `www.` autolinks with `_`,
+  unclosed `![` before links, delimiter-like lines in long paragraphs and
+  trailing `)` after autolinks now take linear time (minutes to hours at
+  16 MiB before). Long links, and links made of zero-width characters, no
+  longer slow rendering down either.
+- A document makes at most 500,000 inline elements (text, emphasis, links,
+  code spans, line breaks…); past that the rest is plain text and a notice
+  is shown. Runs of `]`, `!`, `<`, `&` and escaped characters no longer
+  cost hundreds of bytes each: 1 MiB of `]` took 460 MB of memory, now 20 MB.
+- Hostile documents can no longer make kmd use gigabytes of memory or
+  minutes of CPU when it lays them out: a top-level block lays out at most
+  about a million styled pieces (64 MiB) and the rendered text stops at
+  64 MiB per document, each with a notice; wrapped text no longer costs
+  dozens of bytes of memory per word.
+- Tables too wide for the screen no longer repeat long headers in every
+  record: their labels are cut to 32 columns. Narrowing the columns of a
+  very wide table, and rows with fewer cells than the header, no longer
+  cost time or memory out of proportion to the table.
+- Display formulas shown as source no longer take seconds when they hold
+  thousands of combining marks.
+
+- Clickable (OSC 8) links and images only lead to web pages, e-mail
+  addresses (subject and body only) and Markdown or document files on this
+  computer. Other schemes (`ssh:`, `smb:`, `vscode:`, `javascript:`…), paths
+  to scripts or `.desktop` files, remote `file://` hosts and extensions
+  hidden behind a NUL are no longer clickable in the terminal.
+- The viewer's status bar always shows the whole host of a selected web
+  link, and links with a user name
+  (`https://github.com%2Flogin@evil.example/`) are refused.
+- `render`: with `Hyperlinks` and no `BaseDir`, relative links no longer
+  reveal the process's working directory.
+- Images named several ways in one document (`a.png`, `./a.png`, links to
+  it) are read once, and a document reads at most 64 MiB of image files and
+  `data:` URIs in all; decoded pixels are no longer kept after drawing.
+- Image paths that name network or device locations (`\\host\share`,
+  `//host`, `/\host`, `\\.\pipe\…`, also inside `file:` URLs or
+  percent-encoded) are refused before any file access, so on Windows an
+  image can no longer make kmd open an SMB connection.
+- PNG images are checked chunk by chunk (checksums, nothing after the end)
+  before kitty or iTerm2 receive them, and iTerm2 gets JPEG and GIF images
+  re-encoded by kmd as PNG instead of the document's bytes.
+- Zero-width spaces, word joiners, byte order marks, tag characters and
+  other invisible format characters are stripped from rendered text and
+  from code copied with `c`, so a command or URL can no longer look like
+  another one.
+- `--html` drops bidi overrides ("Trojan Source"), invisible format
+  characters and carriage returns from text, code, titles and alt text, as
+  the terminal output does (`--unsafe-html` keeps them).
+- Theme file names can no longer run commands through the bash completion
+  or send escape sequences to the terminal in `--list-themes`: only themes
+  named with letters, digits, `.`, `-` and `_` are listed.
+- Every error message is sanitized, including unknown flags and missing
+  files whose names hold escape sequences.
+- With several files, each file's heading shows its name as plain text: a
+  name such as `www.example.md` is no longer a link.
+- kmd no longer reads its config file (and the pager command in it) or
+  themes from the current folder when `XDG_CONFIG_HOME` or `HOME` is a
+  relative path such as an unexpanded `~/.config`: relative values are
+  ignored, as the XDG specification asks, and a relative `KMD_CONFIG` is an
+  error.
+- Reloading a document (`-f`, `r` in the viewer) or opening one through a
+  link or the file picker never blocks on a FIFO swapped in for it, and
+  refuses a symbolic link swapped in to another kind of file; `q`, Ctrl-C
+  and termination signals always end the viewer and restore the terminal,
+  even while a document is loading.
+
 ## [0.17.0] - 2026-11-24
 
 ### Added

@@ -174,6 +174,7 @@ Settings are read from \fI$XDG_CONFIG_HOME/kmd/config\fR (by default
 comment. Keys: \fBtheme\fR, \fBdark-theme\fR, \fBlight-theme\fR, \fBwidth\fR,
 \fBmax-width\fR, \fBcolor\fR, \fBimages\fR, \fBimage-rows\fR,
 \fBhyperlinks\fR, \fBpager\fR, \fBmouse\fR, \fBview\fR, \fBmath\fR, \fBdiagrams\fR.
+Relative values of \fBXDG_CONFIG_HOME\fR and \fBHOME\fR are ignored.
 Command-line options take precedence over environment variables, which take
 precedence over the configuration file.
 .SH VIEWER
@@ -352,6 +353,8 @@ lines. \fBinherit\fR selects the base theme. The palette keys \fBbg\fR,
 \fBmagenta\fR re-derive every color; individual roles (for example
 \fBheading2\fR, \fBcode-bg\fR or \fBsyntax-keyword\fR) can be overridden too.
 Run \fBkmd \-\-theme\-template tokyo-night\fR for a complete example.
+Only theme files whose names consist of ASCII letters, digits, \fB.\fR,
+\fB\-\fR and \fB_\fR are listed and completed.
 .SH ENVIRONMENT
 .TP
 .B KMD_THEME
@@ -363,7 +366,11 @@ How long documents are shown: \fBbuiltin\fR (the default, see
 disable paging.
 .TP
 .B KMD_CONFIG
-Path of the configuration file.
+Path of the configuration file; it must be absolute.
+.TP
+.B XDG_CONFIG_HOME
+Folder of the configuration file and themes (\fI~/.config\fR by default);
+ignored unless absolute.
 .TP
 .B NO_COLOR
 Disable colors when set (see https://no-color.org).
@@ -402,23 +409,35 @@ web links instead. Its images are then on the web too, so only inline
 drawing them would mean downloading them.
 .SH SECURITY
 Documents are treated as untrusted. Control characters, escape sequences and
-bidi overrides contained in documents are removed before output, so a
-document cannot control or visually reorder the terminal. kmd makes no
+bidi overrides contained in documents are removed before output, and so are
+invisible format characters such as zero-width spaces (also from copied
+code), so a document cannot control or visually reorder the terminal. kmd makes no
 network requests and remote images are never downloaded (see
 \fBREMOTE DOCUMENTS\fR). Linked documents are only read when the user follows the
 link in the viewer, and only local images, PDFs and other data files (never
-programs) are handed to the desktop. The only query sent to the terminal
+programs) are handed to the desktop. Clickable OSC 8 targets are only
+\fBhttp\fR(\fBs\fR) URLs without a user name, \fBmailto:\fR with only a
+subject and body, and \fBfile://\fR URLs of local Markdown and document
+files. The viewer shows the scheme and whole host of a web link before
+opening it. Reloads and linked documents are opened without blocking and
+must be regular files. The only query sent to the terminal
 asks for its background color (see \fBTHEMES\fR); its answer is read for
 about a second at most and 256 bytes and parsed strictly. The only file
 kmd writes is the slide number for \fB\-\-notes\fR, in a directory that
 must belong to the user with mode 0700; \fB\-\-notes\fR reads at most 32
-bytes from it, and otherwise reads the deck as \fB\-\-slides\fR does. Inputs are limited to 16 MiB and 250,000 blocks, images to
-20 MiB and 40 megapixels (at most 50 per document), and the number of
+bytes from it, and otherwise reads the deck as \fB\-\-slides\fR does. Inputs are limited to 16 MiB, 250,000 blocks and 500,000 inline
+elements, images to
+20 MiB and 40 megapixels (at most 50 and 64 MiB read per document, each file
+read once; network and device paths are refused), and the number of
 diagrams and display formulas per document is bounded, as are the bytes
 reference links may copy from their definitions (1 MiB plus the document's
-size). The
+size). A top-level block is laid out in at most about a million styled
+pieces (64 MiB) and a document renders at most 64 MiB of text; a notice
+replaces the rest. Tables shown as records cut their labels to 32 columns.
+The
 .B \-\-html
-export drops control characters too.
+export drops control characters, bidi overrides, invisible format characters
+and carriage returns too.
 .SH EXAMPLES
 .TP
 .B kmd README.md

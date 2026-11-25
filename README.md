@@ -488,8 +488,9 @@ heading2 = #bf616a      # or override a single role
 ## ⚙️ Configuration
 
 kmd reads `~/.config/kmd/config` (or `$XDG_CONFIG_HOME/kmd/config`, or the
-path in `$KMD_CONFIG`). `kmd --config` prints the file in use, the effective
-settings and a template.
+path in `$KMD_CONFIG`). `XDG_CONFIG_HOME` and `HOME` are used only when they
+are absolute paths, and `KMD_CONFIG` must be absolute. `kmd --config` prints
+the file in use, the effective settings and a template.
 
 ```ini
 theme       = auto
@@ -583,33 +584,47 @@ threat model:
   downloads, nothing contacted while rendering (a test checks that the
   binary does not link the `net` package). See
   [Remote documents](#-remote-documents).
-- **Terminal injection**: C0/C1 control characters, DEL and Unicode bidi
-  overrides ("Trojan Source") are stripped from all document text on output,
-  including characters produced via entities like `&#27;`. OSC 8 link targets
-  must be valid UTF-8 without controls or invisible characters. File names in
-  error messages are sanitized too.
+- **Terminal injection**: C0/C1 control characters, DEL, Unicode bidi
+  overrides ("Trojan Source") and invisible format characters (zero-width
+  spaces, word joiners, tag characters…) are stripped from all document text
+  on output and from copied code, including characters produced via entities
+  like `&#27;`; the zero-width joiner and variation selectors that emoji need
+  are kept. OSC 8 link targets must be valid UTF-8 without controls or
+  invisible characters. Error messages are sanitized too, file names and
+  arguments included.
 - **Images**: local regular files and `data:` URIs only (with the
   [library](#-use-as-a-library), only files inside `BaseDir`), opened non-blocking
   and re-checked on the descriptor; ≤ 20 MiB and ≤ 40 megapixels checked
   *before* decoding; only PNG/JPEG/GIF; nothing is ever downloaded (no
-  tracking pixels). Each image is decoded once per document, at most 50
-  distinct images and 64 MiB of image data per document.
+  tracking pixels). Each file is read once per document, however it is
+  named; at most 50 images, 64 MiB read from image files and `data:` URIs and
+  64 MiB of image output per document; decoded pixels are not kept. Network
+  and device paths (`\\host\share`, `//host`) are refused. PNGs are checked
+  chunk by chunk before kitty or iTerm2 receive them; iTerm2 gets JPEG and
+  GIF re-encoded as PNG.
 - **`--html` export**: safe by default, like cmark: raw HTML is omitted and
   `javascript:`, `vbscript:`, `file:` and non-image `data:` URLs are dropped,
-  and so are control characters; the page carries a restrictive
+  and so are control characters, bidi overrides, invisible format characters
+  and carriage returns; the page carries a restrictive
   Content-Security-Policy (no scripts, forms or `<base>`); highlighted code
   (the first 1 MiB per document) and diagrams are drawn with inline styles,
   from escaped text. `--unsafe-html`
   keeps everything (trusted input only).
-- **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks (a notice is shown
-  beyond), container nesting ≤ 100, inline nesting ≤ 100, tables ≤ 1,000
-  columns and 524,288 cells, ≤ 100 diagrams/display formulas per document,
+- **Resource limits**: input ≤ 16 MiB, ≤ 250,000 blocks and ≤ 500,000
+  inline elements (emphasis, links, code spans, line breaks…; a notice is
+  shown beyond, and the rest is plain text), container nesting ≤ 100,
+  inline nesting ≤ 100, tables ≤ 1,000
+  columns and 524,288 cells (labels of tables shown as records ≤ 32
+  columns), ≤ 100 diagrams/display formulas per document, each top-level
+  block laid out in ≤ about a million styled pieces (64 MiB) and ≤ 64 MiB of
+  rendered text per document (a notice is shown beyond),
   reference links copy ≤ 1 MiB + the document's size from their definitions
   (`[x]: <huge URL>` used thousands of times), source pixels scaled for
   images ≤ 200 megapixels per document, emoji shortcodes ≤ 40 bytes, wiki links ≤ 1 KiB (and only to relative
   paths: no scheme, no absolute or `//host` targets).
   Every construct known to make Markdown parsers quadratic (nested brackets,
   emphasis with links, backtick runs, unterminated comments, link
+  parentheses, nested footnote references, `www.` autolinks, autolink
   parentheses) is covered by pathological tests with time limits.
 - **Viewer**: a linked document is only read when the user follows the link.
   Web and `mailto:` links, and local images, PDFs and other data files, are
@@ -617,12 +632,27 @@ threat model:
   links to programs, scripts or executable files are refused. Symlinks are
   resolved and checked on the real file, which must be a regular file of the
   same kind (`notes.md → ~/.ssh/id_rsa` is refused); `mailto:` links keep
-  only `subject` and `body`. OSC 8 targets become absolute `file://` URLs
-  only for Markdown and document files, so a terminal click never runs a
-  script or `.desktop` file. Local `.html` and `.svg` files are not handed to
+  only `subject` and `body`. OSC 8 targets are only `http(s)` URLs with a
+  host and no user name, `mailto:` with only `subject` and `body`, and
+  absolute `file://` URLs of Markdown and document files on this computer, so
+  a terminal click never runs a script or `.desktop` file, reaches another
+  host or starts another program's URL handler. Local `.html` and `.svg` files are not handed to
   the browser (their scripts would run). A click on a link that leaves kmd
   (web, mail, desktop apps) first selects it and shows its target; a second
-  click or Enter opens it.
+  click or Enter opens it. The target shown always has its scheme and whole
+  host (the path is shortened first); web links with a user name are
+  refused.
+- **Documents**: only the first read of a document named on the command
+  line may wait on a pipe (`kmd <(command)`); every reload, and every
+  document opened through a link or the picker, is opened without blocking
+  and must be a regular file (a symlink only to the same kind of file).
+  Documents load in the background: `q`, Ctrl-C and termination signals
+  always end the viewer and restore the terminal.
+- **Configuration and themes**: the config file and theme folders come only
+  from absolute `XDG_CONFIG_HOME`/`HOME` values, and `KMD_CONFIG` must be
+  absolute, so a cloned folder can never supply a config (or its `pager`).
+  Only theme files named with letters, digits, `.`, `-` and `_` are listed
+  or completed, and the shell completions never expand theme names.
 - **Speaker notes**: `--slides` writes only the number of the slide on
   screen, to a file in a directory that must belong to you and be closed to
   everyone else (mode 0700; kmd refuses one that is not, or a symbolic

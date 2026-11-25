@@ -485,7 +485,7 @@ func checkBlock(t *testing.T, src string, d []styled.Line, width int) {
 		}
 		for _, s := range l {
 			for _, r := range s.Text {
-				if isControl(r) {
+				if styled.Hidden(r) {
 					t.Errorf("Display(%q): control character %U", src, r)
 				}
 			}
@@ -691,7 +691,7 @@ func FuzzInline(f *testing.F) {
 				t.Fatalf("empty span in Inline(%q)", src)
 			}
 			for _, r := range s.Text {
-				if isControl(r) {
+				if styled.Hidden(r) {
 					t.Fatalf("control character %U in Inline(%q)", r, src)
 				}
 			}

@@ -93,7 +93,7 @@ func Display(src string, width int) []styled.Line {
 func verbatim(src string) styled.Line {
 	var b strings.Builder
 	for _, r := range src {
-		if isControl(r) {
+		if styled.Hidden(r) {
 			r = ' '
 		}
 		b.WriteRune(r)
